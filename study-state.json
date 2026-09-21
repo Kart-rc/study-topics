@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "repository": "Kart-rc/study-topics",
+  "timezone": "America/New_York",
+  "delivery_time": "18:50",
+  "minutes_per_lesson": 15,
+  "tracks": [
+    "Data engineering",
+    "Software engineering",
+    "Distinguished Engineer",
+    "GenAI engineering",
+    "Technology breakthroughs"
+  ],
+  "review_offsets_days": [
+    1,
+    3,
+    7,
+    14,
+    30
+  ],
+  "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
+  "last_generated_day": 1,
+  "days": [
+    {
+      "number": 1,
+      "folder": "Day1",
+      "date": "2026-09-21",
+      "generation_key": "2026-09-21",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [],
+      "validation": "Models, quizzes, exports, links and review logic checked; real browser layout unverified. See VALIDATION.md.",
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs"
+      ]
+    }
+  ],
+  "submitted_assessments": [],
+  "notes": "Generation and mastery are separate. Do not publish personal assessment answers to this public repository. Use explicit submitted answers privately to adapt reviews."
+}
