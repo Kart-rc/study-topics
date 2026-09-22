@@ -19,7 +19,7 @@
     30
   ],
   "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
-  "last_generated_day": 1,
+  "last_generated_day": 2,
   "days": [
     {
       "number": 1,
@@ -30,6 +30,25 @@
       "completion": "not_assessed",
       "review_keys": [],
       "validation": "Models, quizzes, exports, links and review logic checked; real browser layout unverified. See VALIDATION.md.",
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs"
+      ]
+    },
+    {
+      "number": 2,
+      "folder": "Day2",
+      "validation": "Embedded models, quizzes, exports, links and Day1 review checked; real browser unavailable. See Day2/VALIDATION.md.",
+      "date": "2026-09-22",
+      "generation_key": "2026-09-22",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day1+1"
+      ],
       "lesson_slugs": [
         "data-engineering",
         "software-engineering",

@@ -1,0 +1,267 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Watermarks: when can a window be forgotten?",
+    "tag": "Foundation · event-time reasoning",
+    "goal": "Separate event time from arrival time, trace state cleanup, and choose a lateness policy that preserves the consumer promise.",
+    "concept": "<p>Event time says when something happened; processing time says when your system handled it. A late-arriving event can still belong to an earlier aggregate. Keeping every aggregate forever is expensive, so a streaming engine needs a rule for retiring old state.</p><p>For a single-stream windowed aggregation, Spark tracks event-time progress and a configured delay. Conceptually, the watermark follows the greatest event timestamp observed minus that delay. It is not simply the wall clock. Spark guarantees aggregation of data within the configured lateness bound; data beyond that bound may or may not be aggregated. Actual behavior also depends on the operator, output mode, and trigger progress. <a href=\"https://spark.apache.org/docs/latest/streaming/apis-on-dataframes-and-datasets.html\">Spark Structured Streaming guide</a>.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A Kafka stream feeds five-minute payment-count windows. Use minutes after 12:00 and a five-minute delay. Batch 1 contains timestamps 2 and 4. Batch 2 contains 12. Batch 3 contains 3 and 8. The third batch's old event is not “nine minutes late” according to a laptop clock; it is behind the stream's observed event-time progress.</p><p>In the model below, each batch uses the previous batch's maximum to compute its watermark. Before batch 3, the maximum is 12, so the watermark is 7. The window [0,5) is already behind 7 and is removed. Timestamp 3 can no longer update that retired window in this model. Timestamp 8 belongs to [5,10), whose state is still retained.</p><p>Increase the delay to 15 and replay. Before batch 3 the watermark is −3, so the early window remains. You preserved more late corrections by holding state longer. The tradeoff is not “correctness versus speed” in the abstract: it is a stated lateness promise, retained state, and when consumers can treat an output as final.</p><p>The key cleanup condition in this deliberately simplified model is:</p><pre>watermark = previousMaxEventTime - delay\nif windowEnd &lt; watermark:\n    retire(windowState)</pre><p>For a real rollout, inspect timestamp quality, late-event distributions, state-store growth, and consumer tolerance for corrections. A future-dated producer timestamp is a warning: it can distort progress. Waiting indefinitely is not a free alternative, and blindly dropping everything older than wall-clock time changes the contract.</p>",
+    "practice": "Predict batch 3 before clicking. Step through with delay 5, then reset and use delay 15. Compare the early window count and retired state. Finally explain why an idle wall clock does not, by itself, prove that event-time completeness has advanced.",
+    "boundary": "This deterministic window-state model uses synthetic batches, previous-batch watermarks, and a strict windowEnd < watermark retirement rule. It is not Spark. It omits multi-input watermark policies, sink/output modes, no-data triggers, state-store implementation and exact operator cutoffs. Its rejection of retired-window events must not be interpreted as Spark guaranteeing that all data beyond the delay is dropped.",
+    "sim": "<label>Allowed delay in minutes <input id=\"delay\" type=\"range\" min=\"5\" max=\"15\" step=\"5\" value=\"5\"></label><p>Changing the delay resets the replay.</p><button id=\"step\">Next batch</button><button id=\"reset\">Reset replay</button><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const batches=[[2,4],[12],[3,8],[20],[4]];let pos=0,maxSeen=null,state={},events=[],wm=null;\nconst show=()=>{world.textContent='Delay: '+delay.value+' min\\nBatches processed: '+pos+'/5\\nWatermark used: '+(wm===null?'none':wm)+'\\nMaximum event time: '+maxSeen+'\\nRetained windows: '+JSON.stringify(state)+'\\n'+events.join('\\n')};\nconst clear=()=>{pos=0;maxSeen=null;state={};events=[];wm=null;show()};\nstep.onclick=()=>{if(pos===batches.length)return;wm=maxSeen===null?null:maxSeen-Number(delay.value);events=[];for(const k of Object.keys(state)){if(wm!==null&&Number(k)+5<wm){delete state[k];events.push('Retired ['+k+','+(Number(k)+5)+')')}}for(const t of batches[pos]){const start=Math.floor(t/5)*5;if(wm!==null&&start+5<wm){events.push('Not counted: event '+t+' belongs to retired window')}else{state[start]=(state[start]||0)+1;events.push('Counted event '+t+' in ['+start+','+(start+5)+')')}}maxSeen=Math.max(maxSeen===null?-Infinity:maxSeen,...batches[pos]);pos++;show()};reset.onclick=clear;delay.oninput=clear;show();",
+    "questions": [
+      [
+        "With max event time 12 and delay 5, what watermark is used in this model's next batch?",
+        [
+          "17",
+          "7",
+          "The current wall clock"
+        ],
+        1,
+        "Subtract the allowed delay from the prior maximum: 12 − 5 = 7."
+      ],
+      [
+        "Why does a larger delay retain more early windows?",
+        [
+          "It moves the cleanup boundary farther behind event-time progress",
+          "It makes producers send earlier",
+          "It removes the need for state"
+        ],
+        0,
+        "A slower cleanup boundary leaves more windows available for late updates, consuming more state."
+      ],
+      [
+        "An event exceeds Spark's configured lateness delay. What is safe to claim?",
+        [
+          "It is always dropped",
+          "It is always counted",
+          "Its aggregation is no longer guaranteed; it may still be processed"
+        ],
+        2,
+        "Spark's lateness guarantee is one-sided. Do not replace it with a universal hard-drop rule."
+      ]
+    ],
+    "sources": [
+      [
+        "Apache Spark Structured Streaming: watermark semantics",
+        "https://spark.apache.org/docs/latest/streaming/apis-on-dataframes-and-datasets.html",
+        "Living documentation; publication date not stated"
+      ]
+    ]
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "A queue buys time, not capacity",
+    "tag": "Foundation · backpressure and bounded work",
+    "goal": "Predict queue growth and drain time, then distinguish a buffer, load shedding, and genuine upstream backpressure.",
+    "concept": "<p>A queue separates arrival from execution. That helps absorb a burst, but cannot make a slower consumer sustain a faster producer forever. When work arrives faster than it finishes, something must grow, be rejected, or be slowed upstream.</p><p>Google's overload guidance emphasizes graceful resource limits and warns that requests per second can hide different per-request costs. A cheap metadata lookup and a large lineage traversal are not equal units of work. Measure the actual constrained resource before choosing an overload signal. <a href=\"https://sre.google/sre-book/handling-overload/\">Google SRE: Handling Overload</a>.</p><p>The following calculator intentionally assumes equal-cost items so you can feel the conservation rule. You can then name exactly which assumption fails in production.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A lineage ingestion worker completes 100 equal-cost events per second. Producers send 120 per second. With an empty buffer, backlog grows by 20 each second. A 300-item queue fills after 15 seconds. Making the queue ten times bigger delays that moment; it does not remove the 20-item-per-second deficit.</p><p>At second 20, the bounded model has queued 300 items and rejected 100. Lower arrivals to 80 while keeping service at 100. Spare capacity is only 20, so clearing the 300-item backlog takes another 15 seconds. It is not 300 / 100 because new work continues arriving.</p><p>The recurrence shown by the controls is:</p><pre>work = backlog + arrivals\nserved = min(serviceCapacity, work)\nwaiting = work - served\nrejected = max(0, waiting - bufferLimit)\nbacklog = min(bufferLimit, waiting)</pre><p>This model serves available work during each one-second bucket and caps waiting work at the bucket boundary. It is a conservation model, not a thread-pool implementation.</p><p>Now enable cooperative backpressure. We model a producer honoring a quota equal to consumer capacity. Rejections stop and existing backlog stops growing, but it does not drain until there is spare capacity. Real backpressure needs a feedback path and an upstream policy. A full queue that merely returns errors is load shedding, not proof that the producer slowed down. Retrying those errors aggressively can recreate Day1's amplification problem.</p><p>A Kafka log may retain backlog outside the worker, but storage retention and consumer lag still have limits. Decide explicitly whether upstream work waits, expires, is rejected, or enters a repair workflow. Do not silently discard business-critical events.</p>",
+    "practice": "Run 20 seconds at arrivals 120 and service 100. Predict backlog and rejects. Change arrivals to 80 and run 15 more seconds. Reset, enable cooperative backpressure, and repeat. Explain where the unadmitted work must go in a real system.",
+    "boundary": "Equal-cost deterministic items, one-second buckets, a fixed service rate and a bounded waiting buffer. Cooperative backpressure here is an ideal quota honored immediately by the producer; unadmitted demand is counted as deferred, not magically completed. No retries, jitter, CPU saturation curve, partition skew, persistent log, or message expiry are modeled.",
+    "sim": "<label>Offered items per second <input id=\"arrivals\" type=\"range\" min=\"0\" max=\"200\" step=\"20\" value=\"120\"></label><label>Service capacity per second <input id=\"service\" type=\"range\" min=\"20\" max=\"200\" step=\"20\" value=\"100\"></label><label><input id=\"cooperate\" type=\"checkbox\"> Producer honors service-capacity quota</label><button id=\"step\">Advance 1 second</button><button id=\"twenty\">Advance 20 seconds</button><button id=\"reset\">Reset counters</button><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "let seconds=0,q=0,rejected=0,completed=0,deferred=0;const limit=300;\nconst show=()=>world.textContent='Offered: '+arrivals.value+'/s; service: '+service.value+'/s\\nElapsed: '+seconds+' s\\nBacklog: '+q+' / '+limit+'\\nCompleted: '+completed+'\\nRejected: '+rejected+'\\nDeferred upstream: '+deferred;\nconst tick=()=>{const offered=+arrivals.value,cap=+service.value,input=cooperate.checked?Math.min(offered,cap):offered;deferred+=offered-input;const work=q+input,done=Math.min(cap,work),waiting=work-done;completed+=done;rejected+=Math.max(0,waiting-limit);q=Math.min(limit,waiting);seconds++};\nstep.onclick=()=>{tick();show()};twenty.onclick=()=>{for(let i=0;i<20;i++)tick();show()};reset.onclick=()=>{seconds=0;q=0;rejected=0;completed=0;deferred=0;show()};[arrivals,service,cooperate].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Backlog 300, arrivals 80/s, service 100/s. Ideal drain time?",
+        [
+          "3 seconds",
+          "15 seconds",
+          "It cannot drain"
+        ],
+        1,
+        "The drain rate is spare capacity: 100 − 80 = 20/s. 300 / 20 = 15 seconds."
+      ],
+      [
+        "Why does a ten-times-larger buffer fail to fix sustained overload?",
+        [
+          "It increases processing capacity only briefly",
+          "The arrival/service deficit is unchanged",
+          "Large buffers always lose data"
+        ],
+        1,
+        "Buffer size changes how long accumulation can continue, not the sustained service rate."
+      ],
+      [
+        "The server rejects excess work but clients retry immediately. Is backpressure established?",
+        [
+          "Yes, because the queue is bounded",
+          "Yes, because errors are visible",
+          "No; offered upstream load may increase"
+        ],
+        2,
+        "Load shedding protects one boundary. Effective backpressure also requires upstream behavior to reduce or defer offered work."
+      ]
+    ],
+    "sources": [
+      [
+        "Google SRE: Handling Overload",
+        "https://sre.google/sre-book/handling-overload/",
+        "SRE book, 2016; online chapter"
+      ]
+    ]
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Canaries: small exposure, useful evidence",
+    "tag": "Foundation · cross-team rollout judgment",
+    "goal": "Design a rollout gate that tests the risky path, compares the right cohorts, and distinguishes rollback of code from repair of data.",
+    "concept": "<p>A canary releases a change to a limited portion of production and compares its behavior with a control before wider exposure. The objective is to learn about the change while limiting harm, not simply to deploy to an arbitrary small percentage. <a href=\"https://sre.google/workbook/canarying-releases/\">Google SRE's canarying chapter</a>.</p><p>For a Distinguished Engineer, the hard question is whether the experiment can falsify the risky assumption. A green dashboard from an unrepresentative cohort is weak evidence. Rollout design therefore involves workload selection, measurement, stopping conditions, and clear decision rights—not just a traffic percentage.</p>",
+    "example": "<p><strong>Original teaching case:</strong> Six teams want a new schema-normalization library. A risky path is handling nested arrays; most requests use flat records. You propose a canary containing nested-array traffic, a control using the current library, and a comparison of rejected-record rate with equivalent input mixes.</p><p>In the synthetic calculator, the control's failure rate is 0.1% and the new version's representative-cohort rate is 4%. At 1% exposure, the whole-service rate is only 0.139%. A global 0.2% warning threshold stays green even though the canary is clearly worse. The arithmetic is:</p><pre>overallRate = exposure × canaryRate\n            + (1 − exposure) × controlRate</pre><p>At 10% exposure, the overall rate reaches 0.49%; the global alarm finally notices, after ten times as much traffic has been exposed. Cohort comparison would have revealed the difference earlier.</p><p>Switch to the “easy requests only” cohort. Its modeled failure rate matches control. This is not evidence about the nested-array path, regardless of how long the easy cohort remains green. A small, representative experiment is different from a small, convenient experiment.</p><p>Write a decision contract: the library owner investigates cohort regressions; the platform operator can halt expansion; consumer owners validate semantic correctness; the release owner records the decision and evidence. These roles are a proposed practice arrangement, not a description of your organization.</p><p>Finally, do not confuse reverting a library with undoing writes it already made. If the canary can corrupt shared data, require isolated output, a safe replay or repair plan, and an exposure boundary at the data layer. A kill switch alone cannot restore lost information.</p>",
+    "practice": "Compare 1% and 10% exposure with representative traffic. Then select easy-only traffic. Explain what each green result actually establishes. Draft a three-sentence rollout gate naming a cohort, halt condition, and owner; include one stateful side effect that rollback would not undo.",
+    "boundary": "Synthetic expected rates, not sampled observations or production measurements. The calculator has no confidence intervals, seasonality, cohort imbalance correction, delayed defects or shared-dependency effects. Its warning thresholds are illustrative only and must not be used as an automatic production gate.",
+    "sim": "<label>Exposure percent <input id=\"exposure\" type=\"range\" min=\"1\" max=\"50\" value=\"1\"></label><label><input id=\"easy\" type=\"checkbox\"> Canary contains easy requests only</label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const e=+exposure.value/100,control=.001,canary=easy.checked?.001:.04,overall=e*canary+(1-e)*control;world.textContent='Exposure: '+exposure.value+'%\\nControl failures: 0.100%\\nCanary failures: '+(canary*100).toFixed(3)+'%\\nOverall failures: '+(overall*100).toFixed(3)+'%\\nGlobal 0.2% warning: '+(overall>.002?'TRIGGERED':'not triggered')+'\\nCanary/control comparison: '+(canary>control?'REGRESSION in modeled cohort':'no difference in tested cohort')+'\\n'+(easy.checked?'Risky nested-array path remains UNTESTED.':'Representative synthetic cohort selected; real statistical validation still needed.')};[exposure,easy].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "At 1% exposure, canary 4%, control 0.1%, what is the overall failure rate?",
+        [
+          "4%",
+          "0.139%",
+          "0.041%"
+        ],
+        1,
+        "0.01 × 4% + 0.99 × 0.1% = 0.139%. Aggregation hides a severe cohort regression."
+      ],
+      [
+        "Why include the risky data shape in a canary?",
+        [
+          "A convenient cohort may not test the failure hypothesis",
+          "To maximize the number of affected users",
+          "To avoid a control group"
+        ],
+        0,
+        "You need evidence about the path being changed, with a controlled exposure and comparable baseline."
+      ],
+      [
+        "Reverting the new library restores the previous code. What may remain?",
+        [
+          "Nothing; all effects are reversed",
+          "Only a dashboard color",
+          "Previously corrupted or incompatible data requiring repair"
+        ],
+        2,
+        "Rollback changes future execution; persistent side effects may need a separate recovery procedure."
+      ]
+    ],
+    "sources": [
+      [
+        "Google SRE Workbook: Canarying Releases",
+        "https://sre.google/workbook/canarying-releases/",
+        "SRE Workbook, 2018"
+      ]
+    ]
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Grade the outcome, not the victory message",
+    "tag": "Foundation · agent evaluation harnesses",
+    "goal": "Write an agent success predicate that checks the requested result and authorization, then expose false positives in a naive grader.",
+    "concept": "<p>An agent can produce a persuasive completion message while leaving the environment wrong. An evaluation needs a task, one or more trials, and grading logic. Checking final state is different from checking the transcript. Deterministic assertions suit exact outcomes; calibrated model or human grading may be needed for more subjective quality. <a href=\"https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents\">Anthropic's evaluation guide</a>.</p><p>The design goal is not to force one preferred sequence of tool calls. It is to accept valid ways of satisfying the task while rejecting incorrect outcomes and policy violations. Explicitly required approvals remain part of correctness, even when the requested mutation itself succeeds.</p>",
+    "example": "<p><strong>Original teaching case:</strong> An incident assistant may quarantine one synthetic dataset only after approval. The task requires exactly one quarantine marker on dataset demo-orders, no changes to another dataset, and an approval record. The assistant's sentence “quarantine completed” establishes none of these facts.</p><p>Four local fixtures all contain a success claim. One has no marker. One has the correct marker and approval. One modifies two datasets. One makes the right mutation without approval. A claim-only grader reports 4/4. The actual task contract passes only the second fixture, or 1/4. That difference is a grader defect, not a model improvement.</p><p>A compact illustrative predicate is:</p><pre>pass = approvalRecorded\n   and modifiedDatasets == [\"demo-orders\"]\n   and quarantineMarkerCount == 1</pre><p>Keep these fixtures immutable, reset the environment between trials, and record the task and artifact versions alongside results. Otherwise a leftover marker from yesterday can make today's agent look successful. Test the grader against a known-correct fixture and deliberately wrong fixtures before comparing models.</p><p>Do not stop at this four-case demonstration. A complete suite for the proposed assistant also needs denied-approval behavior, unavailable tools, stale evidence, unexpected data shapes, and recovery after an uncertain write. A safe refusal can be the correct outcome when permission is absent, but that must be a separate task contract: our current four fixtures all falsely claim completion.</p><p>Use exact checks for exact state and a separate rubric for explanation quality. Averaging a beautiful explanation with an unauthorized write into a passing score would erase an important boundary. Day1's durable progress record should point to evidence produced by a trustworthy grader, not merely another agent's confident assertion.</p>",
+    "practice": "Toggle between claim-only and contract grading. Predict which fixtures pass before inspecting the results. Define one false-positive and one false-negative test for a real read-only RCA assistant. Explain which checks could be deterministic and which require expert judgment.",
+    "boundary": "Four deterministic synthetic fixtures; no LLM is called and no real dataset is modified. This illustrates grader validity, not agent accuracy, benchmark performance, or statistical reliability. The simplified authorization boolean does not implement an authentication or approval system.",
+    "sim": "<label><input id=\"strict\" type=\"checkbox\"> Check outcome and approval, not just the claim</label><button id=\"inspect\">Inspect fixture state</button><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const fixtures=[{name:'Claim but no write',claim:true,approved:true,modified:[],markers:0},{name:'Correct approved result',claim:true,approved:true,modified:['demo-orders'],markers:1},{name:'Wrong scope',claim:true,approved:true,modified:['demo-orders','demo-customers'],markers:2},{name:'Unauthorized write',claim:true,approved:false,modified:['demo-orders'],markers:1}];let detailed=false;\nconst contract=f=>f.approved&&f.markers===1&&f.modified.length===1&&f.modified[0]==='demo-orders';\nconst show=()=>{let passed=0;const rows=fixtures.map(f=>{const ok=strict.checked?contract(f):f.claim;passed+=ok?1:0;return(ok?'PASS ':'FAIL ')+f.name+(detailed?'\\n  '+JSON.stringify(f):'')});world.textContent=(strict.checked?'Contract grader':'Claim-only grader')+'\\n'+rows.join('\\n')+'\\nScore: '+passed+'/4\\nFixture score is not a measured agent success rate.'};strict.oninput=show;inspect.onclick=()=>{detailed=!detailed;show()};show();",
+    "questions": [
+      [
+        "All four fixtures claim success, but only one meets the contract. Claim-only grading produces how many false positives?",
+        [
+          "0",
+          "1",
+          "3"
+        ],
+        2,
+        "The other three fixtures are incorrectly labeled successful by the weak grader."
+      ],
+      [
+        "Why verify grader behavior against known-good and known-bad fixtures?",
+        [
+          "To distinguish grader defects from agent failures",
+          "To eliminate the need for real tasks",
+          "To guarantee future performance"
+        ],
+        0,
+        "A wrong grader makes model comparisons misleading. Test the measurement instrument first."
+      ],
+      [
+        "The agent makes the correct mutation without required approval. Should a polished explanation compensate?",
+        [
+          "Yes, average the scores",
+          "No; authorization is a required boundary",
+          "Only if it sounds confident"
+        ],
+        1,
+        "A mandatory approval condition is not interchangeable with prose quality."
+      ]
+    ],
+    "sources": [
+      [
+        "Anthropic: Demystifying evals for AI agents",
+        "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+        "2026-01-09"
+      ]
+    ]
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Retrieve-for-Train: optimize the set, then move work offline",
+    "tag": "Research spotlight · September 15, 2026 write-up",
+    "goal": "Explain why individually relevant results can form a poor set, and identify what offline-trained retrieval does—and does not—remove from serving.",
+    "concept": "<p>Some retrieval tasks need a complementary set rather than several near-duplicates. Retrieve-for-Train (R4T) uses offline reinforcement learning to train a fan-out language model against set-level rewards, synthesizes training pairs, then trains a compact diffusion retriever. The serving model generates target embeddings without repeating the same language-model fan-out reasoning at query time. <a href=\"https://research.google/blog/bypassing-inference-bottlenecks-accelerating-complex-ai-search-with-retrieve-for-train/\">Google Research's September 15, 2026 write-up</a>.</p><p>The underlying paper was submitted March 6, 2026. It reports retrieval-quality improvements and lower query-time fan-out latency on fashion and music benchmarks. This is research evidence about those settings, not proof of faster or safer enterprise incident diagnosis. <a href=\"https://arxiv.org/abs/2603.06397\">Read the original paper</a>.</p>",
+    "example": "<p><strong>Original teaching case:</strong> Ask a data-platform assistant for evidence explaining a late dataset. Its candidate list contains two highly relevant freshness reports, followed by volume, lineage, and contract evidence. Selecting only the highest independent relevance scores can spend the entire result budget on the same facet.</p><p>Our six-item toy collection is visible below. A greedy selector gives each new facet a bonus. At bonus 0, the three selected items are freshness A, freshness B, and volume. At bonus 0.2, the set becomes freshness A, volume, and lineage. You traded a little average item relevance for broader evidence coverage.</p><p>The teaching algorithm is deliberately simple:</p><pre>candidateScore = relevance\n               + noveltyBonus × isNewFacet\nchoose highest scoring eligible candidate\nrepeat until three results are selected</pre><p>This is <em>not</em> R4T's learning algorithm. It exposes the objective that makes set-level training interesting. A relevance floor prevents an unrelated item from winning merely because its category is novel. Yet even a diverse set is not necessarily sufficient: the correct explanation might require two complementary freshness documents, and a single “lineage” label says nothing about edge quality.</p><p>For a proposed offline pilot, freeze a permission-filtered corpus snapshot and an expert-written task set. Compare plain top-k retrieval, a simple diversified baseline like this one, and the learned method at equal result counts. Evaluate factual support, needed-facet coverage, unnecessary duplication, latency, and update cost. Hold out new incident types rather than only paraphrasing training queries.</p><p>Moving reasoning offline trades repeated serving work for training, refresh, and monitoring responsibilities. A changing catalog or tenant permission can invalidate yesterday's targets. Authorization still needs enforcement at serving time. My inference is that this technique merits a bounded retrieval experiment, not an immediate replacement for a live, permission-aware evidence pipeline.</p>",
+    "practice": "Predict the selected facets with novelty bonus 0, then 0.2. Explain why an unrelated but novel item should remain excluded. Write a case where two documents from the same facet are both necessary, and identify the evaluation signal that would catch over-diversification.",
+    "boundary": "Six hand-labeled synthetic documents, fixed relevance scores, greedy selection and a relevance floor. No embeddings, diffusion model, reinforcement learning, vector database, permissions or real search are executed. The example teaches set-level tradeoffs; its scores and speed are not R4T results.",
+    "sim": "<label>Novel-facet bonus <input id=\"bonus\" type=\"range\" min=\"0\" max=\"0.5\" step=\"0.05\" value=\"0\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const docs=[{id:'freshness-A',facet:'freshness',r:.95},{id:'freshness-B',facet:'freshness',r:.92},{id:'volume',facet:'volume',r:.84},{id:'lineage',facet:'lineage',r:.80},{id:'contract',facet:'contract',r:.76},{id:'unrelated',facet:'other',r:.20}];\nconst show=()=>{const remaining=docs.filter(d=>d.r>=.5),chosen=[],facets=new Set();for(let i=0;i<3;i++){remaining.sort((a,b)=>(b.r+(facets.has(b.facet)?0:+bonus.value))-(a.r+(facets.has(a.facet)?0:+bonus.value)));const d=remaining.shift();chosen.push(d);facets.add(d.facet)}world.textContent='Novelty bonus: '+bonus.value+'\\nCandidates (id | facet | relevance):\\n'+docs.map(d=>d.id+' | '+d.facet+' | '+d.r.toFixed(2)).join('\\n')+'\\n\\nSelected: '+chosen.map(d=>d.id).join(', ')+'\\nDistinct facets: '+facets.size+'/3 slots\\nMean relevance: '+(chosen.reduce((s,d)=>s+d.r,0)/3).toFixed(3)+'\\nUnrelated item excluded by relevance floor 0.5.'};bonus.oninput=show;show();",
+    "questions": [
+      [
+        "With no novelty bonus, which three documents does the model select?",
+        [
+          "freshness-A, volume, lineage",
+          "freshness-A, freshness-B, volume",
+          "Three random facets"
+        ],
+        1,
+        "Independent relevance ranking takes .95, .92 and .84, using two slots on freshness."
+      ],
+      [
+        "What does R4T move away from the serving path?",
+        [
+          "All database lookups and authorization",
+          "All model computation",
+          "Repeated language-model fan-out reasoning, via offline supervision and a trained retriever"
+        ],
+        2,
+        "Serving still needs the trained model and retrieval infrastructure; moving work offline does not remove all computation."
+      ],
+      [
+        "A permission changes after offline training. What should serve-time retrieval do?",
+        [
+          "Enforce current access rules on returned evidence",
+          "Trust every training target",
+          "Disable all corpus updates"
+        ],
+        0,
+        "Training-time validity is not current authorization. Permission-aware serving remains necessary."
+      ]
+    ],
+    "sources": [
+      [
+        "Google Research: Retrieve-for-Train",
+        "https://research.google/blog/bypassing-inference-bottlenecks-accelerating-complex-ai-search-with-retrieve-for-train/",
+        "2026-09-15 research write-up"
+      ],
+      [
+        "Efficient, Property-Aligned Fan-Out Retrieval via RL-Compiled Diffusion",
+        "https://arxiv.org/abs/2603.06397",
+        "Submitted 2026-03-06"
+      ]
+    ]
+  }
+]

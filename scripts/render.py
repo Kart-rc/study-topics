@@ -53,8 +53,8 @@ try{const s=JSON.parse(localStorage.getItem('study:'+lessonKey)||'null');if(s){[
 $('export').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(capture(),null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=lessonKey.replace('/','-')+'-answers.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 '''
   (R/folder/f'{slug}.html').write_text(page(L['title'],body,js))
-  plain=lambda s:html.unescape(re.sub('<[^>]+>','',s))
-  md=f"# {L['title']}\n\n{L['track']} · {folder} · 15 minutes\n\n{L['goal']}\n\n## Recall (2 minutes)\n\n{plain(review)}\n\n## Understand (4 minutes)\n\n{plain(L['concept'])}\n\n{plain(L['example'])}\n\n## Explore (5 minutes)\n\n{L['practice']}\n\nOpen {slug}.html for the executable model.\n\nModel limits: {L['boundary']}\n\n## Quiz (4 minutes)\n\n"
+  plain=lambda s:html.unescape(re.sub('<[^>]+>','',re.sub(r'</(?:p|pre|h2)>', '\n\n', s)))
+  md=f"# {L['title']}\n\n{L['track']} · {folder} · 15 minutes\n\n{L['goal']}\n\n## Recall (2 minutes)\n\n{review}\n\n## Understand (4 minutes)\n\n{plain(L['concept'])}\n\n{plain(L['example'])}\n\n## Explore (5 minutes)\n\n{L['practice']}\n\nOpen {slug}.html for the executable model.\n\nModel limits: {L['boundary']}\n\n## Quiz (4 minutes)\n\n"
   for i,(q,options,a,why) in enumerate(qs):md+=f'{i+1}. {q}\n'+''.join(f'   - {o}\n' for o in options)+'\n'
   md+='4. Explain one design decision to a skeptical engineer.\n5. Change one assumption. What breaks, and how would you detect it?\n\n<details><summary>Answer key — attempt first</summary>\n\n'+ '\n\n'.join(f'{i+1}. {o[a]}. {w}' for i,(q,o,a,w) in enumerate(qs))+'\n\n</details>\n\n## Sources\n\n'+''.join(f'- [{t}]({u}) — {d}; checked {day["date"]}.\n' for t,u,d in L['sources'])
   (R/folder/f'{slug}.md').write_text(md)
