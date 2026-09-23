@@ -1,0 +1,263 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Adaptive skew joins: split the straggler, not the whole job",
+    "tag": "Foundation · Spark AQE mechanics",
+    "goal": "Predict when Spark marks a shuffled partition as skewed, then reason about splitting, replication, and the remaining bottleneck.",
+    "concept": "<p>A sort-merge join can look well provisioned on average while one shuffled partition determines the stage duration. Spark Adaptive Query Execution (AQE) uses runtime statistics to revise a physical plan after a shuffle. Current Spark 4.2 documentation says AQE has been enabled by default since Spark 3.2 and can split skewed sort-merge-join partitions, optionally replicating the matching side.</p><p>For the documented skew rule, a partition is considered skewed only when it is larger than both a factor times the median partition size and an absolute byte threshold. The documented defaults are factor 5 and 256 MB. “Five times median” alone is not the rule.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A customer-fact join produces shuffled partitions of 40, 42, 43, 44, 45, and 900 MB. The median is 43.5 MB. With factor 5, the relative boundary is 217.5 MB; with the 256 MB absolute threshold, the effective boundary is 256 MB. The 900 MB partition clears both tests.</p><p>With a 64 MB advisory target, the calculator divides 900 MB into 15 approximately 60 MB pieces. The largest modeled task input falls from 900 MB to 60 MB. That is a useful intuition for straggler relief, not a 15× runtime promise: reading, shuffling, scheduling, spilling, replication, and downstream work remain.</p><pre>isSkewed = size &gt; factor × median\n        AND size &gt; absoluteThreshold\npieces = ceil(size / advisoryTarget)</pre><p>At platform scale, first verify that the skew is real in runtime statistics. Then ask whether a hot key, data-quality default, or tenant concentration is the business cause. AQE treats the physical symptom; key salting, pre-aggregation, or a data-contract repair may be the durable response.</p>",
+    "practice": "Predict the effective boundary and split count before moving a control. Raise the absolute threshold above the hot partition, then shrink the advisory target. Explain why smaller pieces can add work even when they reduce the longest task.",
+    "boundary": "A size-only deterministic model for one skewed shuffled partition. It is not Spark's planner and does not model join eligibility, skewedPartitionThresholdInBytes being ideally larger than advisory size, small-partition merging, replication of the other join side, spill, network, scheduler overhead, or exact runtimes. Treat the displayed bottleneck as input size, not elapsed time.",
+    "sim": "<label>Hot partition MB <input id=\"hot\" type=\"range\" min=\"100\" max=\"1200\" step=\"50\" value=\"900\"></label><label>Skew factor <input id=\"factor\" type=\"range\" min=\"2\" max=\"10\" step=\"1\" value=\"5\"></label><label>Absolute threshold MB <input id=\"threshold\" type=\"range\" min=\"64\" max=\"1024\" step=\"64\" value=\"256\"></label><label>Advisory target MB <input id=\"advisory\" type=\"range\" min=\"32\" max=\"256\" step=\"32\" value=\"64\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const base=[40,42,43,44,45];\nconst show=()=>{const sizes=[...base,+hot.value].sort((a,b)=>a-b),n=sizes.length,median=(sizes[n/2-1]+sizes[n/2])/2,relative=median*(+factor.value),effective=Math.max(relative,+threshold.value),skew=(+hot.value)>relative&&(+hot.value)>(+threshold.value),pieces=skew?Math.ceil((+hot.value)/(+advisory.value)):1,piece=(+hot.value)/pieces,after=skew?Math.max(45,piece):+hot.value;world.textContent='Partitions MB: '+sizes.join(', ')+'\\nMedian: '+median.toFixed(1)+' MB\\nRelative boundary: '+relative.toFixed(1)+' MB\\nAbsolute boundary: '+threshold.value+' MB\\nMust exceed both → effective boundary: '+effective.toFixed(1)+' MB\\nSkewed? '+(skew?'yes':'no')+'\\nModeled pieces: '+pieces+' × '+piece.toFixed(1)+' MB\\nLargest task input after adaptation: '+after.toFixed(1)+' MB'};[hot,factor,threshold,advisory].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Median 43.5 MB, factor 5, threshold 256 MB, partition 240 MB. Is it skewed by this rule?",
+        [
+          "Yes, because it exceeds 5× median",
+          "No, because it does not also exceed 256 MB",
+          "Yes, because it exceeds the median"
+        ],
+        1,
+        "The partition must exceed both boundaries. It clears 217.5 MB but not 256 MB."
+      ],
+      [
+        "Why can splitting a skewed join partition require extra work?",
+        [
+          "The matching data from the other side may be replicated across splits",
+          "Spark must change the join key",
+          "AQE disables shuffles"
+        ],
+        0,
+        "Splitting one side can require replication of the corresponding other-side data, plus more scheduling and shuffle work."
+      ],
+      [
+        "AQE removes a recurring hot-key straggler. What remains a sound engineering question?",
+        [
+          "Whether the hot key reflects a data-contract or model problem",
+          "Whether medians should be banned",
+          "Whether all joins should use one partition"
+        ],
+        0,
+        "Adaptive execution mitigates a physical plan symptom; it does not explain or repair the domain cause."
+      ]
+    ],
+    "sources": [
+      [
+        "Apache Spark 4.2: SQL performance tuning and Adaptive Query Execution",
+        "https://spark.apache.org/docs/latest/sql-performance-tuning.html",
+        "Spark 4.2 living documentation; exact page publication date not stated"
+      ]
+    ]
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Fencing tokens: stop the worker whose lease already died",
+    "tag": "Foundation · distributed coordination",
+    "goal": "Trace the stale-worker race and explain why lease ownership must be enforced at the resource, not trusted in the client.",
+    "concept": "<p>A lease answers “who may act now?” only while every participant observes time and communication promptly. A worker can pause after acquiring the lease, miss its expiry, and resume after a replacement has begun. Mutual exclusion at the lock service did not erase the paused process or its delayed request.</p><p>A fencing token is a monotonically increasing number issued with each ownership grant. Every protected write carries the token. The resource remembers the greatest accepted token and rejects lower ones. Chubby’s original paper describes sequencers that clients can pass to servers so stale lock holders can be detected. The enduring design lesson is that the resource must participate in enforcement.</p>",
+    "example": "<p><strong>Original teaching case:</strong> Compactor A gets token 1 and pauses during a long runtime stall. Its lease expires. Compactor B gets token 2 and publishes a corrected snapshot. A resumes with a buffered token-1 write.</p><p>If the object-store publishing layer accepts “whoever writes last,” A can replace the newer snapshot. If a small authoritative metadata resource conditionally accepts only tokens at least as new as its recorded token, A is rejected. The lease service and resource therefore share a protocol:</p><pre>grant → monotonically increasing token\nwrite(resource, token, value)\nresource accepts only token ≥ maxAccepted</pre><p>Do not confuse the token with a timestamp generated by workers. A clock value need not be globally monotonic. Also decide the granularity: a token for one dataset must not accidentally fence unrelated datasets.</p>",
+    "practice": "Run A → expire → B → B writes → A resumes with fencing on. Reset and repeat with fencing off. Predict the final value before each delayed write, then name the component that must store maxAccepted durably.",
+    "boundary": "A single in-memory resource, sequential button presses, one lease namespace, and perfect monotonically increasing grants. It omits quorum failure, lease renewal, token durability, retry idempotency, multi-resource transactions, storage APIs that cannot conditionally compare tokens, and recovery after the resource loses maxAccepted. Real designs must bind tokens to the correct resource and command.",
+    "sim": "<label><input id=\"fencing\" type=\"checkbox\" checked> Resource enforces fencing</label><button id=\"grantA\">Grant lease to A</button><button id=\"expireA\">Expire A's lease</button><button id=\"grantB\">Grant lease to B</button><button id=\"writeB\">B writes snapshot</button><button id=\"resumeA\">A resumes delayed write</button><button id=\"reset\">Reset</button><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "let next=0,owner=null,aToken=null,bToken=null,maxAccepted=0,value='initial',log=[];\nconst show=()=>world.textContent='Lease owner: '+(owner||'none')+'\\nA token: '+(aToken??'none')+'; B token: '+(bToken??'none')+'\\nResource max accepted: '+maxAccepted+'\\nResource value: '+value+'\\n\\n'+log.join('\\n');\nconst write=(who,token,val)=>{if(token===null){log.push(who+' has no token');return}if(fencing.checked&&token<maxAccepted){log.push('REJECT '+who+' token '+token+' < '+maxAccepted);return}maxAccepted=Math.max(maxAccepted,token);value=val;log.push('ACCEPT '+who+' token '+token)};\ngrantA.onclick=()=>{aToken=++next;owner='A';log.push('A granted token '+aToken);show()};expireA.onclick=()=>{if(owner==='A')owner=null;log.push('A lease expired; A process may still resume');show()};grantB.onclick=()=>{bToken=++next;owner='B';log.push('B granted token '+bToken);show()};writeB.onclick=()=>{write('B',bToken,'snapshot-B');show()};resumeA.onclick=()=>{write('A',aToken,'stale-snapshot-A');show()};reset.onclick=()=>{next=0;owner=null;aToken=null;bToken=null;maxAccepted=0;value='initial';log=[];show()};fencing.oninput=show;show();",
+    "questions": [
+      [
+        "A has token 1, B's token-2 write was accepted, then A resumes. What should the resource do?",
+        [
+          "Accept A because it once owned the lease",
+          "Reject token 1 as stale",
+          "Ask A's wall clock"
+        ],
+        1,
+        "The resource has already accepted token 2, so token 1 cannot be current."
+      ],
+      [
+        "Why is a lock service alone insufficient in this race?",
+        [
+          "It cannot stop a paused former holder from later sending a delayed request",
+          "It never grants exclusive ownership",
+          "It always uses wall clocks"
+        ],
+        0,
+        "The stale process still exists; the protected resource must recognize an obsolete grant."
+      ],
+      [
+        "A storage API cannot atomically compare and record a fencing token. What is the boundary?",
+        [
+          "The token still guarantees safety by itself",
+          "An enforcing metadata or write path is required; otherwise the stale-write gap remains",
+          "Use a random token"
+        ],
+        1,
+        "A token is evidence, not enforcement. Some authoritative component must reject old tokens atomically."
+      ]
+    ],
+    "sources": [
+      [
+        "Google Research: The Chubby lock service for loosely-coupled distributed systems",
+        "https://research.google/pubs/the-chubby-lock-service-for-loosely-coupled-distributed-systems/",
+        "OSDI 2006 foundation; Google publication page"
+      ]
+    ]
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Cell-based architecture: make failure scope a product decision",
+    "tag": "Foundation · organizational architecture",
+    "goal": "Quantify a cell boundary, expose shared dependencies that bypass it, and frame the migration decisions a senior technical leader must align.",
+    "concept": "<p>A cell is a bounded, independently operable slice of a workload. Requests are assigned to one cell, and a cell failure should not pull other cells down. AWS’s cell-based architecture guidance frames cells as fault-containment boundaries that improve isolation, predictability, and testability.</p><p>“We deployed the same stack N times” is not yet an isolation argument. Routing, identity, configuration, quotas, deployment, telemetry, and recovery paths can remain globally shared. A critical shared path can restore the original blast radius even when the data plane is partitioned.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A metadata platform serves 1,000 tenants in five equally sized cells. Under this deliberately even assignment, losing one cell affects at most 200 tenants. Ten cells reduce the modeled cell failure scope to 100, but double the number of units to deploy and observe.</p><p>Now check “shared dependency failed.” The displayed impact returns to all 1,000 tenants. The cells did not become useless; the model exposed a dependency whose failure bypasses the containment boundary.</p><p>A Distinguished Engineer turns that result into decisions: Which tenant-placement key is stable? What headroom lets a surviving cell absorb recovery? Can the routing/control plane fail closed without taking healthy cells offline? How do schemas and deployments remain compatible across cells? Which high-value tenant needs a dedicated cell? How will teams debug cross-cell inconsistency?</p><p>The migration should be reversible: create placement and routing first, move a cohort, observe cell-local SLOs, rehearse evacuation, then expand. A cell count selected without capacity and operating-cost models is architecture theater.</p>",
+    "practice": "Predict maximum affected tenants at 5 and 10 cells. Toggle the shared dependency failure. Then explain which dependency you would remove from the synchronous request path first and what new operational burden the extra cells create.",
+    "boundary": "Even tenant distribution, one complete cell failure, identical cell capacity, and a binary shared-dependency switch. It omits correlated Availability Zone or Region failure, noisy-neighbor load, state replication, tenant weights, evacuation capacity, placement churn, partial degradation, and recovery time. Cell count is not a real availability calculation.",
+    "sim": "<label>Number of cells <input id=\"cells\" type=\"range\" min=\"1\" max=\"20\" step=\"1\" value=\"5\"></label><label><input id=\"shared\" type=\"checkbox\"> Critical shared dependency also failed</label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const tenants=1000;const show=()=>{const n=+cells.value,cellImpact=Math.ceil(tenants/n),affected=shared.checked?tenants:cellImpact;world.textContent='Tenants: '+tenants+'\\nCells: '+n+'\\nModeled tenants per cell: ≤ '+cellImpact+'\\nFailure: '+(shared.checked?'shared dependency':'one cell')+'\\nMaximum affected in this model: '+affected+' ('+(affected/tenants*100).toFixed(1)+'%)\\nDeployment/observability units: '+n+'\\n\\nQuestion: which supposedly shared path bypasses this boundary?'};[cells,shared].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "With 1,000 evenly assigned tenants and 10 cells, what is the modeled one-cell impact?",
+        [
+          "10 tenants",
+          "100 tenants",
+          "All tenants"
+        ],
+        1,
+        "The simplified upper bound is ceil(1,000 / 10) = 100."
+      ],
+      [
+        "Why can a global synchronous dependency defeat cell isolation?",
+        [
+          "Its failure can block requests in every otherwise healthy cell",
+          "It makes cells cheaper",
+          "It automatically rebalances tenants"
+        ],
+        0,
+        "A shared critical path creates a correlated failure boundary outside the cells."
+      ],
+      [
+        "What is a credible first migration move?",
+        [
+          "Move every tenant at once",
+          "Create placement/routing, move a cohort, and rehearse recovery",
+          "Remove all telemetry"
+        ],
+        1,
+        "A bounded cohort tests both data-plane behavior and the operating model while preserving rollback."
+      ]
+    ],
+    "sources": [
+      [
+        "AWS Prescriptive Guidance: Reducing the scope of impact with cell-based architecture",
+        "https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/reducing-scope-of-impact-with-cell-based-architecture.html",
+        "Published 2023-09-20"
+      ]
+    ]
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "MCP OAuth: bind the token to the server, then mint a new upstream credential",
+    "tag": "Current protocol · harness security",
+    "goal": "Trace token audiences across an MCP tool call and prevent token passthrough from turning the server into a confused deputy.",
+    "concept": "<p>An agent harness may make an MCP server feel like a local function, but its authorization boundary is still a network security boundary. The MCP authorization specification says clients must indicate the intended resource, servers must validate that an access token was issued for them, and MCP servers must not pass a client token through to an upstream API.</p><p>Audience validation answers “was this credential minted for this server?” Separate upstream credentials answer “what may this server do as itself?” If the server accepts any bearer token and forwards it, a credential intended for another service can be misused, logged, or broadened through the harness.</p>",
+    "example": "<p><strong>Original teaching case:</strong> An agent calls <code>catalog.example/tools/read</code>. The presented token says <code>aud=storage.api</code>, not <code>aud=catalog.example</code>. A naive server accepts it and forwards the same token to storage. The request may work, but the MCP boundary has neither validated its own audience nor constrained the downstream identity.</p><p>In strict mode the catalog rejects that token. With <code>aud=catalog.example</code>, it accepts the client request, authorizes the tool, and uses a separate, narrowly scoped <code>aud=storage.api; scope=read</code> credential for its upstream call.</p><pre>client token → aud=catalog.example\nMCP server validates audience + tool authorization\nserver credential → aud=storage.api, scope=read</pre><p>Harness engineering implication: represent the MCP server and every upstream service as distinct principals in traces and policy tests. A tool allowlist does not repair token confusion.</p>",
+    "practice": "Choose storage.api in naive mode and predict whether the MCP server accepts and what it forwards. Turn on strict validation. Then choose catalog.example. Explain which identity should appear in the storage audit log.",
+    "boundary": "A deterministic audience string model, not OAuth validation. It omits issuer and signature checks, scopes, consent, PKCE, discovery, refresh, token exchange, replay protection, DPoP/mTLS, multi-tenant policy, and actual MCP transport. A correct audience is necessary but not sufficient authorization.",
+    "sim": "<label>Presented token audience <select id=\"aud\"><option value=\"catalog.example\">catalog.example</option><option value=\"storage.api\">storage.api</option><option value=\"*\">wildcard / unspecified</option></select></label><label><input id=\"strict\" type=\"checkbox\"> Strict audience validation + separate upstream token</label><button id=\"run\">Evaluate request</button><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const presented=aud.value||'catalog.example',accepted=strict.checked?presented==='catalog.example':true;if(!accepted){world.textContent='MCP decision: REJECT\\nReason: token audience '+presented+' is not catalog.example\\nUpstream call: none';return}const upstream=strict.checked?'aud=storage.api; scope=read; principal=catalog-server':'same client token (aud='+presented+')';world.textContent='MCP decision: ACCEPT\\nAudience validation: '+(strict.checked?'passed':'not enforced')+'\\nUpstream credential: '+upstream+'\\nRisk: '+(strict.checked?'separate identities and least-privilege review remain':'token passthrough / confused-deputy boundary')};run.onclick=show;[aud,strict].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "A client presents aud=storage.api to catalog.example. What should strict validation do?",
+        [
+          "Accept because storage is downstream",
+          "Reject because the token was not issued for the MCP server",
+          "Rewrite the audience string"
+        ],
+        1,
+        "The MCP server validates that it is the intended audience; a downstream audience is not interchangeable."
+      ],
+      [
+        "Why should the MCP server use a separate upstream token?",
+        [
+          "To preserve audience and privilege boundaries instead of passing the client's credential through",
+          "To make traces shorter",
+          "To avoid authenticating the client"
+        ],
+        0,
+        "Separate credentials keep the client-to-server and server-to-upstream trust decisions distinct."
+      ],
+      [
+        "The token has the correct audience. Is the tool call automatically authorized?",
+        [
+          "Yes",
+          "No; issuer, signature, scope and resource/tool policy still matter",
+          "Only for read tools"
+        ],
+        1,
+        "Audience validation is one required check, not the complete authorization decision."
+      ]
+    ],
+    "sources": [
+      [
+        "Model Context Protocol authorization specification 2025-06-18",
+        "https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization",
+        "Protocol version 2025-06-18; checked against versioned specification"
+      ]
+    ]
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "TimesFM-3: one zero-shot model, related time series, future covariates",
+    "tag": "Research spotlight · August 31, 2026",
+    "goal": "Distinguish multivariate zero-shot forecasting from a univariate baseline and design a fair platform pilot without treating a teaching model as TimesFM.",
+    "concept": "<p>Google Research introduced TimesFM-3 as a zero-shot foundation model for univariate, multivariate, and covariate-informed forecasting in a single forward pass. The August 31, 2026 write-up describes an alternating attention architecture, non-autoregressive horizon decoding, and quantile forecasts.</p><p>The new capability matters when related series and known future signals carry information that a target’s history alone cannot. Google reports leading or competitive results across its selected benchmark groups against named baselines. Those are research claims from the model team, not evidence for your workload. The post said BigQuery integration was coming “in the coming weeks”; as of the source date, that was a future plan, not a generally available feature claim.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A streaming platform’s last seven daily ingestion volumes hover near 100 units. Two future days have planned backfills. A history-only baseline repeats the historical mean, so it forecasts about 100 each day. A covariate-aware toy rule adds 40 on scheduled backfill days, producing a seven-day total near 780 rather than 700.</p><p>That does not prove the covariate helps. If schedules are canceled or the relationship changes, the extra signal can make the forecast worse. Evaluate it against a seasonal naive baseline on rolling historical cutoffs, using only covariates that would actually have been known at each cutoff.</p><p>TimesFM-3 separates target history, past-only covariates, and covariates known into the forecast horizon. For a platform pilot, examples might be ingestion volume as target, observed lag as past-only, and a committed backfill calendar as past-and-future. Prevent leakage: “eventually corrected actual volume” is not a future-known input.</p>",
+    "practice": "Predict the seven-day total with the schedule ignored, then enable known-future covariates. Change the planned effect. Explain how you would backtest a schedule field that is often canceled after the forecast is made.",
+    "boundary": "This is an original mean-plus-schedule calculator with a fixed illustrative ±15 interval. It does not execute TimesFM-3, learn cross-series dependence, produce calibrated quantiles, use attention, or reproduce any reported benchmark. The planned effect is chosen by you and can be wrong. No product availability is implied.",
+    "sim": "<label><input id=\"include\" type=\"checkbox\"> Use planned-backfill covariate</label><label>Assumed effect per planned day <input id=\"effect\" type=\"range\" min=\"0\" max=\"80\" step=\"10\" value=\"40\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const history=[100,98,102,101,99,100,101],planned=[0,0,1,0,0,1,0];const show=()=>{const mean=history.reduce((a,b)=>a+b,0)/history.length,forecast=planned.map(x=>mean+(include.checked?x*(+effect.value):0)),total=forecast.reduce((a,b)=>a+b,0);world.textContent='History: '+history.join(', ')+'\\nFuture planned-backfill flags: '+planned.join(', ')+'\\nMode: '+(include.checked?'target history + known future covariate':'history-only baseline')+'\\nForecast: '+forecast.map(x=>x.toFixed(1)).join(', ')+'\\nIllustrative intervals: '+forecast.map(x=>'['+(x-15).toFixed(0)+','+(x+15).toFixed(0)+']').join(' ')+'\\n7-day total: '+total.toFixed(1)+'\\n\\nThis calculator is not TimesFM-3.'};[include,effect].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "With a baseline of about 100 and two planned days adding 40 each, what is the approximate seven-day total?",
+        [
+          "620",
+          "700",
+          "780"
+        ],
+        2,
+        "Seven baseline days contribute about 700; two planned effects add 80."
+      ],
+      [
+        "Why must a future covariate be reconstructed as known at each backtest cutoff?",
+        [
+          "To prevent information that arrived later from leaking into evaluation",
+          "To increase the model size",
+          "To remove the target history"
+        ],
+        0,
+        "A fair zero-shot or trained forecast can use only the information available when the forecast would have been made."
+      ],
+      [
+        "What is safe to conclude from Google’s reported benchmark results?",
+        [
+          "TimesFM-3 will win on every enterprise series",
+          "It performed strongly on the reported evaluation setup; your workload still needs a controlled backtest",
+          "BigQuery integration was already generally available"
+        ],
+        1,
+        "Research benchmarks motivate evaluation. They do not establish workload-specific accuracy or announced product availability."
+      ]
+    ],
+    "sources": [
+      [
+        "Google Research: TimesFM-3, a zero-shot foundation model for multivariate forecasting",
+        "https://research.google/blog/timesfm-3-a-zero-shot-foundation-model-for-multivariate-forecasting/",
+        "Published 2026-08-31"
+      ]
+    ]
+  }
+]
+
