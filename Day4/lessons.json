@@ -1,0 +1,268 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Kafka transactions: make the output and offset one decision",
+    "tag": "Foundation · Kafka 4.3 semantics",
+    "goal": "Trace the crash window in consume-transform-produce, then state exactly where Kafka's exactly-once boundary ends.",
+    "concept": "<p>Idempotent production prevents a producer retry from appending the same batch twice. A consume-transform-produce application has a second problem: it must make the derived output and the consumed input offset agree. If it writes output, crashes, and has not committed the offset, the replacement reads the input again.</p><p>Kafka transactions can atomically commit records across topic partitions together with the consumer-group offsets. A downstream consumer using <code>isolation.level=read_committed</code> hides records from aborted transactions. Current Kafka 4.3 documentation also requires disabling automatic offset commits for the direct producer/consumer pattern and assigning a <code>transactional.id</code> to the producer.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A lineage normalizer reads input offset 10 and emits a canonical lineage edge. The process fails immediately after the output send.</p><p>Without a transaction, the first edge remains visible while offset 10 remains uncommitted. The restarted consumer processes offset 10 again, so two edges are visible unless the sink independently deduplicates them.</p><p>With a transaction, the first attempt's output and offset update abort together. The retry commits one output and offset 11. The log can still contain an aborted record, so a <code>read_uncommitted</code> consumer may observe both physical attempts. The transaction guarantee depends on the reader honoring the transaction markers.</p><pre>beginTransaction()\nproduce(derivedEdge)\nsendOffsetsToTransaction(offset 11)\ncommitTransaction()  // output + position become visible together</pre><p>The precise boundary matters: Kafka can coordinate Kafka output topics and Kafka offsets. A write to an arbitrary REST API, Snowflake table, or object store does not join that transaction merely because its input came from Kafka. Such sinks need their own idempotency key, transactional connector, or colocated output/offset checkpoint.</p>",
+    "practice": "Predict the visible output count for all four combinations of transaction on/off and read-committed on/off. Then explain why an external API call inside the application is outside this atomic boundary.",
+    "boundary": "One input record, one output record, one crash point, and an ideal retry. It does not execute Kafka or model producer epochs, fencing, coordinator failure, timeouts, rebalances, multi-partition ordering, retries, transaction markers in detail, or external sinks. Physical-record counts are illustrative; exact log internals and retention are omitted.",
+    "sim": "<label><input id=\"tx\" type=\"checkbox\"> Atomically commit output + offset</label><label><input id=\"committed\" type=\"checkbox\"> Downstream reads only committed transactions</label><button id=\"run\">Run crash then restart</button><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{world.textContent='Choose the boundary, then run the crash scenario.'};run.onclick=()=>{const transactional=tx.checked,strict=committed.checked;const physical=2;const aborted=transactional?1:0;const visible=transactional&&strict?1:2;world.textContent='Input: offset 10\\nCrash: after first output send, before normal completion\\nMode: '+(transactional?'transactional output + offset':'independent output then offset')+'\\nPhysical output attempts in toy log: '+physical+'\\nAborted transactional attempts: '+aborted+'\\nVisible outputs to this consumer: '+visible+'\\nCommitted next input offset: 11\\nResult: '+(visible===1?'one committed result is observed':'duplicate/aborted attempt is observable')};[tx,committed].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "The worker writes output, crashes before committing its input offset, then restarts without a transaction. What is likely?",
+        [
+          "The input is skipped",
+          "The input is processed again and the output can duplicate",
+          "Kafka rolls back the external world"
+        ],
+        1,
+        "The committed position still points to the input, while the first output already exists."
+      ],
+      [
+        "Why is read_committed part of the end-to-end Kafka pattern?",
+        [
+          "It hides records belonging to aborted transactions",
+          "It makes every sink transactional",
+          "It disables consumer groups"
+        ],
+        0,
+        "Transaction markers only protect readers that choose committed isolation."
+      ],
+      [
+        "The application also calls a billing REST API. What is safe to claim?",
+        [
+          "The Kafka transaction rolls the API call back",
+          "Exactly-once extends automatically to all network calls",
+          "The API needs a separate idempotency or coordination design"
+        ],
+        2,
+        "Kafka's atomic offset/output primitive does not enlist an arbitrary external side effect."
+      ]
+    ],
+    "sources": [
+      [
+        "Apache Kafka 4.3 design: delivery semantics and transactions",
+        "https://kafka.apache.org/43/design/design/",
+        "Kafka 4.3 documentation; last modified 2026-05-22"
+      ],
+      [
+        "Apache Kafka 4.3 consumer configuration: isolation.level",
+        "https://kafka.apache.org/43/configuration/consumer-configs/",
+        "Kafka 4.3 documentation; last modified 2026-05-22"
+      ]
+    ]
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Protobuf evolution: the field number is the contract",
+    "tag": "Foundation · compatibility engineering",
+    "goal": "Predict mixed-version decoding, preserve unknown fields, and recognize why a wire-safe change can still break application behavior.",
+    "concept": "<p>In Protobuf binary encoding, a field number—not its source-code name—is the durable identity on the wire. Adding a new field is binary wire-safe: an old parser treats the unfamiliar tag as an unknown field, while a new parser supplies defaults when reading old messages.</p><p>That tolerance is not permission to reuse numbers. Reassigning an old tag gives the same bytes a new meaning and can cause parse failures, data corruption, or leakage. Deleted numbers should be reserved. Compatibility also depends on the path: Proto3 preserves unknown binary fields during parse and serialization, but converting through JSON or copying known fields one by one can discard them.</p>",
+    "example": "<p><strong>Original teaching case:</strong> Version 1 of a dataset event uses tag 1 for <code>dataset_id</code> and tag 2 for <code>owner</code>. Version 2 adds tag 3 for <code>classification</code>. A V1 relay can read the message, ignore classification in its application logic, and reserialize the binary message while preserving tag 3. A later V2 consumer recovers it.</p><p>If the relay maps only known fields into JSON and back, tag 3 disappears. The schemas are wire-compatible, yet the integration path is lossy.</p><p>Worse, if V2 deletes <code>owner</code> and reuses tag 2 for <code>retention_days</code>, the bytes <code>tag2=\"30\"</code> are read by V1 as owner <code>\"30\"</code>. Both parsers can succeed while disagreeing semantically.</p><pre>V1: 1 → dataset_id, 2 → owner\nV2 safe: add 3 → classification\nV2 unsafe: reuse 2 → retention_days</pre><p>At enterprise scale, enforce compatibility in CI, retain descriptors, test old-new and new-old readers, and observe actual client versions before activating new semantics. Wire safety is necessary; coordinated application behavior is the release contract.</p>",
+    "practice": "Start with the safe addition and a binary relay. Toggle the JSON bridge and predict whether classification survives. Then reuse tag 2 and explain why successful parsing is not evidence of semantic compatibility.",
+    "boundary": "A symbolic tag map, not the Protobuf wire codec. It omits wire types, packed fields, oneof behavior, language-specific enum handling, presence rules, descriptor registries, ProtoJSON's separate compatibility rules, and actual generated code. The tag-reuse example uses string-like values only to make semantic ambiguity visible.",
+    "sim": "<label><input id=\"jsonBridge\" type=\"checkbox\"> Old relay converts through JSON / known fields only</label><label><input id=\"reuse\" type=\"checkbox\"> New schema reuses tag 2 as retention_days</label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const wire=reuse.checked?{1:'orders',2:'30',3:'restricted'}:{1:'orders',2:'team-a',3:'restricted'};const old={dataset_id:wire[1],owner:wire[2]},unknown=jsonBridge.checked?{}:{3:wire[3]};const forwarded={1:old.dataset_id,2:old.owner,...unknown};const newest=reuse.checked?{dataset_id:forwarded[1],retention_days:forwarded[2],classification:forwarded[3]||'(lost)'}:{dataset_id:forwarded[1],owner:forwarded[2],classification:forwarded[3]||'(lost)'};world.textContent='Wire tags: '+JSON.stringify(wire)+'\\nOld V1 interpretation: '+JSON.stringify(old)+'\\nRelay path: '+(jsonBridge.checked?'known fields through JSON; unknown tag dropped':'binary message copy; unknown tag preserved')+'\\nNewest interpretation after relay: '+JSON.stringify(newest)+'\\nAssessment: '+(reuse.checked?'UNSAFE — tag 2 has two meanings during mixed deployment':jsonBridge.checked?'wire-safe schema, lossy relay path':'safe additive evolution in this model')};[jsonBridge,reuse].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "A V2 producer adds tag 3. What does a V1 binary parser do?",
+        [
+          "Treats tag 3 as an unknown field",
+          "Renumbers all fields",
+          "Must fail"
+        ],
+        0,
+        "Adding a field is binary wire-safe; old code does not recognize its application meaning."
+      ],
+      [
+        "Why reserve a deleted field number?",
+        [
+          "To reduce message size",
+          "To prevent a future field from reinterpreting old bytes",
+          "To make JSON faster"
+        ],
+        1,
+        "A reused number makes historical and mixed-version bytes ambiguous."
+      ],
+      [
+        "Schemas are wire-safe, but an old relay converts messages to JSON and back. What boundary matters?",
+        [
+          "Unknown fields may be lost on that path",
+          "Binary compatibility guarantees JSON preservation",
+          "The relay automatically upgrades"
+        ],
+        0,
+        "The transport and copying behavior are part of compatibility, not just the .proto diff."
+      ]
+    ],
+    "sources": [
+      [
+        "Protocol Buffers proto3 guide: updating message types and unknown fields",
+        "https://protobuf.dev/programming-guides/proto3/#updating",
+        "Living documentation; publication date not stated"
+      ]
+    ]
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Static stability: survive first, repair second",
+    "tag": "Foundation · regional reliability judgment",
+    "goal": "Size pre-existing zonal capacity and distinguish a resilience design from a recovery plan that depends on an impaired control plane.",
+    "concept": "<p>A statically stable system keeps its existing useful work running when a dependency is impaired. It may stop accepting configuration changes, but its data plane does not require emergency provisioning or mutation to survive.</p><p>AWS describes the control plane as the machinery that creates and changes resources, while the data plane performs their ongoing work. The control plane is typically more complex and lower volume. Building the incident response around “launch replacements now” introduces the control plane—and bootstrapping, discovery, credentials, and configuration—into the worst possible moment.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A three-AZ data-quality service is load-tested to 50% of total demand in each zone. Normal provisioned capacity is 150%. Lose one zone and 100% remains: no scale-up is needed. AWS gives this same three-zone arithmetic as 50% overprovisioning, with each zone operating at 66% of its tested capacity.</p><p>If each zone holds only 35% of demand, losing one leaves 70%. A reactive plan needs 30 percentage points of new capacity. It may recover when control-plane operations work, but it is not statically stable.</p><pre>survivingCapacity = (zones - 1) × capacityPerZone\nstaticStable = survivingCapacity ≥ 100% demand</pre><p>A Distinguished Engineer turns the arithmetic into an operating contract: define which failure the service must absorb, fund the required headroom, keep critical request paths zone-local where appropriate, pre-provision standby state, and run game days that disable control-plane changes. Cost objections are real; the response is tiering and explicit risk acceptance, not relabeling reactive recovery as high availability.</p>",
+    "practice": "At three zones, find the minimum whole-number capacity per zone that survives one loss. Disable the control plane and compare 50% with 35%. Then identify one bootstrap dependency your data plane still takes during recovery.",
+    "boundary": "Uniform load, one entire zone lost, perfect traffic shifting, identical capacity, and a binary control-plane state. It omits gray failures, cross-zone calls, stateful quorum, data durability, health-check errors, autoscaling delay, regional failure, uneven traffic, cost, and service-specific AWS behavior. Capacity percentages are teaching arithmetic, not sizing advice.",
+    "sim": "<label>Availability Zones <input id=\"zones\" type=\"range\" min=\"2\" max=\"5\" step=\"1\" value=\"3\"></label><label>Capacity per zone (% of total demand) <input id=\"perZone\" type=\"range\" min=\"25\" max=\"70\" step=\"5\" value=\"50\"></label><label><input id=\"control\" type=\"checkbox\" checked> Control plane can provision during impairment</label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const n=+zones.value,p=+perZone.value,normal=n*p,surviving=(n-1)*p,deficit=Math.max(0,100-surviving),stable=deficit===0;world.textContent='Normal provisioned capacity: '+normal+'% of demand\\nAfter one zone loss: '+surviving+'% remains\\nImmediate deficit: '+deficit+'%\\nControl plane: '+(control.checked?'available in this scenario':'unavailable')+'\\nOutcome: '+(stable?'STATICALLY STABLE — existing capacity carries demand':control.checked?'REACTIVE RECOVERY REQUIRED — depends on successful mutation':'CAPACITY OUTAGE — no recovery mutation available')+'\\n\\nSurvival test: (zones − 1) × per-zone capacity ≥ 100'};[zones,perZone,control].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Three zones each carry capacity equal to 50% of demand. One fails. What remains?",
+        [
+          "50%",
+          "100%",
+          "150%"
+        ],
+        1,
+        "Two surviving zones each contribute 50%, so existing capacity still meets demand."
+      ],
+      [
+        "Why is emergency scale-out weaker than pre-provisioned headroom?",
+        [
+          "It depends on control-plane and bootstrap paths during an impairment",
+          "It always costs more",
+          "It removes health checks"
+        ],
+        0,
+        "The repair path adds changing infrastructure and several dependencies precisely when conditions are degraded."
+      ],
+      [
+        "The data plane serves old configuration but cannot accept updates during a control-plane outage. Is that consistent with static stability?",
+        [
+          "No, every operation must remain available",
+          "Yes, existing useful work can continue while changes pause",
+          "Only if all zones fail"
+        ],
+        1,
+        "Static stability prioritizes continued established behavior; control-plane mutations can be temporarily unavailable."
+      ]
+    ],
+    "sources": [
+      [
+        "AWS Builders' Library: Static stability using Availability Zones",
+        "https://aws.amazon.com/builders-library/static-stability-using-availability-zones/",
+        "Established AWS architecture guidance; publication date not stated"
+      ]
+    ]
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Agent durability: separate the brain, the hands, and the session",
+    "tag": "Current engineering · harness architecture",
+    "goal": "Recover a long-running agent after harness or sandbox failure without making either runtime the sole owner of progress or credentials.",
+    "concept": "<p>A long-running agent has at least three different concerns: the brain and harness decide what to do; the hands execute tools and code; the session records what happened. Coupling all three inside one container makes that container a stateful pet. If it dies, progress, evidence, and execution environment can disappear together.</p><p>Anthropic's April 2026 Managed Agents write-up describes stable interfaces around these parts: an external append-only session log, a replaceable harness, and replaceable sandboxes/tools reached through an <code>execute(name, input) → string</code> boundary. A new harness can wake from the durable session, while a failed sandbox can be reprovisioned.</p>",
+    "example": "<p><strong>Original teaching case:</strong> An agent repairs 300 lineage definitions in three checkpoints. In a coupled design, checkpoint state lives only in the same container as the harness and repository. A sandbox failure after checkpoint 2 loses the trustworthy record of completed work; restarting risks both repetition and omission.</p><p>In the decoupled model, each completed checkpoint emits an event to a durable session before the next decision. If the sandbox dies, a new hand is provisioned. If the harness dies, a new brain reads the log. Neither recovery guarantees that a repeated external mutation is safe—tool calls still need idempotency keys or outcome reconciliation.</p><pre>emitEvent(session, checkpointCompleted)\nexecute(sandbox, nextAction)\non failure:\n  wake(session)\n  provision(resources)\n  reconcile last action before retry</pre><p>The same separation creates a security boundary. Anthropic reports keeping credentials outside the generated-code sandbox and using a proxy/vault for MCP calls. The general design principle is structural: the hand receives the capability needed for the action, not a vault it can inspect.</p>",
+    "practice": "Complete two checkpoints, then fail the sandbox in coupled mode and resume. Reset and repeat in decoupled mode. Also fail the harness. Explain which event must be durable before an irreversible tool call can be retried safely.",
+    "boundary": "A three-step state machine, not an agent runtime. It models a perfectly durable session and deterministic checkpoints, but omits concurrent agents, event ordering, partial writes, session corruption, context compaction, tool authentication, sandbox provisioning, duplicate external side effects, compensation, and actual latency. Decoupling improves recoverability; it does not create idempotency.",
+    "sim": "<label>Architecture <select id=\"mode\"><option value=\"coupled\">Coupled container</option><option value=\"decoupled\">External durable session</option></select></label><button id=\"work\">Complete next checkpoint</button><button id=\"failHand\">Fail sandbox / hand</button><button id=\"failBrain\">Fail harness / brain</button><button id=\"resume\">Resume</button><button id=\"reset\">Reset</button><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "let progress=0,events=[],brain=true,hand=true,log=[];const show=()=>world.textContent='Mode: '+mode.value+'\\nBrain: '+(brain?'running':'failed')+'; hand: '+(hand?'running':'failed')+'\\nRecovered progress: '+progress+'/3\\nDurable session events: '+events.length+'\\n\\n'+log.join('\\n');const lose=what=>{if(mode.value==='coupled'){progress=0;events=[];log=['Coupled '+what+' failed: local progress unavailable']}else log.push(what+' failed; external session remains')};work.onclick=()=>{if(!brain||!hand){log.push('Cannot work until both components run')}else if(progress<3){progress++;if(mode.value==='decoupled')events.push({checkpoint:progress});log.push('Completed checkpoint '+progress+(mode.value==='decoupled'?'; event emitted':' only in local container'))}show()};failHand.onclick=()=>{hand=false;lose('hand');show()};failBrain.onclick=()=>{brain=false;lose('brain');show()};resume.onclick=()=>{brain=true;hand=true;if(mode.value==='decoupled')progress=events.length;log.push('Reprovisioned runtimes; resumed from '+progress);show()};reset.onclick=()=>{progress=0;events=[];brain=true;hand=true;log=[];show()};mode.oninput=reset.onclick;show();",
+    "questions": [
+      [
+        "A decoupled sandbox fails after two durable checkpoint events. What can a replacement recover?",
+        [
+          "Nothing",
+          "The session history and two completed checkpoints",
+          "The original process memory"
+        ],
+        1,
+        "The recovery source is the external session log, not the failed sandbox."
+      ],
+      [
+        "Why keep the session separate from the model's context window?",
+        [
+          "Durable history can be re-read or transformed even when a context window is compacted",
+          "It guarantees every event belongs in every prompt",
+          "It removes the need for a harness"
+        ],
+        0,
+        "Storage and prompt selection are different concerns; durable events need not all occupy the active context."
+      ],
+      [
+        "The session shows a tool call started but no result event. Is blind retry safe?",
+        [
+          "Always",
+          "Only if the model is confident",
+          "No; reconcile the outcome or use an idempotent operation"
+        ],
+        2,
+        "A durable log exposes ambiguity but cannot undo an external side effect or prove it did not happen."
+      ]
+    ],
+    "sources": [
+      [
+        "Anthropic Engineering: Scaling Managed Agents—Decoupling the brain from the hands",
+        "https://www.anthropic.com/engineering/managed-agents",
+        "Published 2026-04-08"
+      ]
+    ]
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "MaD-RL: optimize the output distribution, not only the best-looking sample",
+    "tag": "Research spotlight · September 24, 2026",
+    "goal": "See why maximizing per-sample reward can collapse modes, then distinguish distribution matching from temperature-based diversity.",
+    "concept": "<p>Many post-training recipes reward each generated answer independently. If one answer mode scores slightly higher, optimization can concentrate probability there. That is useful when the objective is “return the single best answer,” but wrong when the product needs a controlled population: balanced synthetic data, policy exploration, or a fairness-related mixture.</p><p>Meta's MaD-RL paper, published September 24, 2026, proposes reinforcement-learning rewards that match the distribution of a latent categorical attribute to a chosen target. The authors report that GRPO can reduce output diversity by concentrating on one mode, and they formulate distribution-matching rewards using divergences including L2, KL, and Jensen–Shannon. Their experiments cover mathematical reasoning and programming.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A code-synthesis pipeline wants 50% straightforward solutions, 30% memory-efficient solutions, and 20% highly parallel solutions. A sample-level reward optimizer prefers straightforward answers and produces an 85/10/5 mix. Its expected reward is high, but the dataset misses the desired coverage.</p><p>The slider interpolates toward the target distribution. As matching intensity rises, L1 distance to the target falls while expected scalar reward declines. That is not a defect; it makes the multi-objective trade explicit.</p><p>Turning up sampling temperature is not equivalent. Temperature spreads token probabilities and tends toward a generic high-entropy distribution. It does not directly say “make 20% of completed programs belong to this semantic mode.” Distribution matching needs an attribute measurement, a target, and a reward tied to the aggregate distribution.</p><pre>sample reward objective: maximize E[r(output)]\ndistribution objective: minimize D(p(attribute), target)\ncombined system: choose the tradeoff deliberately</pre><p>For a platform pilot, first validate the attribute classifier and measure mode coverage on held-out prompts. A mislabeled latent category can produce a beautifully matched wrong distribution.</p>",
+    "practice": "Begin at zero matching intensity and predict which mode dominates. Move to 100%. Compare expected reward, distance to target, and entropy. Explain why the target should come from a product or data requirement rather than a desire for diversity by itself.",
+    "boundary": "A linear interpolation between two hand-authored distributions with fixed per-mode rewards. It does not implement RL, GRPO, KL/JS reward derivations, token generation, latent-attribute classification, or any MaD-RL experiment. L1 distance and entropy are teaching metrics, not the paper's reported results.",
+    "sim": "<label>Distribution-matching intensity <input id=\"mix\" type=\"range\" min=\"0\" max=\"100\" step=\"10\" value=\"0\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const rewardPolicy=[.85,.10,.05],target=[.50,.30,.20],rewards=[1,.7,.4];const show=()=>{const t=+mix.value/100,p=rewardPolicy.map((x,i)=>(1-t)*x+t*target[i]),expected=p.reduce((s,x,i)=>s+x*rewards[i],0),l1=p.reduce((s,x,i)=>s+Math.abs(x-target[i]),0),entropy=-p.reduce((s,x)=>s+(x?x*Math.log2(x):0),0);world.textContent='Modes: straightforward | memory-efficient | parallel\\nCurrent distribution: '+p.map(x=>(x*100).toFixed(0)+'%').join(' | ')+'\\nTarget distribution: 50% | 30% | 20%\\nExpected scalar reward: '+expected.toFixed(3)+'\\nL1 distance to target: '+l1.toFixed(3)+'\\nOutput-mode entropy: '+entropy.toFixed(3)+' bits\\n\\nThis objective calculator is not MaD-RL.'};mix.oninput=show;show();",
+    "questions": [
+      [
+        "A per-sample optimizer always favors the slightly highest-reward mode. What population failure can follow?",
+        [
+          "Mode concentration",
+          "Guaranteed calibration",
+          "Perfect fairness"
+        ],
+        0,
+        "Maximizing individual rewards can push probability toward one mode even when the desired output population is broader."
+      ],
+      [
+        "Why is higher sampling temperature not the same as matching a 50/30/20 semantic target?",
+        [
+          "Temperature operates on token probabilities and does not directly enforce the latent output-category mix",
+          "Temperature always lowers entropy",
+          "It requires no model"
+        ],
+        0,
+        "Generic token-level spreading is not a direct constraint on aggregate semantic categories."
+      ],
+      [
+        "What must be validated before trusting a matched output distribution?",
+        [
+          "Only average reward",
+          "The attribute classifier and target definition, plus held-out behavior",
+          "The color of the chart"
+        ],
+        1,
+        "Matching measured categories is useful only when the measurement and desired distribution are valid."
+      ]
+    ],
+    "sources": [
+      [
+        "Meta AI Research: MaD-RL—Matching Distributions for Calibrating LLMs with Reinforcement Learning",
+        "https://ai.meta.com/research/publications/mad-rl-matching-distributions-for-calibrating-llms-with-reinforcement-learning/",
+        "Published 2026-09-24; research claims from authors"
+      ]
+    ]
+  }
+]
+
