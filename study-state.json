@@ -19,7 +19,7 @@
     30
   ],
   "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
-  "last_generated_day": 5,
+  "last_generated_day": 6,
   "days": [
     {
       "number": 1,
@@ -107,6 +107,26 @@
       "review_keys": [
         "Day2+3",
         "Day4+1"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs"
+      ]
+    },
+    {
+      "number": 6,
+      "folder": "Day6",
+      "validation": "Embedded models, quizzes, exports, links and Day3/Day5 reviews checked; browser executable unavailable. See Day6/VALIDATION.md.",
+      "date": "2026-09-26",
+      "generation_key": "2026-09-26",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day3+3",
+        "Day5+1"
       ],
       "lesson_slugs": [
         "data-engineering",
