@@ -1,0 +1,262 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Iceberg partition evolution: new layout, same query",
+    "tag": "Foundation · Iceberg 1.11.0",
+    "goal": "Predict how one logical time filter is planned across old and new partition specs without rewriting historical files.",
+    "concept": "<p>A partition is a physical pruning hint, not part of the business question. Apache Iceberg's hidden partitioning lets a query filter on source columns such as <code>event_time</code>; the table derives the appropriate partition filter. That separation makes the layout evolvable.</p><p>When the table changes from day to hour partitioning, existing files stay in their old daily layout and new files use the hourly layout. Iceberg keeps both partition specs in metadata and plans each layout separately. The change is a metadata operation, not an eager rewrite.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A lineage-events table writes Days 1–7 into one file per day. Query latency for a two-hour incident window is dominated by reading a whole day. On Day 8, the platform changes new writes to hourly partitioning.</p><p>The SQL remains <code>WHERE event_time BETWEEN ...</code>. For Day 6, the planner maps that predicate to the old day transform and scans one 24-hour file. For Day 10, it maps the same predicate to the new hour transform and scans two one-hour files. If a query crosses the cutover, both planning rules participate.</p><pre>ALTER TABLE lineage.events\nREPLACE PARTITION FIELD day(event_time)\nWITH hour(event_time);</pre><p>No historical rewrite means no immediate migration blast radius, but it also means old files do not magically gain hourly pruning. A deliberate rewrite or compaction can improve them later. Engine/version support, catalog coordination, file sizing, and manifest maintenance still belong in the production plan.</p>",
+    "practice": "Predict the scanned time for a two-hour query before moving the day across the cutover. Then disable evolution and explain why query text can remain stable while physical pruning changes.",
+    "boundary": "A fourteen-day table with exactly one daily file or twenty-four hourly files per day and perfect predicate pruning. It does not execute Iceberg or Spark, read manifests, model file statistics, residual filters, partition transforms beyond time, compaction, snapshot isolation, catalog support, skew, or object-store request cost.",
+    "sim": "<label>Query day <input id=\"queryDay\" type=\"range\" min=\"1\" max=\"14\" step=\"1\" value=\"6\"></label><label>Hours requested <input id=\"queryHours\" type=\"range\" min=\"1\" max=\"24\" step=\"1\" value=\"2\"></label><label><input id=\"evolve\" type=\"checkbox\" checked> New writes use hourly partitions from Day 8</label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const d=+queryDay.value,h=+queryHours.value,old=d<8||!evolve.checked,spec=old?'day(event_time)':'hour(event_time)',files=old?1:h,scanned=old?24:h;world.textContent='Logical predicate: event_time on Day '+d+' for '+h+' hour(s)\\nFile partition spec used: '+spec+'\\nFiles selected in toy table: '+files+'\\nTime represented by selected files: '+scanned+' hour(s)\\nHistorical files rewritten by spec change: 0\\n\\n'+(old&&evolve.checked?'Old layout remains valid; pruning is coarser.':old?'No evolution: all writes stay daily.':'New layout: the same source-column filter derives hourly pruning.')};[queryDay,queryHours,evolve].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "A two-hour query targets data written before the daily-to-hourly cutover. What does the toy planner scan?",
+        [
+          "Two historical hourly files created automatically",
+          "The old daily file using the old spec",
+          "No file because old specs are invalid"
+        ],
+        1,
+        "Old data remains in its original layout and is planned with the metadata for that layout."
+      ],
+      [
+        "Why can the SQL continue to filter event_time instead of naming a partition column?",
+        [
+          "Hidden partitioning derives layout-specific pruning from the source-column predicate",
+          "Every engine rewrites all data first",
+          "Partition values are ignored"
+        ],
+        0,
+        "The query states the business predicate; Iceberg translates it for each partition spec."
+      ],
+      [
+        "What is outside the metadata-only guarantee?",
+        [
+          "Keeping the prior spec metadata",
+          "Writing new files with the new spec",
+          "Improving the old files to hourly granularity without a rewrite"
+        ],
+        2,
+        "Evolution avoids an eager rewrite; changing historical physical granularity still requires rewriting data files."
+      ]
+    ],
+    "sources": [
+      [
+        "Apache Iceberg 1.11.0 documentation: partition evolution",
+        "https://iceberg.apache.org/docs/latest/evolution/#partition-evolution",
+        "Living Apache documentation for latest 1.11.0; page publication date not stated"
+      ]
+    ]
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Consistent hashing: move a slice, not the whole keyspace",
+    "tag": "Foundation · Dynamo paper",
+    "goal": "Trace key ownership on a ring and quantify why membership changes remap fewer keys than modulo sharding.",
+    "concept": "<p>Naive modulo sharding maps <code>hash(key) % nodeCount</code>. It is simple and balanced, but changing the divisor changes the answer for many keys. Adding one cache node can therefore invalidate most placement decisions at once.</p><p>Consistent hashing maps keys and nodes into a fixed circular hash space. A key belongs to the first node clockwise from its position. Adding a node changes ownership only for the arc between that node and its predecessor. Amazon's Dynamo paper used consistent hashing for incremental scale and added virtual nodes to improve balance and represent heterogeneous capacity.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A schema-registry cache has three nodes. Adding a fourth with modulo sharding changes the divisor from three to four, so keys scatter to different owners. The warm-cache event becomes a fleet-wide cold-cache event.</p><p>On a ring, A, B, and C keep their positions. D takes only keys in D's newly claimed clockwise interval. The rest retain their owner. Operationally, the mechanism converts a global reshuffle into bounded movement—but the hottest individual keys can still overload their owners.</p><pre>position = hash(key) on a fixed ring\nowner = first node clockwise from position\nadd D → only predecessor-to-D arc changes owner</pre><p>Production systems rarely stop at one point per host: virtual nodes smooth random imbalance, replicas span failure domains, and membership changes need an agreed view. Consistent hashing minimizes movement; it does not provide consensus, replication, or load fairness by itself.</p>",
+    "practice": "Start with three nodes, then add D. Compare ring and modulo remapping. Add E and explain why a low movement count can coexist with a bad hotspot.",
+    "boundary": "Sixty synthetic keys, a 64-slot ring, fixed node positions, one owner per key, and a tiny deterministic hash. It omits virtual nodes, replicas, weighted capacity, failure domains, membership consensus, concurrent changes, streaming migration, skewed access popularity, and cryptographic hash quality.",
+    "sim": "<label>Mapping strategy <select id=\"mapping\"><option value=\"ring\">Consistent-hash ring</option><option value=\"mod\">Modulo node count</option></select></label><label>Active nodes <input id=\"nodeCount\" type=\"range\" min=\"3\" max=\"5\" step=\"1\" value=\"3\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const nodes=[['A',0],['B',21],['C',42],['D',10],['E',31]],hash=i=>(i*37+13)%64;const owner=(h,n,kind)=>{if(kind==='mod')return nodes[h%n][0];return nodes.slice(0,n).sort((a,b)=>a[1]-b[1]).find(x=>x[1]>=h)?.[0]||nodes.slice(0,n).sort((a,b)=>a[1]-b[1])[0][0]};const show=()=>{const n=+nodeCount.value,k=mapping.value,base=Array.from({length:60},(_,i)=>owner(hash(i),3,k)),now=Array.from({length:60},(_,i)=>owner(hash(i),n,k)),moved=now.filter((x,i)=>x!==base[i]).length,counts=nodes.slice(0,n).map(x=>x[0]+': '+now.filter(v=>v===x[0]).length).join(' | ');world.textContent='Strategy: '+(k==='ring'?'fixed ring, first node clockwise':'hash modulo active node count')+'\\nActive: '+nodes.slice(0,n).map(x=>x[0]).join(', ')+'\\nKeys per owner: '+counts+'\\nKeys moved versus three-node baseline: '+moved+'/60\\n\\n'+(n===3?'Add a node to observe remapping.':k==='ring'?'Only newly claimed ring arcs move in this model.':'Changing the divisor remaps keys across the fleet.')};[mapping,nodeCount].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Why does adding a node disrupt modulo sharding broadly?",
+        [
+          "The divisor changes, so many hash remainders change",
+          "The hash function stops returning values",
+          "Every key becomes duplicated"
+        ],
+        0,
+        "Placement depends directly on node count, so changing it changes many assignments."
+      ],
+      [
+        "On a fixed consistent-hash ring, which keys move to a new node?",
+        [
+          "Every key",
+          "Keys in the arc newly claimed by that node",
+          "Only keys with empty values"
+        ],
+        1,
+        "The new node interrupts one ownership interval; other clockwise successors remain the same."
+      ],
+      [
+        "What problem do virtual nodes help with but do not eliminate?",
+        [
+          "Balancing ownership and heterogeneous capacity",
+          "Consensus on membership",
+          "Semantic hot keys"
+        ],
+        0,
+        "Multiple tokens smooth partition ownership; they do not make popular keys cold or establish agreement."
+      ]
+    ],
+    "sources": [
+      [
+        "Dynamo: Amazon's Highly Available Key-value Store",
+        "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf",
+        "SOSP; published 2007-10-14"
+      ]
+    ]
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Dependency isolation: spend concurrency by failure domain",
+    "tag": "Current AWS guidance · July 7, 2026",
+    "goal": "Turn a slow dependency into a contained feature failure instead of a process-wide concurrency collapse.",
+    "concept": "<p>Concurrency is inventory. By Little's Law, the average in-flight work is arrival rate times latency. A downstream dependency that becomes ten times slower can consume roughly ten times the callers, sockets, or task slots even when request rate is unchanged.</p><p>If unrelated features share one pool, the slow path can starve healthy paths. Dependency isolation assigns separate concurrency budgets to meaningful failure domains—dependency, workload class, tenant tier, or operation. Exhaustion then becomes a bounded local failure with fast rejection rather than a process-wide queue.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A governance API has ten outbound slots. Critical policy reads arrive at 4 requests/second and take 200 ms, needing about 0.8 concurrent calls. Bulk lineage enrichment arrives at 6 requests/second. At 200 ms it needs 1.2 slots; at 2 seconds it needs 12.</p><p>With a shared pool, the slow enrichment path can occupy all ten slots and make policy reads wait. With four slots reserved for policy reads and six for enrichment, bulk throughput degrades and rejects quickly while critical reads keep enough inventory.</p><pre>inFlight demand ≈ arrivalRate × latency\nshared pool: unrelated modes compete\nisolated pools: each mode has a bounded blast radius</pre><p>The Distinguished Engineer decision is not “add bulkheads everywhere.” Each pool costs utilization and tuning complexity. Choose boundaries from correlated latency modes, criticality, and telemetry; define admission behavior; and revisit allocations using observed saturation, rejection, and downstream latency.</p>",
+    "practice": "Raise bulk dependency latency from 200 ms to 2 seconds. Predict critical throughput with and without isolation. Then explain what metric would tell you a pool is protecting the wrong boundary.",
+    "boundary": "A steady-state Little's Law calculator with two workloads, fixed arrival rates, fixed service time for critical traffic, instantaneous admission, and no queue. It omits distributions, retries, timeouts, connection setup, CPU, priority scheduling, adaptive limits, fairness, autoscaling, burstiness, and multi-hop feedback.",
+    "sim": "<label>Bulk dependency latency (ms) <input id=\"bulkLatency\" type=\"range\" min=\"200\" max=\"2000\" step=\"200\" value=\"200\"></label><label><input id=\"isolated\" type=\"checkbox\"> Isolate 4 critical slots and 6 bulk slots</label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const criticalRate=4,criticalLatency=.2,bulkRate=6,bulkSec=+bulkLatency.value/1000,needCritical=criticalRate*criticalLatency,needBulk=bulkRate*bulkSec;let criticalServed,bulkServed;if(isolated.checked){criticalServed=Math.min(criticalRate,4/criticalLatency);bulkServed=Math.min(bulkRate,6/bulkSec)}else{const demand=needCritical+needBulk,share=Math.min(1,10/demand);criticalServed=criticalRate*share;bulkServed=bulkRate*share}world.textContent='Estimated in-flight demand\\n  critical: '+needCritical.toFixed(1)+' slots\\n  bulk: '+needBulk.toFixed(1)+' slots\\nPool design: '+(isolated.checked?'critical 4 | bulk 6':'shared 10')+'\\nEstimated admitted throughput\\n  critical: '+criticalServed.toFixed(1)+'/s of 4.0/s\\n  bulk: '+bulkServed.toFixed(1)+'/s of 6.0/s\\nOutcome: '+(criticalServed>=4?'critical path protected in this model':'critical path loses capacity to the slow mode')};[bulkLatency,isolated].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "A dependency's latency rises tenfold while arrival rate stays fixed. What happens to its concurrency demand?",
+        [
+          "It falls tenfold",
+          "It stays constant",
+          "It rises roughly tenfold"
+        ],
+        2,
+        "Little's Law links in-flight work to rate times time."
+      ],
+      [
+        "Why give critical policy reads a separate pool from bulk enrichment?",
+        [
+          "To contain a correlated slow mode to its own feature budget",
+          "To make all capacity perfectly utilized",
+          "To remove the need for timeouts"
+        ],
+        0,
+        "The isolation boundary preserves inventory for the healthy critical path."
+      ],
+      [
+        "What is the main tradeoff of fixed isolated pools?",
+        [
+          "They guarantee zero failures",
+          "Reserved capacity can sit idle while another pool rejects work",
+          "They merge failure domains"
+        ],
+        1,
+        "Isolation buys containment at the cost of possible stranded capacity and added tuning."
+      ]
+    ],
+    "sources": [
+      [
+        "AWS Builders' Library: Using dependency isolation to contain concurrency overload",
+        "https://builder.aws.com/content/3EuxuD6bWtQ6gEp9FaKQfd3Z2AM/using-dependency-isolation-to-contain-concurrency-overload",
+        "Updated 2026-07-07"
+      ]
+    ]
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Context compaction: preserve decisions, discard exhaust",
+    "tag": "Harness engineering · established 2025 guidance",
+    "goal": "Design a long-running agent's compaction policy around recoverable decisions, open work, and evidence pointers rather than transcript length.",
+    "concept": "<p>An agent context window is working memory, not a durable event store. Keeping every tool result feels safe, but repeated logs, diffs, and search pages consume attention that the next decision needs. Bigger context does not remove relevance dilution.</p><p>Compaction summarizes an aging trace into a smaller continuation context. The selection policy is the engineering work: preserve goal and constraints, architectural decisions with rationale, unresolved risks, progress and next actions, plus identifiers that can re-fetch evidence. Raw tool exhaust is usually cheaper to retrieve again than to carry forever.</p>",
+    "example": "<p><strong>Original teaching case:</strong> A migration agent has a 12,000-token continuation budget. Its trace contains 8,000 tokens of repeated Spark plan output, 3,000 recent conversational tokens, 2,000 tokens of decisions, 1,500 open-task tokens, and 1,000 tokens of file/commit pointers.</p><p>A transcript-tail policy keeps the newest plan output and conversation but can evict the decision that partition changes must remain backward compatible. A structured policy emits a compact handoff: objective, invariants, decisions and reasons, unresolved checks, current artifacts, and re-fetchable evidence pointers.</p><pre>durable log: complete history and artifacts\ncompacted context: smallest high-signal continuation state\npointer: where evidence can be fetched again</pre><p>Summaries are lossy. Keep the underlying trace durable, version the compaction prompt, run probes for required facts after compaction, and evaluate on real long-horizon failures. Never treat a fluent summary as proof that critical evidence survived.</p>",
+    "practice": "Compare transcript-tail and structured policies at 8,000 tokens, then raise the budget. Identify which missing item creates a silent correctness risk rather than an obvious failure.",
+    "boundary": "A deterministic greedy packing model with hand-authored token costs and importance order. It does not call an LLM, measure attention, summarize text, model overlapping information, validate factual fidelity, or reproduce Anthropic's implementation or performance.",
+    "sim": "<label>Continuation budget (tokens) <input id=\"contextBudget\" type=\"range\" min=\"6000\" max=\"16000\" step=\"1000\" value=\"8000\"></label><label>Compaction policy <select id=\"contextPolicy\"><option value=\"tail\">Keep newest transcript segments</option><option value=\"structured\">Structured high-signal handoff</option></select></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const items={goal:1000,decisions:2000,openTasks:1500,pointers:1000,recentConversation:3000,rawToolOutput:8000};const orders={tail:['rawToolOutput','recentConversation','openTasks','decisions','pointers','goal'],structured:['goal','decisions','openTasks','pointers','recentConversation','rawToolOutput']};const show=()=>{let left=+contextBudget.value,kept=[];for(const k of orders[contextPolicy.value])if(items[k]<=left){kept.push(k);left-=items[k]}const required=['goal','decisions','openTasks','pointers'],missing=required.filter(x=>!kept.includes(x));world.textContent='Budget: '+contextBudget.value+' tokens\\nPolicy: '+contextPolicy.options[contextPolicy.selectedIndex].text+'\\nKept: '+(kept.join(', ')||'(none)')+'\\nUnused budget: '+left+'\\nCritical continuation fields missing: '+(missing.join(', ')||'none in this toy policy')+'\\n\\nDurable source trace remains outside this working context.'};[contextBudget,contextPolicy].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Which item is usually safest to evict from long-running working context?",
+        [
+          "The objective",
+          "Repeated raw tool output that can be re-fetched",
+          "An unresolved production risk"
+        ],
+        1,
+        "Re-fetchable exhaust is lower-value than the state needed to continue correctly."
+      ],
+      [
+        "Why keep evidence pointers in a compact handoff?",
+        [
+          "They let the agent recover detail without carrying every raw token",
+          "They prove the summary is correct",
+          "They make durable storage unnecessary"
+        ],
+        0,
+        "Pointers support just-in-time retrieval while preserving a tight attention budget."
+      ],
+      [
+        "What is the key boundary of compaction?",
+        [
+          "A summary can lose a fact whose importance appears later",
+          "It always expands the context",
+          "It guarantees deterministic model behavior"
+        ],
+        0,
+        "Compaction is lossy, so durable traces and post-compaction probes remain necessary."
+      ]
+    ],
+    "sources": [
+      [
+        "Anthropic Engineering: Effective context engineering for AI agents",
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+        "Published 2025-09-29"
+      ]
+    ]
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Repeat-After-Me: visual injection reaches the tool boundary",
+    "tag": "Research spotlight · September 7, 2026",
+    "goal": "Trace a multimodal prompt-injection path from untrusted pixels to a privileged tool and identify where the harness can break it.",
+    "concept": "<p>Multimodal agents turn images into context and model outputs into actions. That creates a transitive trust mistake: an image supplied as data can influence a model that is also authorized to emit exact tool calls. A visually embedded instruction is dangerous only when the rest of the path converts it into an accepted, privileged action.</p><p>Meta's September 7, 2026 paper introduces Repeat-After-Me, a black-box adaptive visual prompt-injection attack. The authors report that it can elicit long, format-compliant strings such as parseable native tool calls and demonstrate attacks across open-weight and commercial vision-language models. Those are research-author claims, not universal production rates.</p>",
+    "example": "<p><strong>Original defensive case:</strong> A support agent reads a customer screenshot. The screenshot influences the model to propose a file-write tool call unrelated to the user's request. If the harness treats model output as authorization and exposes a broad write tool, the pixels have crossed from untrusted data to durable control.</p><p>Break the chain at several independent gates: mark external content as untrusted, bind actions to the user's explicit goal, expose only task-scoped capabilities, validate structured arguments, require approval for sensitive writes, protect policy/config files, and run the tool in a sandbox with credential and network limits.</p><pre>untrusted image → model interpretation → parseable tool call\n→ authorization decision → side effect</pre><p>A model-side refusal helps but is not a security boundary. Conversely, a single keyword filter is not a complete defense. The harness must assume the model can be influenced and enforce authority outside the model.</p>",
+    "practice": "Run the path with every gate open. Then restrict capability and protect policy files. Explain which control prevents the action even if the model still emits a perfectly formatted call.",
+    "boundary": "A defensive Boolean attack-path tracer. It does not generate an injected image, optimize an attack, call a model or tool, estimate attack success, reproduce the paper's evaluation, or prove any defense sufficient. Gate labels are original teaching abstractions.",
+    "sim": "<label><input id=\"visualFollow\" type=\"checkbox\" checked> Model follows instruction embedded in untrusted pixels</label><label><input id=\"parseableCall\" type=\"checkbox\" checked> Output is a parseable tool call</label><label>Granted capability <select id=\"capability\"><option value=\"write\">Broad file write</option><option value=\"read\">Read-only</option><option value=\"none\">No tool</option></select></label><label><input id=\"policyMutable\" type=\"checkbox\" checked> Agent can modify policy/config files</label><button id=\"trace\">Trace request</button><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{world.textContent='Set the trust and capability gates, then trace the request.'};trace.onclick=()=>{const steps=['1. Untrusted image reached the model'];if(!visualFollow.checked){steps.push('2. Model did not follow the embedded instruction — path stops');world.textContent=steps.join('\\n');return}steps.push('2. Model follows embedded instruction');if(!parseableCall.checked){steps.push('3. Tool output is invalid — parser rejects it');world.textContent=steps.join('\\n');return}steps.push('3. Tool call parses');if(capability.value!=='write'){steps.push('4. Capability boundary denies file write — path stops');world.textContent=steps.join('\\n');return}steps.push('4. Broad file-write capability authorizes action');if(!policyMutable.checked){steps.push('5. Protected policy path rejects mutation — path stops');world.textContent=steps.join('\\n');return}steps.push('5. Policy/config mutation succeeds in this toy path','RESULT: untrusted pixels reached a durable control surface');world.textContent=steps.join('\\n')};[visualFollow,parseableCall,capability,policyMutable].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Why is producing a parseable native tool call an important attack milestone?",
+        [
+          "The harness can convert model text into an executable action",
+          "It makes the image higher resolution",
+          "It proves the user authorized the action"
+        ],
+        0,
+        "Exact format compliance can bridge model influence into a tool invocation; authorization is still separate."
+      ],
+      [
+        "Which control remains effective even if the model follows the injected instruction?",
+        [
+          "A task-scoped capability that cannot perform the requested write",
+          "A larger context window",
+          "A more fluent explanation"
+        ],
+        0,
+        "Authority enforced outside the model can deny a valid-looking but unauthorized call."
+      ],
+      [
+        "What is safe to conclude from the paper's reported attack success rates?",
+        [
+          "Every deployment has the same rate",
+          "The reported evaluation demonstrates a serious attack class, but each harness still needs its own threat model and tests",
+          "Visual input must always be disabled"
+        ],
+        1,
+        "Research results establish evidence, not a universal probability for every model, prompt, tool, and defense."
+      ]
+    ],
+    "sources": [
+      [
+        "Meta AI Research: Repeat-After-Me—Black-Box Adaptive Visual Prompt Injection",
+        "https://ai.meta.com/research/publications/repeat-after-me-black-box-adaptive-visual-prompt-injection/",
+        "Published 2026-09-07; research claims from authors"
+      ]
+    ]
+  }
+]
