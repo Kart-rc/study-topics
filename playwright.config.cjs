@@ -1,0 +1,42 @@
+const { defineConfig } = require('@playwright/test');
+module.exports = defineConfig({
+  testDir: './tests/browser',
+  testMatch: '**/*.spec.cjs',
+  fullyParallel: false,
+  workers: 1,
+  retries: 0,
+  maxFailures: 3,
+  forbidOnly: !!process.env.CI,
+  timeout: 30_000,
+  globalTimeout: 5 * 60_000,
+  expect: { timeout: 5_000 },
+  reporter: [['list'], ['html', { open: 'never' }]],
+  use: {
+    browserName: 'chromium',
+    baseURL: 'http://127.0.0.1:4173',
+    locale: 'en-US',
+    timezoneId: 'UTC',
+    acceptDownloads: true,
+    serviceWorkers: 'block',
+    actionTimeout: 5_000,
+    navigationTimeout: 10_000,
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: 'off',
+  },
+  projects: [
+    { name: 'chromium-desktop', use: { viewport: { width: 1280, height: 800 } } },
+    { name: 'chromium-mobile', use: {
+      viewport: { width: 390, height: 844 }, deviceScaleFactor: 1,
+      isMobile: true, hasTouch: true,
+    } },
+  ],
+  webServer: {
+    command: 'python3 -m http.server 4173 --bind 127.0.0.1',
+    url: 'http://127.0.0.1:4173/index.html',
+    reuseExistingServer: false,
+    timeout: 10_000,
+    stdout: 'ignore',
+    stderr: 'pipe',
+  },
+});

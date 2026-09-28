@@ -22,6 +22,54 @@ Each lesson has three scored prediction/rationale/boundary questions and two wri
 
 This is a public repository. Keep personal assessment answers and confidential work examples out of commits; all bundled examples use synthetic data.
 
+## Browser validation
+
+The [Browser smoke workflow](.github/workflows/browser-smoke.yml) runs on pull
+requests, pushes to `main`, and manual dispatch. It selects the highest numeric
+`DayN` directory, checks that its five lessons are complete, and runs its existing
+`verify.cjs` when present. A partial newest bundle fails instead of silently
+testing an older day.
+
+Playwright then opens every HTML page in that bundle and tests root-to-day
+navigation in headless Chromium at desktop (1280×800) and mobile (390×844)
+viewports. It checks JavaScript/console errors, failed local resources, local
+links and fragments, horizontal overflow, disclosures, model controls, quiz
+gating and scoring, persistence after reload, and real JSON downloads including
+attempt history. Day7 also has explicit browser assertions for its model
+boundaries; future bundles retain generic interaction tests and their own
+`verify.cjs` checks. New model-specific browser assertions belong in
+`tests/browser/smoke.spec.cjs`, not in lesson content.
+
+Run locally with Node.js 22+ and Python 3:
+
+```sh
+npm ci --ignore-scripts
+npx playwright install --with-deps chromium
+npm test
+```
+
+The runner starts its own loopback HTTP server on port 4173. Close other servers
+on that port first. To run only one viewport:
+`npm run test:browser -- --project=chromium-mobile`.
+
+The job is capped at 12 minutes, the browser suite at five minutes, and each test
+at 30 seconds, with one worker, no retries, and a three-failure cutoff. Discovery
+allows at most 12 HTML pages in the newest bundle. Each page checks at most 200
+distinct local links; old linked targets are checked but not recursively crawled.
+External source links are not fetched. Unexpected external page requests fail.
+
+Only hard-coded synthetic responses are entered into fresh, disposable browser
+contexts. No personal browser profile, answer export, saved storage state, or
+secret is loaded. Downloads are parsed and deleted; answer files are not uploaded.
+Reports, viewport screenshots, and failure traces are retained for seven days in
+Actions (and ignored by git locally). They contain only synthetic test activity.
+
+This is a functional/layout smoke gate, not pixel-perfect visual regression,
+accessibility certification, real-device coverage, or a Safari/Firefox test. It
+uses HTTP; browser-specific `file://` persistence is not established. See the
+workflow run for current evidence. Historical `DayN/VALIDATION.md` reports describe
+what was observed when written and are not rewritten by CI.
+
 ## Files
 
 - `DayN/index.html`: daily hub.

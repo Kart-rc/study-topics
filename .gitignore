@@ -1,0 +1,8 @@
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+# Learner exports and browser profiles must remain private.
+*-answers.json
+storage-state*.json
+playwright/.auth/
