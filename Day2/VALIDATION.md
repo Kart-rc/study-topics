@@ -28,3 +28,7 @@ Run `node Day2/verify.cjs` from the repository root to repeat the embedded-scrip
 - Real browser launch failed because the Playwright browser executable is absent. Layout, mobile rendering, keyboard behavior, actual browser storage permissions, and browser download behavior were not verified. Simulated-DOM checks are not a substitute for browser QA.
 - No real Spark job, queue service, production canary, LLM evaluation, or learned retriever was run. The interactions execute the disclosed educational models only.
 - Static examples and checks do not establish production safety or learner mastery.
+
+## Plain-language and execution-walkthrough revision
+
+This day now has five executed code examples with recorded state replays and highlighted statements. Core explanations were simplified for Days 1–9; original technical detail is optional. Topic identities, scored quizzes, sources, original lab behavior, and study history were retained. Python/Java execution, replay controls, quiz/save/restore/export checks, and local links passed. Real-browser layout and native behavior remain unverified. See [TEACHING_UPDATE.md](../TEACHING_UPDATE.md) for scope, commands, and exact verification limits.

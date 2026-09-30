@@ -2,7 +2,7 @@
 
 Technology breakthroughs · Day3 · 15 minutes
 
-Distinguish multivariate zero-shot forecasting from a univariate baseline and design a fair platform pilot without treating a teaching model as TimesFM.
+A volume forecast based only on yesterday’s traffic misses tomorrow’s planned backfill.
 
 ## Recall (2 minutes)
 
@@ -10,21 +10,60 @@ Distinguish multivariate zero-shot forecasting from a univariate baseline and de
 
 ## Understand (4 minutes)
 
-Google Research introduced TimesFM-3 as a zero-shot foundation model for univariate, multivariate, and covariate-informed forecasting in a single forward pass. The August 31, 2026 write-up describes an alternating attention architecture, non-autoregressive horizon decoding, and quantile forecasts.
+A volume forecast based only on yesterday’s traffic misses tomorrow’s planned backfill. Some future information is available before the future arrives.
 
-The new capability matters when related series and known future signals carry information that a target’s history alone cannot. Google reports leading or competitive results across its selected benchmark groups against named baselines. Those are research claims from the model team, not evidence for your workload. The post said BigQuery integration was coming “in the coming weeks”; as of the source date, that was a future plan, not a generally available feature claim.
-
-
-
-Original teaching case: A streaming platform’s last seven daily ingestion volumes hover near 100 units. Two future days have planned backfills. A history-only baseline repeats the historical mean, so it forecasts about 100 each day. A covariate-aware toy rule adds 40 on scheduled backfill days, producing a seven-day total near 780 rather than 700.
-
-That does not prove the covariate helps. If schedules are canceled or the relationship changes, the extra signal can make the forecast worse. Evaluate it against a seasonal naive baseline on rolling historical cutoffs, using only covariates that would actually have been known at each cutoff.
-
-TimesFM-3 separates target history, past-only covariates, and covariates known into the forecast horizon. For a platform pilot, examples might be ingestion volume as target, observed lag as past-only, and a committed backfill calendar as past-and-future. Prevent leakage: “eventually corrected actual volume” is not a future-known input.
+A covariate is an extra input that may help explain the value being forecast. TimesFM-3 research describes using related series and such inputs. A future-known input must really have been available when the forecast was made; using later measurements would leak the answer.
 
 
 
-## Explore (5 minutes)
+Our synthetic baseline predicts 100 units on each of seven days. Two known backfill days add 40 each, taking the total from 700 to 780. This is a teaching rule, not a TimesFM implementation.
+
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+baseline = [100] * 7
+planned_backfill = [False, True, False, False, True, False, False]
+forecast = [value + (40 if planned else 0) for value, planned in zip(baseline, planned_backfill)]
+baseline_total = sum(baseline)
+forecast_total = sum(forecast)
+```
+
+1. History-only prediction repeats the same value.
+
+   Changed values: `{"baseline": [100, 100, 100, 100, 100, 100, 100]}`
+
+2. The schedule is known at the forecast cutoff.
+
+   Changed values: `{"planned_backfill": [false, true, false, false, true, false, false]}`
+
+3. Add the synthetic backfill effect only on scheduled days.
+
+   Changed values: `{"forecast": [100, 140, 100, 100, 140, 100, 100]}`
+
+4. The original weekly total is 700.
+
+   Changed values: `{"baseline_total": 700}`
+
+5. The adjusted weekly total is 780.
+
+   Changed values: `{"forecast_total": 780}`
+
+[Full runnable example](examples/technology-breakthroughs.py).
+
+Limits: The 40-unit effect is invented for teaching, not learned or reported performance. Canceled schedules or changed relationships can make the extra input harmful. Test with historical cutoffs and no future leakage.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>Google Research introduced TimesFM-3 as a zero-shot foundation model for univariate, multivariate, and covariate-informed forecasting in a single forward pass. The August 31, 2026 write-up describes an alternating attention architecture, non-autoregressive horizon decoding, and quantile forecasts.</p><p>The new capability matters when related series and known future signals carry information that a target’s history alone cannot. Google reports leading or competitive results across its selected benchmark groups against named baselines. Those are research claims from the model team, not evidence for your workload. The post said BigQuery integration was coming “in the coming weeks”; as of the source date, that was a future plan, not a generally available feature claim.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A streaming platform’s last seven daily ingestion volumes hover near 100 units. Two future days have planned backfills. A history-only baseline repeats the historical mean, so it forecasts about 100 each day. A covariate-aware toy rule adds 40 on scheduled backfill days, producing a seven-day total near 780 rather than 700.</p><p>That does not prove the covariate helps. If schedules are canceled or the relationship changes, the extra signal can make the forecast worse. Evaluate it against a seasonal naive baseline on rolling historical cutoffs, using only covariates that would actually have been known at each cutoff.</p><p>TimesFM-3 separates target history, past-only covariates, and covariates known into the forecast horizon. For a platform pilot, examples might be ingestion volume as target, observed lag as past-only, and a committed backfill calendar as past-and-future. Prevent leakage: “eventually corrected actual volume” is not a future-known input.</p>
+
+</details>
+
+## Explore (remaining exploration time)
 
 Predict the seven-day total with the schedule ignored, then enable known-future covariates. Change the planned effect. Explain how you would backtest a schedule field that is often canceled after the forecast is made.
 

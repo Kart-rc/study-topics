@@ -2,7 +2,7 @@
 
 GenAI engineering · Day5 · 15 minutes
 
-Design a long-running agent's compaction policy around recoverable decisions, open work, and evidence pointers rather than transcript length.
+A long agent transcript contains thousands of repeated log lines.
 
 ## Recall (2 minutes)
 
@@ -10,25 +10,62 @@ Design a long-running agent's compaction policy around recoverable decisions, op
 
 ## Understand (4 minutes)
 
-An agent context window is working memory, not a durable event store. Keeping every tool result feels safe, but repeated logs, diffs, and search pages consume attention that the next decision needs. Bigger context does not remove relevance dilution.
+A long agent transcript contains thousands of repeated log lines. Keeping only the newest text can remove an important earlier decision.
 
-Compaction summarizes an aging trace into a smaller continuation context. The selection policy is the engineering work: preserve goal and constraints, architectural decisions with rationale, unresolved risks, progress and next actions, plus identifiers that can re-fetch evidence. Raw tool exhaust is usually cheaper to retrieve again than to carry forever.
+Context compaction replaces bulky conversation history with a smaller continuation record. Keep the goal, rules, decisions, open checks, and evidence locations. Keep the full evidence separately so a short summary does not become the only source of truth.
 
 
 
-Original teaching case: A migration agent has a 12,000-token continuation budget. Its trace contains 8,000 tokens of repeated Spark plan output, 3,000 recent conversational tokens, 2,000 tokens of decisions, 1,500 open-task tokens, and 1,000 tokens of file/commit pointers.
+The important rule is “preserve old partition readers.” The toy handoff retains that rule and a pointer to the full trace while dropping repeated plan output. A simple probe then checks that the rule survived.
 
-A transcript-tail policy keeps the newest plan output and conversation but can evict the decision that partition changes must remain backward compatible. A structured policy emits a compact handoff: objective, invariants, decisions and reasons, unresolved checks, current artifacts, and re-fetchable evidence pointers.
 
-durable log: complete history and artifacts
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+record = {"rule": "preserve old partition readers", "open_check": "replay old data", "log_pointer": "trace-42", "noise": "repeated plan output"}
+handoff = {key: record[key] for key in ["rule", "open_check", "log_pointer"]}
+record = None
+rule_survives = handoff["rule"] == "preserve old partition readers"
+next_step = handoff["open_check"]
+```
+
+1. The original record mixes essential facts and disposable repetition.
+
+   Changed values: `{"record": {"rule": "preserve old partition readers", "open_check": "replay old data", "log_pointer": "trace-42", "noise": "repeated plan output"}}`
+
+2. Select the continuation facts deliberately.
+
+   Changed values: `{"handoff": {"rule": "preserve old partition readers", "open_check": "replay old data", "log_pointer": "trace-42"}}`
+
+3. The active context no longer holds the original record.
+
+   Changed values: `{"record": null}`
+
+4. Probe a required fact after compaction.
+
+   Changed values: `{"rule_survives": true}`
+
+5. The next action remains explicit.
+
+   Changed values: `{"next_step": "replay old data"}`
+
+[Full runnable example](examples/genai-engineering.py).
+
+Limits: This exact dictionary selection is not an LLM summarizer. Real summaries can omit or distort facts; keep durable evidence and evaluate required-fact retention.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>An agent context window is working memory, not a durable event store. Keeping every tool result feels safe, but repeated logs, diffs, and search pages consume attention that the next decision needs. Bigger context does not remove relevance dilution.</p><p>Compaction summarizes an aging trace into a smaller continuation context. The selection policy is the engineering work: preserve goal and constraints, architectural decisions with rationale, unresolved risks, progress and next actions, plus identifiers that can re-fetch evidence. Raw tool exhaust is usually cheaper to retrieve again than to carry forever.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A migration agent has a 12,000-token continuation budget. Its trace contains 8,000 tokens of repeated Spark plan output, 3,000 recent conversational tokens, 2,000 tokens of decisions, 1,500 open-task tokens, and 1,000 tokens of file/commit pointers.</p><p>A transcript-tail policy keeps the newest plan output and conversation but can evict the decision that partition changes must remain backward compatible. A structured policy emits a compact handoff: objective, invariants, decisions and reasons, unresolved checks, current artifacts, and re-fetchable evidence pointers.</p><pre>durable log: complete history and artifacts
 compacted context: smallest high-signal continuation state
-pointer: where evidence can be fetched again
+pointer: where evidence can be fetched again</pre><p>Summaries are lossy. Keep the underlying trace durable, version the compaction prompt, run probes for required facts after compaction, and evaluate on real long-horizon failures. Never treat a fluent summary as proof that critical evidence survived.</p>
 
-Summaries are lossy. Keep the underlying trace durable, version the compaction prompt, run probes for required facts after compaction, and evaluate on real long-horizon failures. Never treat a fluent summary as proof that critical evidence survived.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Compare transcript-tail and structured policies at 8,000 tokens, then raise the budget. Identify which missing item creates a silent correctness risk rather than an obvious failure.
 

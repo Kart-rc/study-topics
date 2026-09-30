@@ -28,3 +28,7 @@ A dependency-free structural pass also checked all six HTML files for unique IDs
 ## Verification limit
 
 No Chromium, Chrome, or Firefox executable was available. Responsive CSS and viewport metadata were inspected and local links were resolved, but visual mobile layout, native browser storage, accessibility behavior, and actual download UI were not tested in a real browser. The simulated DOM validates JavaScript behavior, not rendering.
+
+## Plain-language and execution-walkthrough revision
+
+This day now has five executed code examples with recorded state replays and highlighted statements. Core explanations were simplified for Days 1–9; original technical detail is optional. Topic identities, scored quizzes, sources, original lab behavior, and study history were retained. Python/Java execution, replay controls, quiz/save/restore/export checks, and local links passed. Real-browser layout and native behavior remain unverified. See [TEACHING_UPDATE.md](../TEACHING_UPDATE.md) for scope, commands, and exact verification limits.

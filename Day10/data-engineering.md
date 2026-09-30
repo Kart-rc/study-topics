@@ -30,7 +30,66 @@ Try to predict: after that crash, does a pending outbox row mean “never sent�
 
 
 
-## Explore (5 minutes)
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+import sqlite3
+db = sqlite3.connect(":memory:"); db.executescript("CREATE TABLE orders(id TEXT PRIMARY KEY); CREATE TABLE outbox(event_id TEXT PRIMARY KEY, status TEXT);")
+with db:
+    db.execute("INSERT INTO orders VALUES (?)", ("A100",))
+    db.execute("INSERT INTO outbox VALUES (?, ?)", ("E7", "pending"))
+order_rows = db.execute("SELECT * FROM orders").fetchall(); tickets = db.execute("SELECT * FROM outbox").fetchall()
+kafka = ["E7"]; relay_ack = True
+relay_ack = False
+kafka.append("E7")
+db.execute("UPDATE outbox SET status = ? WHERE event_id = ?", ("sent", "E7")); db.commit()
+tickets = db.execute("SELECT * FROM outbox").fetchall(); distinct_events = list(dict.fromkeys(kafka))
+```
+
+1. Use Python’s built-in SQLite library for a real local transaction.
+
+   Changed values: `{}`
+
+2. Create the two tables in an in-memory demonstration database.
+
+   Changed values: `{}`
+
+3. The transaction saves the order and pending ticket together.
+
+   Changed values: `{}`
+
+4. Read the committed rows. Both exist.
+
+   Changed values: `{"order_rows": [["A100"]], "tickets": [["E7", "pending"]]}`
+
+5. A list represents the first successful publish.
+
+   Changed values: `{"kafka": ["E7"], "relay_ack": true}`
+
+6. A relay restart loses its temporary acknowledgement; the ticket remains pending.
+
+   Changed values: `{"relay_ack": false}`
+
+7. Retrying the pending ticket creates a second copy.
+
+   Changed values: `{"kafka": ["E7", "E7"]}`
+
+8. After the second send, record the successful delivery.
+
+   Changed values: `{}`
+
+9. The outbox is sent; stable E7 identity reveals one logical event in two copies.
+
+   Changed values: `{"tickets": [["E7", "sent"]], "distinct_events": ["E7"]}`
+
+[Full runnable example](examples/data-engineering.py).
+
+Limits: The SQLite transaction actually executes. Kafka is a Python list, and dict.fromkeys only illustrates stable-ID recognition; neither is a production relay or transactional consumer. The database is in memory, so this models a relay restart, not loss of the database process.
+
+## Explore (remaining exploration time)
 
 Press Save order, Send event, Crash, then Send event again. Read the three boxes after every click. Deliver the messages first with duplicate protection on, then repeat with it off.
 

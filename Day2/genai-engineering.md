@@ -2,7 +2,7 @@
 
 GenAI engineering · Day2 · 15 minutes
 
-Write an agent success predicate that checks the requested result and authorization, then expose false positives in a naive grader.
+An agent says “quarantine completed.” That sentence does not prove the right dataset changed, that only one marker exists, or that approval was recorded..
 
 ## Recall (2 minutes)
 
@@ -10,31 +10,62 @@ Write an agent success predicate that checks the requested result and authorizat
 
 ## Understand (4 minutes)
 
-An agent can produce a persuasive completion message while leaving the environment wrong. An evaluation needs a task, one or more trials, and grading logic. Checking final state is different from checking the transcript. Deterministic assertions suit exact outcomes; calibrated model or human grading may be needed for more subjective quality. Anthropic's evaluation guide.
+An agent says “quarantine completed.” That sentence does not prove the right dataset changed, that only one marker exists, or that approval was recorded.
 
-The design goal is not to force one preferred sequence of tool calls. It is to accept valid ways of satisfying the task while rejecting incorrect outcomes and policy violations. Explicitly required approvals remain part of correctness, even when the requested mutation itself succeeds.
+A grader checks the result against the task’s rules. Exact state needs exact checks. Explanation quality can be assessed separately, but a convincing explanation should not compensate for an unauthorized change.
 
 
 
-Original teaching case: An incident assistant may quarantine one synthetic dataset only after approval. The task requires exactly one quarantine marker on dataset demo-orders, no changes to another dataset, and an approval record. The assistant's sentence “quarantine completed” establishes none of these facts.
+All four fixtures below claim success. Only the second has approval, exactly one marker, and only demo-orders modified. The real result is one pass, not four.
 
-Four local fixtures all contain a success claim. One has no marker. One has the correct marker and approval. One modifies two datasets. One makes the right mutation without approval. A claim-only grader reports 4/4. The actual task contract passes only the second fixture, or 1/4. That difference is a grader defect, not a model improvement.
 
-A compact illustrative predicate is:
 
-pass = approvalRecorded
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+fixtures = [(False, ["demo-orders"], 0), (True, ["demo-orders"], 1), (True, ["demo-orders", "other"], 1), (False, ["demo-orders"], 1)]
+claims = [True, True, True, True]
+claim_score = sum(claims)
+verdicts = [approved and changed == ["demo-orders"] and count == 1 for approved, changed, count in fixtures]
+actual_score = sum(verdicts)
+```
+
+1. Each fixture stores approval, changed datasets, and marker count.
+
+   Changed values: `{"fixtures": [[false, ["demo-orders"], 0], [true, ["demo-orders"], 1], [true, ["demo-orders", "other"], 1], [false, ["demo-orders"], 1]]}`
+
+2. Every assistant message claims success.
+
+   Changed values: `{"claims": [true, true, true, true]}`
+
+3. A message-only grader awards four passes.
+
+   Changed values: `{"claim_score": 4}`
+
+4. Check the required state and permission together.
+
+   Changed values: `{"verdicts": [false, true, false, false]}`
+
+5. Only the valid fixture passes.
+
+   Changed values: `{"actual_score": 1}`
+
+[Full runnable example](examples/genai-engineering.py).
+
+Limits: The fixture checks are exact for this small contract only. Production grading also needs clean environments, fresh evidence, negative cases, and separately defined safe-refusal behavior.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>An agent can produce a persuasive completion message while leaving the environment wrong. An evaluation needs a task, one or more trials, and grading logic. Checking final state is different from checking the transcript. Deterministic assertions suit exact outcomes; calibrated model or human grading may be needed for more subjective quality. <a href="https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents">Anthropic's evaluation guide</a>.</p><p>The design goal is not to force one preferred sequence of tool calls. It is to accept valid ways of satisfying the task while rejecting incorrect outcomes and policy violations. Explicitly required approvals remain part of correctness, even when the requested mutation itself succeeds.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> An incident assistant may quarantine one synthetic dataset only after approval. The task requires exactly one quarantine marker on dataset demo-orders, no changes to another dataset, and an approval record. The assistant's sentence “quarantine completed” establishes none of these facts.</p><p>Four local fixtures all contain a success claim. One has no marker. One has the correct marker and approval. One modifies two datasets. One makes the right mutation without approval. A claim-only grader reports 4/4. The actual task contract passes only the second fixture, or 1/4. That difference is a grader defect, not a model improvement.</p><p>A compact illustrative predicate is:</p><pre>pass = approvalRecorded
    and modifiedDatasets == ["demo-orders"]
-   and quarantineMarkerCount == 1
+   and quarantineMarkerCount == 1</pre><p>Keep these fixtures immutable, reset the environment between trials, and record the task and artifact versions alongside results. Otherwise a leftover marker from yesterday can make today's agent look successful. Test the grader against a known-correct fixture and deliberately wrong fixtures before comparing models.</p><p>Do not stop at this four-case demonstration. A complete suite for the proposed assistant also needs denied-approval behavior, unavailable tools, stale evidence, unexpected data shapes, and recovery after an uncertain write. A safe refusal can be the correct outcome when permission is absent, but that must be a separate task contract: our current four fixtures all falsely claim completion.</p><p>Use exact checks for exact state and a separate rubric for explanation quality. Averaging a beautiful explanation with an unauthorized write into a passing score would erase an important boundary. Day1's durable progress record should point to evidence produced by a trustworthy grader, not merely another agent's confident assertion.</p>
 
-Keep these fixtures immutable, reset the environment between trials, and record the task and artifact versions alongside results. Otherwise a leftover marker from yesterday can make today's agent look successful. Test the grader against a known-correct fixture and deliberately wrong fixtures before comparing models.
+</details>
 
-Do not stop at this four-case demonstration. A complete suite for the proposed assistant also needs denied-approval behavior, unavailable tools, stale evidence, unexpected data shapes, and recovery after an uncertain write. A safe refusal can be the correct outcome when permission is absent, but that must be a separate task contract: our current four fixtures all falsely claim completion.
-
-Use exact checks for exact state and a separate rubric for explanation quality. Averaging a beautiful explanation with an unauthorized write into a passing score would erase an important boundary. Day1's durable progress record should point to evidence produced by a trustworthy grader, not merely another agent's confident assertion.
-
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Toggle between claim-only and contract grading. Predict which fixtures pass before inspecting the results. Define one false-positive and one false-negative test for a real read-only RCA assistant. Explain which checks could be deterministic and which require expert judgment.
 

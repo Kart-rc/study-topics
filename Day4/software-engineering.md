@@ -2,7 +2,7 @@
 
 Software engineering · Day4 · 15 minutes
 
-Predict mixed-version decoding, preserve unknown fields, and recognize why a wire-safe change can still break application behavior.
+A message passes through an older service before reaching a newer one.
 
 ## Recall (2 minutes)
 
@@ -10,27 +10,67 @@ Predict mixed-version decoding, preserve unknown fields, and recognize why a wir
 
 ## Understand (4 minutes)
 
-In Protobuf binary encoding, a field number—not its source-code name—is the durable identity on the wire. Adding a new field is binary wire-safe: an old parser treats the unfamiliar tag as an unknown field, while a new parser supplies defaults when reading old messages.
+A message passes through an older service before reaching a newer one. Can a field the older service does not understand survive the trip?
 
-That tolerance is not permission to reuse numbers. Reassigning an old tag gives the same bytes a new meaning and can cause parse failures, data corruption, or leakage. Deleted numbers should be reserved. Compatibility also depends on the path: Proto3 preserves unknown binary fields during parse and serialization, but converting through JSON or copying known fields one by one can discard them.
+In Protobuf binary messages, the field number identifies the field. A binary parse-and-reserialize path can preserve unknown fields. Mapping only known fields into a new representation can lose them. Reusing an old number for a new meaning is dangerous even when bytes still parse.
 
 
 
-Original teaching case: Version 1 of a dataset event uses tag 1 for dataset_id and tag 2 for owner. Version 2 adds tag 3 for classification. A V1 relay can read the message, ignore classification in its application logic, and reserialize the binary message while preserving tag 3. A later V2 consumer recovers it.
+Tag 3 carries classification. The toy binary relay keeps it; the known-fields-only relay drops it. This map example illustrates information loss without pretending to encode Protobuf bytes.
 
-If the relay maps only known fields into JSON and back, tag 3 disappears. The schemas are wire-compatible, yet the integration path is lossy.
 
-Worse, if V2 deletes owner and reuses tag 2 for retention_days, the bytes tag2="30" are read by V1 as owner "30". Both parsers can succeed while disagreeing semantically.
 
-V1: 1 → dataset_id, 2 → owner
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```java
+var incoming = new java.util.LinkedHashMap<Integer, String>();
+incoming.put(1, "orders"); incoming.put(2, "data-team"); incoming.put(3, "restricted");
+var binaryRelay = new java.util.LinkedHashMap<Integer, String>(incoming);
+var knownOnly = new java.util.LinkedHashMap<Integer, String>();
+knownOnly.put(1, incoming.get(1)); knownOnly.put(2, incoming.get(2));
+boolean classificationSurvives = knownOnly.containsKey(3);
+```
+
+1. Represent wire tags with a map for teaching.
+
+   Changed values: `{"incoming": "{}"}`
+
+2. A new sender includes classification at tag 3.
+
+   Changed values: `{"incoming": "{1=orders, 2=data-team, 3=restricted}"}`
+
+3. The toy binary-preserving path retains all tags.
+
+   Changed values: `{"binaryRelay": "{1=orders, 2=data-team, 3=restricted}"}`
+
+4. A manual mapping starts empty.
+
+   Changed values: `{"knownOnly": "{}"}`
+
+5. Copying only known tags loses tag 3.
+
+   Changed values: `{"knownOnly": "{1=orders, 2=data-team}"}`
+
+6. The downstream classification is missing on this path.
+
+   Changed values: `{"classificationSurvives": "false"}`
+
+[Full runnable example](examples/software-engineering.java).
+
+Limits: The maps are an analogy, not a Protobuf parser. Actual unknown-field behavior depends on the format path and APIs. Reserve removed field numbers and check type compatibility with real schemas.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>In Protobuf binary encoding, a field number—not its source-code name—is the durable identity on the wire. Adding a new field is binary wire-safe: an old parser treats the unfamiliar tag as an unknown field, while a new parser supplies defaults when reading old messages.</p><p>That tolerance is not permission to reuse numbers. Reassigning an old tag gives the same bytes a new meaning and can cause parse failures, data corruption, or leakage. Deleted numbers should be reserved. Compatibility also depends on the path: Proto3 preserves unknown binary fields during parse and serialization, but converting through JSON or copying known fields one by one can discard them.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> Version 1 of a dataset event uses tag 1 for <code>dataset_id</code> and tag 2 for <code>owner</code>. Version 2 adds tag 3 for <code>classification</code>. A V1 relay can read the message, ignore classification in its application logic, and reserialize the binary message while preserving tag 3. A later V2 consumer recovers it.</p><p>If the relay maps only known fields into JSON and back, tag 3 disappears. The schemas are wire-compatible, yet the integration path is lossy.</p><p>Worse, if V2 deletes <code>owner</code> and reuses tag 2 for <code>retention_days</code>, the bytes <code>tag2="30"</code> are read by V1 as owner <code>"30"</code>. Both parsers can succeed while disagreeing semantically.</p><pre>V1: 1 → dataset_id, 2 → owner
 V2 safe: add 3 → classification
-V2 unsafe: reuse 2 → retention_days
+V2 unsafe: reuse 2 → retention_days</pre><p>At enterprise scale, enforce compatibility in CI, retain descriptors, test old-new and new-old readers, and observe actual client versions before activating new semantics. Wire safety is necessary; coordinated application behavior is the release contract.</p>
 
-At enterprise scale, enforce compatibility in CI, retain descriptors, test old-new and new-old readers, and observe actual client versions before activating new semantics. Wire safety is necessary; coordinated application behavior is the release contract.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Start with the safe addition and a binary relay. Toggle the JSON bridge and predict whether classification survives. Then reuse tag 2 and explain why successful parsing is not evidence of semantic compatibility.
 

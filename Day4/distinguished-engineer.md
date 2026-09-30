@@ -2,7 +2,7 @@
 
 Distinguished Engineer · Day4 · 15 minutes
 
-Size pre-existing zonal capacity and distinguish a resilience design from a recovery plan that depends on an impaired control plane.
+A zone fails just when the system needs more capacity.
 
 ## Recall (2 minutes)
 
@@ -10,24 +10,66 @@ Size pre-existing zonal capacity and distinguish a resilience design from a reco
 
 ## Understand (4 minutes)
 
-A statically stable system keeps its existing useful work running when a dependency is impaired. It may stop accepting configuration changes, but its data plane does not require emergency provisioning or mutation to survive.
+A zone fails just when the system needs more capacity. If recovery depends on creating resources, a control-plane outage can prevent that recovery.
 
-AWS describes the control plane as the machinery that creates and changes resources, while the data plane performs their ongoing work. The control plane is typically more complex and lower volume. Building the incident response around “launch replacements now” introduces the control plane—and bootstrapping, discovery, credentials, and configuration—into the worst possible moment.
-
-
-
-Original teaching case: A three-AZ data-quality service is load-tested to 50% of total demand in each zone. Normal provisioned capacity is 150%. Lose one zone and 100% remains: no scale-up is needed. AWS gives this same three-zone arithmetic as 50% overprovisioning, with each zone operating at 66% of its tested capacity.
-
-If each zone holds only 35% of demand, losing one leaves 70%. A reactive plan needs 30 percentage points of new capacity. It may recover when control-plane operations work, but it is not statically stable.
-
-survivingCapacity = (zones - 1) × capacityPerZone
-staticStable = survivingCapacity ≥ 100% demand
-
-A Distinguished Engineer turns the arithmetic into an operating contract: define which failure the service must absorb, fund the required headroom, keep critical request paths zone-local where appropriate, pre-provision standby state, and run game days that disable control-plane changes. Cost objections are real; the response is tiering and explicit risk acceptance, not relabeling reactive recovery as high availability.
+Static stability means the already-running system can continue useful work through the chosen failure. The data plane serves requests; the control plane creates or changes resources. Plan enough tested capacity to survive before emergency provisioning is needed.
 
 
 
-## Explore (5 minutes)
+With three zones each able to carry 50% of demand, losing one leaves 100%. If each carries only 35%, losing one leaves 70%, and the system needs another 30 percentage points.
+
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+zones = 3; demand = 100
+capacity_per_zone = 50
+surviving = (zones - 1) * capacity_per_zone
+stable = surviving >= demand
+underprovisioned = (zones - 1) * 35
+shortfall = demand - underprovisioned
+```
+
+1. Express capacity as a percentage of normal demand.
+
+   Changed values: `{"zones": 3, "demand": 100}`
+
+2. Each zone is tested to serve half the total demand.
+
+   Changed values: `{"capacity_per_zone": 50}`
+
+3. Two zones retain 100% capacity.
+
+   Changed values: `{"surviving": 100}`
+
+4. No new capacity is required for this failure.
+
+   Changed values: `{"stable": true}`
+
+5. The smaller design retains only 70%.
+
+   Changed values: `{"underprovisioned": 70}`
+
+6. It needs another 30 percentage points during the incident.
+
+   Changed values: `{"shortfall": 30}`
+
+[Full runnable example](examples/distinguished-engineer.py).
+
+Limits: This assumes traffic can reach the survivors and all other needed dependencies remain available. Arithmetic headroom alone does not establish static stability.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A statically stable system keeps its existing useful work running when a dependency is impaired. It may stop accepting configuration changes, but its data plane does not require emergency provisioning or mutation to survive.</p><p>AWS describes the control plane as the machinery that creates and changes resources, while the data plane performs their ongoing work. The control plane is typically more complex and lower volume. Building the incident response around “launch replacements now” introduces the control plane—and bootstrapping, discovery, credentials, and configuration—into the worst possible moment.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A three-AZ data-quality service is load-tested to 50% of total demand in each zone. Normal provisioned capacity is 150%. Lose one zone and 100% remains: no scale-up is needed. AWS gives this same three-zone arithmetic as 50% overprovisioning, with each zone operating at 66% of its tested capacity.</p><p>If each zone holds only 35% of demand, losing one leaves 70%. A reactive plan needs 30 percentage points of new capacity. It may recover when control-plane operations work, but it is not statically stable.</p><pre>survivingCapacity = (zones - 1) × capacityPerZone
+staticStable = survivingCapacity ≥ 100% demand</pre><p>A Distinguished Engineer turns the arithmetic into an operating contract: define which failure the service must absorb, fund the required headroom, keep critical request paths zone-local where appropriate, pre-provision standby state, and run game days that disable control-plane changes. Cost objections are real; the response is tiering and explicit risk acceptance, not relabeling reactive recovery as high availability.</p>
+
+</details>
+
+## Explore (remaining exploration time)
 
 At three zones, find the minimum whole-number capacity per zone that survives one loss. Disable the control plane and compare 50% with 35%. Then identify one bootstrap dependency your data plane still takes during recovery.
 

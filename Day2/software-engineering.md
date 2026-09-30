@@ -2,7 +2,7 @@
 
 Software engineering · Day2 · 15 minutes
 
-Predict queue growth and drain time, then distinguish a buffer, load shedding, and genuine upstream backpressure.
+A worker can finish 100 events each second, but producers send 120.
 
 ## Recall (2 minutes)
 
@@ -10,35 +10,69 @@ Predict queue growth and drain time, then distinguish a buffer, load shedding, a
 
 ## Understand (4 minutes)
 
-A queue separates arrival from execution. That helps absorb a burst, but cannot make a slower consumer sustain a faster producer forever. When work arrives faster than it finishes, something must grow, be rejected, or be slowed upstream.
+A worker can finish 100 events each second, but producers send 120. A queue gives the worker somewhere to put the extra events. It does not make the worker faster.
 
-Google's overload guidance emphasizes graceful resource limits and warns that requests per second can hide different per-request costs. A cheap metadata lookup and a large lineage traversal are not equal units of work. Measure the actual constrained resource before choosing an overload signal. Google SRE: Handling Overload.
-
-The following calculator intentionally assumes equal-cost items so you can feel the conservation rule. You can then name exactly which assumption fails in production.
+Backlog grows by arrivals minus completed work. A bounded queue eventually rejects work if arrivals remain higher than service capacity. Backpressure means the producer actually slows down in response; rejection alone does not prove that happened.
 
 
 
-Original teaching case: A lineage ingestion worker completes 100 equal-cost events per second. Producers send 120 per second. With an empty buffer, backlog grows by 20 each second. A 300-item queue fills after 15 seconds. Making the queue ten times bigger delays that moment; it does not remove the 20-item-per-second deficit.
+A 300-item queue fills in 15 seconds at a 20-item-per-second deficit. After arrivals drop to 80, only 20 slots per second are spare, so draining 300 items also takes 15 seconds.
 
-At second 20, the bounded model has queued 300 items and rejected 100. Lower arrivals to 80 while keeping service at 100. Spare capacity is only 20, so clearing the 300-item backlog takes another 15 seconds. It is not 300 / 100 because new work continues arriving.
 
-The recurrence shown by the controls is:
 
-work = backlog + arrivals
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```java
+int arrivals = 120;
+int service = 100;
+int growth = arrivals - service;
+int secondsToFill = 300 / growth;
+arrivals = 80;
+int secondsToDrain = 300 / (service - arrivals);
+```
+
+1. Events arrive each second.
+
+   Changed values: `{"arrivals": "120"}`
+
+2. The worker finishes 100 each second.
+
+   Changed values: `{"service": "100"}`
+
+3. Twenty events accumulate each second.
+
+   Changed values: `{"growth": "20"}`
+
+4. A 300-item buffer buys 15 seconds.
+
+   Changed values: `{"secondsToFill": "15"}`
+
+5. Producers slow down.
+
+   Changed values: `{"arrivals": "80"}`
+
+6. Only spare capacity drains the backlog: another 15 seconds.
+
+   Changed values: `{"secondsToDrain": "15"}`
+
+[Full runnable example](examples/software-engineering.java).
+
+Limits: This equal-cost, constant-rate calculation assumes service continues and the queue starts empty. Bursts, variable work, scheduling, and retries change real queue behavior.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A queue separates arrival from execution. That helps absorb a burst, but cannot make a slower consumer sustain a faster producer forever. When work arrives faster than it finishes, something must grow, be rejected, or be slowed upstream.</p><p>Google's overload guidance emphasizes graceful resource limits and warns that requests per second can hide different per-request costs. A cheap metadata lookup and a large lineage traversal are not equal units of work. Measure the actual constrained resource before choosing an overload signal. <a href="https://sre.google/sre-book/handling-overload/">Google SRE: Handling Overload</a>.</p><p>The following calculator intentionally assumes equal-cost items so you can feel the conservation rule. You can then name exactly which assumption fails in production.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A lineage ingestion worker completes 100 equal-cost events per second. Producers send 120 per second. With an empty buffer, backlog grows by 20 each second. A 300-item queue fills after 15 seconds. Making the queue ten times bigger delays that moment; it does not remove the 20-item-per-second deficit.</p><p>At second 20, the bounded model has queued 300 items and rejected 100. Lower arrivals to 80 while keeping service at 100. Spare capacity is only 20, so clearing the 300-item backlog takes another 15 seconds. It is not 300 / 100 because new work continues arriving.</p><p>The recurrence shown by the controls is:</p><pre>work = backlog + arrivals
 served = min(serviceCapacity, work)
 waiting = work - served
 rejected = max(0, waiting - bufferLimit)
-backlog = min(bufferLimit, waiting)
+backlog = min(bufferLimit, waiting)</pre><p>This model serves available work during each one-second bucket and caps waiting work at the bucket boundary. It is a conservation model, not a thread-pool implementation.</p><p>Now enable cooperative backpressure. We model a producer honoring a quota equal to consumer capacity. Rejections stop and existing backlog stops growing, but it does not drain until there is spare capacity. Real backpressure needs a feedback path and an upstream policy. A full queue that merely returns errors is load shedding, not proof that the producer slowed down. Retrying those errors aggressively can recreate Day1's amplification problem.</p><p>A Kafka log may retain backlog outside the worker, but storage retention and consumer lag still have limits. Decide explicitly whether upstream work waits, expires, is rejected, or enters a repair workflow. Do not silently discard business-critical events.</p>
 
-This model serves available work during each one-second bucket and caps waiting work at the bucket boundary. It is a conservation model, not a thread-pool implementation.
+</details>
 
-Now enable cooperative backpressure. We model a producer honoring a quota equal to consumer capacity. Rejections stop and existing backlog stops growing, but it does not drain until there is spare capacity. Real backpressure needs a feedback path and an upstream policy. A full queue that merely returns errors is load shedding, not proof that the producer slowed down. Retrying those errors aggressively can recreate Day1's amplification problem.
-
-A Kafka log may retain backlog outside the worker, but storage retention and consumer lag still have limits. Decide explicitly whether upstream work waits, expires, is rejected, or enters a repair workflow. Do not silently discard business-critical events.
-
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Run 20 seconds at arrivals 120 and service 100. Predict backlog and rejects. Change arrivals to 80 and run 15 more seconds. Reset, enable cooperative backpressure, and repeat. Explain where the unadmitted work must go in a real system.
 

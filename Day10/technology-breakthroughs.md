@@ -26,7 +26,49 @@ The key distinction: no electrical standby power for retaining a state does not 
 
 
 
-## Explore (5 minutes)
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+requested_level = 10; write_power = True
+stored_level = requested_level if write_power else 0
+write_power = False
+read_light = True; input_value = 0.6
+output = input_value * stored_level / 15 if read_light else None
+read_light = False; output = None
+```
+
+1. Choose one of the 16 levels, numbered 0 through 15.
+
+   Changed values: `{"requested_level": 10, "write_power": true}`
+
+2. The powered programming step stores level 10.
+
+   Changed values: `{"stored_level": 10}`
+
+3. Removing programming power does not change the stored variable.
+
+   Changed values: `{"write_power": false}`
+
+4. Reading and arithmetic have separate modeled inputs.
+
+   Changed values: `{"read_light": true, "input_value": 0.6}`
+
+5. The ideal weighted output is 0.4.
+
+   Changed values: `{"output": 0.4}`
+
+6. No reading is available, while the stored level remains 10.
+
+   Changed values: `{"read_light": false, "output": null}`
+
+[Full runnable example](examples/technology-breakthroughs.py).
+
+Limits: This is an ideal memory analogy and arithmetic, not device physics. It omits drift, noise, finite retention, energy cost, and calibration. The code cannot validate the research result.
+
+## Explore (remaining exploration time)
 
 Choose level 10 and press Program. Remove programming power and confirm the saved level remains. Switch off reading light and observe the missing readout. Change the slider while power is off: does the saved level change?
 

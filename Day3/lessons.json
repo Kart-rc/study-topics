@@ -4,9 +4,9 @@
     "track": "Data engineering",
     "title": "Adaptive skew joins: split the straggler, not the whole job",
     "tag": "Foundation · Spark AQE mechanics",
-    "goal": "Predict when Spark marks a shuffled partition as skewed, then reason about splitting, replication, and the remaining bottleneck.",
-    "concept": "<p>A sort-merge join can look well provisioned on average while one shuffled partition determines the stage duration. Spark Adaptive Query Execution (AQE) uses runtime statistics to revise a physical plan after a shuffle. Current Spark 4.2 documentation says AQE has been enabled by default since Spark 3.2 and can split skewed sort-merge-join partitions, optionally replicating the matching side.</p><p>For the documented skew rule, a partition is considered skewed only when it is larger than both a factor times the median partition size and an absolute byte threshold. The documented defaults are factor 5 and 256 MB. “Five times median” alone is not the rule.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A customer-fact join produces shuffled partitions of 40, 42, 43, 44, 45, and 900 MB. The median is 43.5 MB. With factor 5, the relative boundary is 217.5 MB; with the 256 MB absolute threshold, the effective boundary is 256 MB. The 900 MB partition clears both tests.</p><p>With a 64 MB advisory target, the calculator divides 900 MB into 15 approximately 60 MB pieces. The largest modeled task input falls from 900 MB to 60 MB. That is a useful intuition for straggler relief, not a 15× runtime promise: reading, shuffling, scheduling, spilling, replication, and downstream work remain.</p><pre>isSkewed = size &gt; factor × median\n        AND size &gt; absoluteThreshold\npieces = ceil(size / advisoryTarget)</pre><p>At platform scale, first verify that the skew is real in runtime statistics. Then ask whether a hot key, data-quality default, or tenant concentration is the business cause. AQE treats the physical symptom; key salting, pre-aggregation, or a data-contract repair may be the durable response.</p>",
+    "goal": "Most tasks in a join finish quickly, but one task reads a much larger partition.",
+    "concept": "<p>Most tasks in a join finish quickly, but one task reads a much larger partition. The whole job waits for that straggler.</p><p>Skew means work is unevenly distributed. Spark’s adaptive query execution, or AQE, can use runtime sizes to split eligible oversized join partitions. A partition must be large compared with both its peers and an absolute threshold. Splitting reduces the largest unit of work; it does not remove all overhead.</p>",
+    "example": "<p>For sizes 40, 42, 43, 44, 45, and 900 MB, the median is 43.5 MB. Five times that is 217.5 MB. The 900 MB partition also exceeds 256 MB. Dividing it toward a 64 MB target gives 15 pieces of about 60 MB.</p>",
     "practice": "Predict the effective boundary and split count before moving a control. Raise the absolute threshold above the hot partition, then shrink the advisory target. Explain why smaller pieces can add work even when they reduce the longest task.",
     "boundary": "A size-only deterministic model for one skewed shuffled partition. It is not Spark's planner and does not model join eligibility, skewedPartitionThresholdInBytes being ideally larger than advisory size, small-partition merging, replication of the other join side, spill, network, scheduler overhead, or exact runtimes. Treat the displayed bottleneck as input size, not elapsed time.",
     "sim": "<label>Hot partition MB <input id=\"hot\" type=\"range\" min=\"100\" max=\"1200\" step=\"50\" value=\"900\"></label><label>Skew factor <input id=\"factor\" type=\"range\" min=\"2\" max=\"10\" step=\"1\" value=\"5\"></label><label>Absolute threshold MB <input id=\"threshold\" type=\"range\" min=\"64\" max=\"1024\" step=\"64\" value=\"256\"></label><label>Advisory target MB <input id=\"advisory\" type=\"range\" min=\"32\" max=\"256\" step=\"32\" value=\"64\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -49,16 +49,149 @@
         "https://spark.apache.org/docs/latest/sql-performance-tuning.html",
         "Spark 4.2 living documentation; exact page publication date not stated"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>A sort-merge join can look well provisioned on average while one shuffled partition determines the stage duration. Spark Adaptive Query Execution (AQE) uses runtime statistics to revise a physical plan after a shuffle. Current Spark 4.2 documentation says AQE has been enabled by default since Spark 3.2 and can split skewed sort-merge-join partitions, optionally replicating the matching side.</p><p>For the documented skew rule, a partition is considered skewed only when it is larger than both a factor times the median partition size and an absolute byte threshold. The documented defaults are factor 5 and 256 MB. “Five times median” alone is not the rule.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A customer-fact join produces shuffled partitions of 40, 42, 43, 44, 45, and 900 MB. The median is 43.5 MB. With factor 5, the relative boundary is 217.5 MB; with the 256 MB absolute threshold, the effective boundary is 256 MB. The 900 MB partition clears both tests.</p><p>With a 64 MB advisory target, the calculator divides 900 MB into 15 approximately 60 MB pieces. The largest modeled task input falls from 900 MB to 60 MB. That is a useful intuition for straggler relief, not a 15× runtime promise: reading, shuffling, scheduling, spilling, replication, and downstream work remain.</p><pre>isSkewed = size &gt; factor × median\n        AND size &gt; absoluteThreshold\npieces = ceil(size / advisoryTarget)</pre><p>At platform scale, first verify that the skew is real in runtime statistics. Then ask whether a hot key, data-quality default, or tenant concentration is the business cause. AQE treats the physical symptom; key salting, pre-aggregation, or a data-contract repair may be the durable response.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "sizes = [40, 42, 43, 44, 45, 900]",
+          "note": "The last partition is much larger than its peers."
+        },
+        {
+          "code": "median = (sizes[2] + sizes[3]) / 2",
+          "note": "The middle pair gives 43.5 MB."
+        },
+        {
+          "code": "threshold = max(5 * median, 256)",
+          "note": "Both conditions imply a 256 MB effective threshold."
+        },
+        {
+          "code": "skewed = sizes[-1] > threshold",
+          "note": "The 900 MB partition qualifies in this toy."
+        },
+        {
+          "code": "pieces = (sizes[-1] + 63) // 64",
+          "note": "Round up to 15 pieces at the advisory target."
+        },
+        {
+          "code": "piece_mb = sizes[-1] / pieces",
+          "note": "Each idealized piece is 60 MB."
+        }
+      ],
+      "limit": "This is split-size arithmetic, not a Spark scheduler. Actual split boundaries, supported join types, replicated input, spilling, and task overhead affect the plan and runtime.",
+      "expect": {
+        "pieces": 15,
+        "piece_mb": 60
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "sizes": [
+              40,
+              42,
+              43,
+              44,
+              45,
+              900
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "sizes": [
+              40,
+              42,
+              43,
+              44,
+              45,
+              900
+            ],
+            "median": 43.5
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "sizes": [
+              40,
+              42,
+              43,
+              44,
+              45,
+              900
+            ],
+            "median": 43.5,
+            "threshold": 256
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "sizes": [
+              40,
+              42,
+              43,
+              44,
+              45,
+              900
+            ],
+            "median": 43.5,
+            "threshold": 256,
+            "skewed": true
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "sizes": [
+              40,
+              42,
+              43,
+              44,
+              45,
+              900
+            ],
+            "median": 43.5,
+            "threshold": 256,
+            "skewed": true,
+            "pieces": 15
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "sizes": [
+              40,
+              42,
+              43,
+              44,
+              45,
+              900
+            ],
+            "median": 43.5,
+            "threshold": 256,
+            "skewed": true,
+            "pieces": 15,
+            "piece_mb": 60.0
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-23"
   },
   {
     "slug": "software-engineering",
     "track": "Software engineering",
     "title": "Fencing tokens: stop the worker whose lease already died",
     "tag": "Foundation · distributed coordination",
-    "goal": "Trace the stale-worker race and explain why lease ownership must be enforced at the resource, not trusted in the client.",
-    "concept": "<p>A lease answers “who may act now?” only while every participant observes time and communication promptly. A worker can pause after acquiring the lease, miss its expiry, and resume after a replacement has begun. Mutual exclusion at the lock service did not erase the paused process or its delayed request.</p><p>A fencing token is a monotonically increasing number issued with each ownership grant. Every protected write carries the token. The resource remembers the greatest accepted token and rejects lower ones. Chubby’s original paper describes sequencers that clients can pass to servers so stale lock holders can be detected. The enduring design lesson is that the resource must participate in enforcement.</p>",
-    "example": "<p><strong>Original teaching case:</strong> Compactor A gets token 1 and pauses during a long runtime stall. Its lease expires. Compactor B gets token 2 and publishes a corrected snapshot. A resumes with a buffered token-1 write.</p><p>If the object-store publishing layer accepts “whoever writes last,” A can replace the newer snapshot. If a small authoritative metadata resource conditionally accepts only tokens at least as new as its recorded token, A is rejected. The lease service and resource therefore share a protocol:</p><pre>grant → monotonically increasing token\nwrite(resource, token, value)\nresource accepts only token ≥ maxAccepted</pre><p>Do not confuse the token with a timestamp generated by workers. A clock value need not be globally monotonic. Also decide the granularity: a token for one dataset must not accidentally fence unrelated datasets.</p>",
+    "goal": "Worker A pauses for a long time.",
+    "concept": "<p>Worker A pauses for a long time. Its lease expires, so worker B takes over. When A wakes up, it still has a write ready. A lease alone cannot stop that old write.</p><p>A fencing token is a number that increases when a new owner is granted access. The storage boundary remembers the newest accepted token and rejects older ones. The resource performing the write must enforce the rule; an expired worker may not know it lost ownership.</p>",
+    "example": "<p>A has token 1. B has token 2 and saves a corrected snapshot. A’s late token-1 write is rejected, leaving B’s value intact.</p>",
     "practice": "Run A → expire → B → B writes → A resumes with fencing on. Reset and repeat with fencing off. Predict the final value before each delayed write, then name the component that must store maxAccepted durably.",
     "boundary": "A single in-memory resource, sequential button presses, one lease namespace, and perfect monotonically increasing grants. It omits quorum failure, lease renewal, token durability, retry idempotency, multi-resource transactions, storage APIs that cannot conditionally compare tokens, and recovery after the resource loses maxAccepted. Real designs must bind tokens to the correct resource and command.",
     "sim": "<label><input id=\"fencing\" type=\"checkbox\" checked> Resource enforces fencing</label><button id=\"grantA\">Grant lease to A</button><button id=\"expireA\">Expire A's lease</button><button id=\"grantB\">Grant lease to B</button><button id=\"writeB\">B writes snapshot</button><button id=\"resumeA\">A resumes delayed write</button><button id=\"reset\">Reset</button><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -101,16 +234,106 @@
         "https://research.google/pubs/the-chubby-lock-service-for-loosely-coupled-distributed-systems/",
         "OSDI 2006 foundation; Google publication page"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>A lease answers “who may act now?” only while every participant observes time and communication promptly. A worker can pause after acquiring the lease, miss its expiry, and resume after a replacement has begun. Mutual exclusion at the lock service did not erase the paused process or its delayed request.</p><p>A fencing token is a monotonically increasing number issued with each ownership grant. Every protected write carries the token. The resource remembers the greatest accepted token and rejects lower ones. Chubby’s original paper describes sequencers that clients can pass to servers so stale lock holders can be detected. The enduring design lesson is that the resource must participate in enforcement.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> Compactor A gets token 1 and pauses during a long runtime stall. Its lease expires. Compactor B gets token 2 and publishes a corrected snapshot. A resumes with a buffered token-1 write.</p><p>If the object-store publishing layer accepts “whoever writes last,” A can replace the newer snapshot. If a small authoritative metadata resource conditionally accepts only tokens at least as new as its recorded token, A is rejected. The lease service and resource therefore share a protocol:</p><pre>grant → monotonically increasing token\nwrite(resource, token, value)\nresource accepts only token ≥ maxAccepted</pre><p>Do not confuse the token with a timestamp generated by workers. A clock value need not be globally monotonic. Also decide the granularity: a token for one dataset must not accidentally fence unrelated datasets.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "int tokenA = 1;",
+          "note": "A holds an earlier lease generation."
+        },
+        {
+          "code": "int tokenB = 2;",
+          "note": "B receives a newer generation."
+        },
+        {
+          "code": "int newestAccepted = tokenB;",
+          "note": "The resource records B’s accepted token."
+        },
+        {
+          "code": "String snapshot = \"B corrected\";",
+          "note": "B’s value is now stored."
+        },
+        {
+          "code": "boolean allowA = tokenA >= newestAccepted;",
+          "note": "The resource rejects A’s stale token."
+        },
+        {
+          "code": "snapshot = allowA ? \"A stale\" : snapshot;",
+          "note": "Rejected work leaves the stored value unchanged."
+        }
+      ],
+      "limit": "This Java comparison represents a storage-side atomic condition. It does not implement leases or make an ordinary unchecked object-store write safe. Token scope and monotonic issuance are required.",
+      "expect": {
+        "allowA": "false",
+        "snapshot": "B corrected"
+      },
+      "language": "java",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "tokenA": "1"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "tokenA": "1",
+            "tokenB": "2"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "tokenA": "1",
+            "tokenB": "2",
+            "newestAccepted": "2"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "tokenA": "1",
+            "tokenB": "2",
+            "newestAccepted": "2",
+            "snapshot": "B corrected"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "tokenA": "1",
+            "tokenB": "2",
+            "newestAccepted": "2",
+            "snapshot": "B corrected",
+            "allowA": "false"
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "tokenA": "1",
+            "tokenB": "2",
+            "newestAccepted": "2",
+            "snapshot": "B corrected",
+            "allowA": "false"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-23"
   },
   {
     "slug": "distinguished-engineer",
     "track": "Distinguished Engineer",
     "title": "Cell-based architecture: make failure scope a product decision",
     "tag": "Foundation · organizational architecture",
-    "goal": "Quantify a cell boundary, expose shared dependencies that bypass it, and frame the migration decisions a senior technical leader must align.",
-    "concept": "<p>A cell is a bounded, independently operable slice of a workload. Requests are assigned to one cell, and a cell failure should not pull other cells down. AWS’s cell-based architecture guidance frames cells as fault-containment boundaries that improve isolation, predictability, and testability.</p><p>“We deployed the same stack N times” is not yet an isolation argument. Routing, identity, configuration, quotas, deployment, telemetry, and recovery paths can remain globally shared. A critical shared path can restore the original blast radius even when the data plane is partitioned.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A metadata platform serves 1,000 tenants in five equally sized cells. Under this deliberately even assignment, losing one cell affects at most 200 tenants. Ten cells reduce the modeled cell failure scope to 100, but double the number of units to deploy and observe.</p><p>Now check “shared dependency failed.” The displayed impact returns to all 1,000 tenants. The cells did not become useless; the model exposed a dependency whose failure bypasses the containment boundary.</p><p>A Distinguished Engineer turns that result into decisions: Which tenant-placement key is stable? What headroom lets a surviving cell absorb recovery? Can the routing/control plane fail closed without taking healthy cells offline? How do schemas and deployments remain compatible across cells? Which high-value tenant needs a dedicated cell? How will teams debug cross-cell inconsistency?</p><p>The migration should be reversible: create placement and routing first, move a cohort, observe cell-local SLOs, rehearse evacuation, then expand. A cell count selected without capacity and operating-cost models is architecture theater.</p>",
+    "goal": "A metadata platform serves 1,000 tenants.",
+    "concept": "<p>A metadata platform serves 1,000 tenants. One bad deployment should not have to interrupt all of them.</p><p>A cell is a separately operated group of resources serving a subset of tenants. It limits the damage from failures inside that group. A shared dependency can still cross every boundary, so count dependencies as well as boxes.</p>",
+    "example": "<p>Five equally sized cells place 200 tenants in each failure group. Ten cells reduce that to 100. But if all ten need one failed catalog, all 1,000 tenants can still be affected.</p>",
     "practice": "Predict maximum affected tenants at 5 and 10 cells. Toggle the shared dependency failure. Then explain which dependency you would remove from the synchronous request path first and what new operational burden the extra cells create.",
     "boundary": "Even tenant distribution, one complete cell failure, identical cell capacity, and a binary shared-dependency switch. It omits correlated Availability Zone or Region failure, noisy-neighbor load, state replication, tenant weights, evacuation capacity, placement churn, partial degradation, and recovery time. Cell count is not a real availability calculation.",
     "sim": "<label>Number of cells <input id=\"cells\" type=\"range\" min=\"1\" max=\"20\" step=\"1\" value=\"5\"></label><label><input id=\"shared\" type=\"checkbox\"> Critical shared dependency also failed</label><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -153,16 +376,104 @@
         "https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/reducing-scope-of-impact-with-cell-based-architecture.html",
         "Published 2023-09-20"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>A cell is a bounded, independently operable slice of a workload. Requests are assigned to one cell, and a cell failure should not pull other cells down. AWS’s cell-based architecture guidance frames cells as fault-containment boundaries that improve isolation, predictability, and testability.</p><p>“We deployed the same stack N times” is not yet an isolation argument. Routing, identity, configuration, quotas, deployment, telemetry, and recovery paths can remain globally shared. A critical shared path can restore the original blast radius even when the data plane is partitioned.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A metadata platform serves 1,000 tenants in five equally sized cells. Under this deliberately even assignment, losing one cell affects at most 200 tenants. Ten cells reduce the modeled cell failure scope to 100, but double the number of units to deploy and observe.</p><p>Now check “shared dependency failed.” The displayed impact returns to all 1,000 tenants. The cells did not become useless; the model exposed a dependency whose failure bypasses the containment boundary.</p><p>A Distinguished Engineer turns that result into decisions: Which tenant-placement key is stable? What headroom lets a surviving cell absorb recovery? Can the routing/control plane fail closed without taking healthy cells offline? How do schemas and deployments remain compatible across cells? Which high-value tenant needs a dedicated cell? How will teams debug cross-cell inconsistency?</p><p>The migration should be reversible: create placement and routing first, move a cohort, observe cell-local SLOs, rehearse evacuation, then expand. A cell count selected without capacity and operating-cost models is architecture theater.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "tenants = 1000; cells = 5",
+          "note": "Start with five evenly loaded cells."
+        },
+        {
+          "code": "affected = tenants // cells",
+          "note": "One cell failure affects 200 tenants in this example."
+        },
+        {
+          "code": "cells = 10",
+          "note": "Use smaller failure groups."
+        },
+        {
+          "code": "affected = tenants // cells",
+          "note": "One cell now contains 100 tenants."
+        },
+        {
+          "code": "shared_catalog_failed = True",
+          "note": "The shared dependency crosses cell boundaries."
+        },
+        {
+          "code": "affected = tenants if shared_catalog_failed else tenants // cells",
+          "note": "The shared failure reaches all 1,000."
+        }
+      ],
+      "limit": "The example assumes even placement and full dependency failure. It does not size failover capacity or quantify availability. More cells also add operating cost.",
+      "expect": {
+        "affected": 1000
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "tenants": 1000,
+            "cells": 5
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "tenants": 1000,
+            "cells": 5,
+            "affected": 200
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "tenants": 1000,
+            "cells": 10,
+            "affected": 200
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "tenants": 1000,
+            "cells": 10,
+            "affected": 100
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "tenants": 1000,
+            "cells": 10,
+            "affected": 100,
+            "shared_catalog_failed": true
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "tenants": 1000,
+            "cells": 10,
+            "affected": 1000,
+            "shared_catalog_failed": true
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-23"
   },
   {
     "slug": "genai-engineering",
     "track": "GenAI engineering",
     "title": "MCP OAuth: bind the token to the server, then mint a new upstream credential",
     "tag": "Current protocol · harness security",
-    "goal": "Trace token audiences across an MCP tool call and prevent token passthrough from turning the server into a confused deputy.",
-    "concept": "<p>An agent harness may make an MCP server feel like a local function, but its authorization boundary is still a network security boundary. The MCP authorization specification says clients must indicate the intended resource, servers must validate that an access token was issued for them, and MCP servers must not pass a client token through to an upstream API.</p><p>Audience validation answers “was this credential minted for this server?” Separate upstream credentials answer “what may this server do as itself?” If the server accepts any bearer token and forwards it, a credential intended for another service can be misused, logged, or broadened through the harness.</p>",
-    "example": "<p><strong>Original teaching case:</strong> An agent calls <code>catalog.example/tools/read</code>. The presented token says <code>aud=storage.api</code>, not <code>aud=catalog.example</code>. A naive server accepts it and forwards the same token to storage. The request may work, but the MCP boundary has neither validated its own audience nor constrained the downstream identity.</p><p>In strict mode the catalog rejects that token. With <code>aud=catalog.example</code>, it accepts the client request, authorizes the tool, and uses a separate, narrowly scoped <code>aud=storage.api; scope=read</code> credential for its upstream call.</p><pre>client token → aud=catalog.example\nMCP server validates audience + tool authorization\nserver credential → aud=storage.api, scope=read</pre><p>Harness engineering implication: represent the MCP server and every upstream service as distinct principals in traces and policy tests. A tool allowlist does not repair token confusion.</p>",
+    "goal": "A token intended for a storage API arrives at a catalog tool server.",
+    "concept": "<p>A token intended for a storage API arrives at a catalog tool server. Even if the storage API would accept it, that does not make it a valid credential for the catalog.</p><p>The audience says which service a token is intended for. Each server must check that boundary and the requested permission. When the catalog calls storage, it should use an appropriately scoped upstream credential rather than blindly forwarding the client token.</p>",
+    "example": "<p>The first token names storage.api and is rejected by catalog.example. The corrected token names catalog.example. The catalog’s separate upstream credential names storage.api and allows read access only.</p>",
     "practice": "Choose storage.api in naive mode and predict whether the MCP server accepts and what it forwards. Turn on strict validation. Then choose catalog.example. Explain which identity should appear in the storage audit log.",
     "boundary": "A deterministic audience string model, not OAuth validation. It omits issuer and signature checks, scopes, consent, PKCE, discovery, refresh, token exchange, replay protection, DPoP/mTLS, multi-tenant policy, and actual MCP transport. A correct audience is necessary but not sufficient authorization.",
     "sim": "<label>Presented token audience <select id=\"aud\"><option value=\"catalog.example\">catalog.example</option><option value=\"storage.api\">storage.api</option><option value=\"*\">wildcard / unspecified</option></select></label><label><input id=\"strict\" type=\"checkbox\"> Strict audience validation + separate upstream token</label><button id=\"run\">Evaluate request</button><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -205,16 +516,94 @@
         "https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization",
         "Protocol version 2025-06-18; checked against versioned specification"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>An agent harness may make an MCP server feel like a local function, but its authorization boundary is still a network security boundary. The MCP authorization specification says clients must indicate the intended resource, servers must validate that an access token was issued for them, and MCP servers must not pass a client token through to an upstream API.</p><p>Audience validation answers “was this credential minted for this server?” Separate upstream credentials answer “what may this server do as itself?” If the server accepts any bearer token and forwards it, a credential intended for another service can be misused, logged, or broadened through the harness.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> An agent calls <code>catalog.example/tools/read</code>. The presented token says <code>aud=storage.api</code>, not <code>aud=catalog.example</code>. A naive server accepts it and forwards the same token to storage. The request may work, but the MCP boundary has neither validated its own audience nor constrained the downstream identity.</p><p>In strict mode the catalog rejects that token. With <code>aud=catalog.example</code>, it accepts the client request, authorizes the tool, and uses a separate, narrowly scoped <code>aud=storage.api; scope=read</code> credential for its upstream call.</p><pre>client token → aud=catalog.example\nMCP server validates audience + tool authorization\nserver credential → aud=storage.api, scope=read</pre><p>Harness engineering implication: represent the MCP server and every upstream service as distinct principals in traces and policy tests. A tool allowlist does not repair token confusion.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "server = \"catalog.example\"; client_audience = \"storage.api\"",
+          "note": "The token is addressed to the wrong service."
+        },
+        {
+          "code": "accepted = client_audience == server",
+          "note": "The catalog rejects this mismatch."
+        },
+        {
+          "code": "client_audience = \"catalog.example\"",
+          "note": "A replacement token names the catalog."
+        },
+        {
+          "code": "accepted = client_audience == server",
+          "note": "The audience check now passes."
+        },
+        {
+          "code": "upstream = {\"aud\": \"storage.api\", \"scope\": \"read\"}",
+          "note": "A separate upstream credential has its own narrow purpose."
+        }
+      ],
+      "limit": "This only illustrates audience matching. Real token verification also requires signature, issuer, expiry, scope, and authorization checks. It does not implement OAuth or prove a request is authorized.",
+      "expect": {
+        "accepted": true
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "server": "catalog.example",
+            "client_audience": "storage.api"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "server": "catalog.example",
+            "client_audience": "storage.api",
+            "accepted": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "server": "catalog.example",
+            "client_audience": "catalog.example",
+            "accepted": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "server": "catalog.example",
+            "client_audience": "catalog.example",
+            "accepted": true
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "server": "catalog.example",
+            "client_audience": "catalog.example",
+            "accepted": true,
+            "upstream": {
+              "aud": "storage.api",
+              "scope": "read"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-23"
   },
   {
     "slug": "technology-breakthroughs",
     "track": "Technology breakthroughs",
     "title": "TimesFM-3: one zero-shot model, related time series, future covariates",
     "tag": "Research spotlight · August 31, 2026",
-    "goal": "Distinguish multivariate zero-shot forecasting from a univariate baseline and design a fair platform pilot without treating a teaching model as TimesFM.",
-    "concept": "<p>Google Research introduced TimesFM-3 as a zero-shot foundation model for univariate, multivariate, and covariate-informed forecasting in a single forward pass. The August 31, 2026 write-up describes an alternating attention architecture, non-autoregressive horizon decoding, and quantile forecasts.</p><p>The new capability matters when related series and known future signals carry information that a target’s history alone cannot. Google reports leading or competitive results across its selected benchmark groups against named baselines. Those are research claims from the model team, not evidence for your workload. The post said BigQuery integration was coming “in the coming weeks”; as of the source date, that was a future plan, not a generally available feature claim.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A streaming platform’s last seven daily ingestion volumes hover near 100 units. Two future days have planned backfills. A history-only baseline repeats the historical mean, so it forecasts about 100 each day. A covariate-aware toy rule adds 40 on scheduled backfill days, producing a seven-day total near 780 rather than 700.</p><p>That does not prove the covariate helps. If schedules are canceled or the relationship changes, the extra signal can make the forecast worse. Evaluate it against a seasonal naive baseline on rolling historical cutoffs, using only covariates that would actually have been known at each cutoff.</p><p>TimesFM-3 separates target history, past-only covariates, and covariates known into the forecast horizon. For a platform pilot, examples might be ingestion volume as target, observed lag as past-only, and a committed backfill calendar as past-and-future. Prevent leakage: “eventually corrected actual volume” is not a future-known input.</p>",
+    "goal": "A volume forecast based only on yesterday’s traffic misses tomorrow’s planned backfill.",
+    "concept": "<p>A volume forecast based only on yesterday’s traffic misses tomorrow’s planned backfill. Some future information is available before the future arrives.</p><p>A covariate is an extra input that may help explain the value being forecast. TimesFM-3 research describes using related series and such inputs. A future-known input must really have been available when the forecast was made; using later measurements would leak the answer.</p>",
+    "example": "<p>Our synthetic baseline predicts 100 units on each of seven days. Two known backfill days add 40 each, taking the total from 700 to 780. This is a teaching rule, not a TimesFM implementation.</p>",
     "practice": "Predict the seven-day total with the schedule ignored, then enable known-future covariates. Change the planned effect. Explain how you would backtest a schedule field that is often canceled after the forecast is made.",
     "boundary": "This is an original mean-plus-schedule calculator with a fixed illustrative ±15 interval. It does not execute TimesFM-3, learn cross-series dependence, produce calibrated quantiles, use attention, or reproduce any reported benchmark. The planned effect is chosen by you and can be wrong. No product availability is implied.",
     "sim": "<label><input id=\"include\" type=\"checkbox\"> Use planned-backfill covariate</label><label>Assumed effect per planned day <input id=\"effect\" type=\"range\" min=\"0\" max=\"80\" step=\"10\" value=\"40\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -257,7 +646,178 @@
         "https://research.google/blog/timesfm-3-a-zero-shot-foundation-model-for-multivariate-forecasting/",
         "Published 2026-08-31"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>Google Research introduced TimesFM-3 as a zero-shot foundation model for univariate, multivariate, and covariate-informed forecasting in a single forward pass. The August 31, 2026 write-up describes an alternating attention architecture, non-autoregressive horizon decoding, and quantile forecasts.</p><p>The new capability matters when related series and known future signals carry information that a target’s history alone cannot. Google reports leading or competitive results across its selected benchmark groups against named baselines. Those are research claims from the model team, not evidence for your workload. The post said BigQuery integration was coming “in the coming weeks”; as of the source date, that was a future plan, not a generally available feature claim.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A streaming platform’s last seven daily ingestion volumes hover near 100 units. Two future days have planned backfills. A history-only baseline repeats the historical mean, so it forecasts about 100 each day. A covariate-aware toy rule adds 40 on scheduled backfill days, producing a seven-day total near 780 rather than 700.</p><p>That does not prove the covariate helps. If schedules are canceled or the relationship changes, the extra signal can make the forecast worse. Evaluate it against a seasonal naive baseline on rolling historical cutoffs, using only covariates that would actually have been known at each cutoff.</p><p>TimesFM-3 separates target history, past-only covariates, and covariates known into the forecast horizon. For a platform pilot, examples might be ingestion volume as target, observed lag as past-only, and a committed backfill calendar as past-and-future. Prevent leakage: “eventually corrected actual volume” is not a future-known input.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "baseline = [100] * 7",
+          "note": "History-only prediction repeats the same value."
+        },
+        {
+          "code": "planned_backfill = [False, True, False, False, True, False, False]",
+          "note": "The schedule is known at the forecast cutoff."
+        },
+        {
+          "code": "forecast = [value + (40 if planned else 0) for value, planned in zip(baseline, planned_backfill)]",
+          "note": "Add the synthetic backfill effect only on scheduled days."
+        },
+        {
+          "code": "baseline_total = sum(baseline)",
+          "note": "The original weekly total is 700."
+        },
+        {
+          "code": "forecast_total = sum(forecast)",
+          "note": "The adjusted weekly total is 780."
+        }
+      ],
+      "limit": "The 40-unit effect is invented for teaching, not learned or reported performance. Canceled schedules or changed relationships can make the extra input harmful. Test with historical cutoffs and no future leakage.",
+      "expect": {
+        "baseline_total": 700,
+        "forecast_total": 780
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "baseline": [
+              100,
+              100,
+              100,
+              100,
+              100,
+              100,
+              100
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "baseline": [
+              100,
+              100,
+              100,
+              100,
+              100,
+              100,
+              100
+            ],
+            "planned_backfill": [
+              false,
+              true,
+              false,
+              false,
+              true,
+              false,
+              false
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "baseline": [
+              100,
+              100,
+              100,
+              100,
+              100,
+              100,
+              100
+            ],
+            "planned_backfill": [
+              false,
+              true,
+              false,
+              false,
+              true,
+              false,
+              false
+            ],
+            "forecast": [
+              100,
+              140,
+              100,
+              100,
+              140,
+              100,
+              100
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "baseline": [
+              100,
+              100,
+              100,
+              100,
+              100,
+              100,
+              100
+            ],
+            "planned_backfill": [
+              false,
+              true,
+              false,
+              false,
+              true,
+              false,
+              false
+            ],
+            "forecast": [
+              100,
+              140,
+              100,
+              100,
+              140,
+              100,
+              100
+            ],
+            "baseline_total": 700
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "baseline": [
+              100,
+              100,
+              100,
+              100,
+              100,
+              100,
+              100
+            ],
+            "planned_backfill": [
+              false,
+              true,
+              false,
+              false,
+              true,
+              false,
+              false
+            ],
+            "forecast": [
+              100,
+              140,
+              100,
+              100,
+              140,
+              100,
+              100
+            ],
+            "baseline_total": 700,
+            "forecast_total": 780
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-23"
   }
 ]
-

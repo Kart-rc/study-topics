@@ -34,3 +34,17 @@ This is a public repository. Keep personal assessment answers and confidential w
 To rebuild a reviewed bundle: `python3 scripts/render.py Day1`. New content requires researched lesson data; the renderer is not a content generator. Model simplifications appear inside each lesson.
 
 The lesson approach draws on the [Geoffrey Litt skillpack](https://github.com/Kart-rc/nlah-agent-repo/tree/main/harness/skillpacks/geoffreylitt): intuition before code, small executable worlds, and comprehension checks. The user explicitly requested retaining these learning artifacts. Quiz completion does not block the approved daily generation schedule.
+
+## Follow the code (Days 1–10)
+
+Each lesson now has a short code walkthrough with **Run next step**, **Previous step**, and **Start again**. The highlighted statement and changed values show what happened. Python and Java examples were executed to capture these records; the browser replays them. The separate interactive lab still lets you change inputs. Day10’s outbox example also executes a real SQLite transaction locally during trace generation.
+
+Core study time remains 15 minutes per lesson. Original technical detail is available in optional expanded sections. All original topics, scored quizzes, source links, and study/review history remain intact.
+
+- `DayN/examples/`: full runnable Python or Java teaching examples. Python uses only its standard library; Java examples use Java 17 here and require a source-launch-capable JDK to run.
+- Regenerate execution records: `python3 scripts/walkthrough.py` (Python plus Java required; set `STUDY_JAVA` only if Java is not on PATH).
+- Re-render a day: `python3 scripts/render.py Day10` (no Java or browser needed to render stored traces).
+- Verify all replay controls and common lesson behavior: `node scripts/verify-walkthroughs.cjs`.
+- Run the existing day-specific checks with `node DayN/verify.cjs` for Days 2–10. Day1 model checks are included in the shared verification script.
+
+See [TEACHING_UPDATE.md](TEACHING_UPDATE.md) for the revision scope and actual validation limits.

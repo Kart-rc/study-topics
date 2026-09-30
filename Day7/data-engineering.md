@@ -2,7 +2,7 @@
 
 Data engineering · Day7 · 15 minutes
 
-Decide when Structured Streaming Real-Time Mode changes the latency floor—and when query shape makes it the wrong execution mode.
+A fraud pre-filter needs low delay.
 
 ## Recall (2 minutes)
 
@@ -10,25 +10,67 @@ Decide when Structured Streaming Real-Time Mode changes the latency floor—and 
 
 ## Understand (4 minutes)
 
-Traditional Structured Streaming repeatedly plans and executes micro-batches. Making the trigger smaller can reduce batching delay, but scheduler and coordination work become a larger fraction of every batch. Spark 4.1 introduces Real-Time Mode (RTM), a different execution path for continuous, sub-second processing; the release describes first official support for Scala stateless workloads.
+A fraud pre-filter needs low delay. Reducing a processing interval sounds attractive, but the chosen mode must first support the work the query performs.
 
-The architectural question comes before the trigger value: is the query inside the supported surface? Spark 4.1 documents an allowlist and rejects unsupported sources, operators, or sinks; its error catalog also says async progress tracking is unsupported. Stateful aggregation, stream-stream joins, and arbitrary state are not merely tuning problems if the RTM scope does not support them.
+Spark Real-Time Mode uses a different execution approach from ordinary micro-batches. In the lesson’s Spark 4.1 scope, the supported stateless path is the starting point. Adding a per-card rolling count introduces stored state and changes eligibility. A smaller time setting cannot add missing operator support.
 
 
 
-Original teaching case: A Kafka fraud pre-filter parses events, applies a stateless rule, and writes candidates to another Kafka topic. At 20,000 events/s, four tasks each processing 8,000 events/s provide 32,000 events/s of toy capacity. A 500 ms micro-batch contributes about 250 ms average batching wait before processing; a 50 ms real-time epoch contributes about 25 ms in this deliberately simple model.
+Four tasks at 8,000 events per second provide 32,000 events per second of toy capacity for 20,000 arrivals. The stateless filter is eligible under our simplified check. Turning on the rolling counter fails that check before latency is considered.
 
-Add a per-card rolling counter and the choice changes. The business logic now needs durable keyed state. In Spark 4.1, shrinking the RTM epoch does not make that unsupported operator eligible; use a supported stateful mode or redesign the split so only the stateless prefix runs in RTM.
 
-eligibility = supported source + stateless operator graph + supported sink
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+arrivals = 20000; tasks = 4; rate_per_task = 8000
+capacity = tasks * rate_per_task
+has_stateful_counter = False
+eligible = not has_stateful_counter
+has_stateful_counter = True
+eligible = not has_stateful_counter
+```
+
+1. Define a synthetic stateless workload.
+
+   Changed values: `{"arrivals": 20000, "tasks": 4, "rate_per_task": 8000}`
+
+2. The nominal capacity is 32,000 events per second.
+
+   Changed values: `{"capacity": 32000}`
+
+3. The first query only parses and filters.
+
+   Changed values: `{"has_stateful_counter": false}`
+
+4. This one teaching constraint is satisfied.
+
+   Changed values: `{"eligible": true}`
+
+5. A per-card rolling count adds state.
+
+   Changed values: `{"has_stateful_counter": true}`
+
+6. The same simplified eligibility check now fails.
+
+   Changed values: `{"eligible": false}`
+
+[Full runnable example](examples/data-engineering.py).
+
+Limits: This is a scope check for the version described in the original lesson, not automatic Spark plan validation. Connector support, exact distribution, restart behavior, and resource demand require current platform documentation.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>Traditional Structured Streaming repeatedly plans and executes micro-batches. Making the trigger smaller can reduce batching delay, but scheduler and coordination work become a larger fraction of every batch. Spark 4.1 introduces Real-Time Mode (RTM), a different execution path for continuous, sub-second processing; the release describes first official support for Scala stateless workloads.</p><p>The architectural question comes before the trigger value: is the query inside the supported surface? Spark 4.1 documents an allowlist and rejects unsupported sources, operators, or sinks; its error catalog also says async progress tracking is unsupported. Stateful aggregation, stream-stream joins, and arbitrary state are not merely tuning problems if the RTM scope does not support them.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A Kafka fraud pre-filter parses events, applies a stateless rule, and writes candidates to another Kafka topic. At 20,000 events/s, four tasks each processing 8,000 events/s provide 32,000 events/s of toy capacity. A 500 ms micro-batch contributes about 250 ms average batching wait before processing; a 50 ms real-time epoch contributes about 25 ms in this deliberately simple model.</p><p>Add a per-card rolling counter and the choice changes. The business logic now needs durable keyed state. In Spark 4.1, shrinking the RTM epoch does not make that unsupported operator eligible; use a supported stateful mode or redesign the split so only the stateless prefix runs in RTM.</p><pre>eligibility = supported source + stateless operator graph + supported sink
 capacity = tasks × per-task rate
-approximate batching wait = epoch / 2
+approximate batching wait = epoch / 2</pre><p>Before adoption, validate connector semantics, checkpoint/restart behavior, backpressure, CPU overhead, observability, and the exact Spark distribution your managed platform exposes.</p>
 
-Before adoption, validate connector semantics, checkpoint/restart behavior, backpressure, CPU overhead, observability, and the exact Spark distribution your managed platform exposes.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Predict the result for a stateless query at 20,000 events/s, then add state and raise input above capacity. Explain why latency tuning cannot repair either ineligibility or sustained overload.
 

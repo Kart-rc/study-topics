@@ -29,3 +29,7 @@ The two-minute recall budget uses the two oldest due bundles: `Day6+3` and `Day8
 ## Actual limits
 
 Chromium was absent. Both available Playwright browser installation attempts failed with invalid/truncated downloads. No real-browser layout, keyboard traversal, localStorage persistence across browser sessions, or native download behavior was verified. CSS includes responsive stacking and visible keyboard focus, but those are implementation properties, not a visual test result. Simulated DOM checks do not reproduce browser rendering or browser security policies. No production Kafka, database, service, AI tool, or physical device was contacted by the models.
+
+## Plain-language and execution-walkthrough revision
+
+This day now has five executed code examples with recorded state replays and highlighted statements. Core explanations were simplified for Days 1–9; original technical detail is optional. Topic identities, scored quizzes, sources, original lab behavior, and study history were retained. Python/Java execution, replay controls, quiz/save/restore/export checks, and local links passed. Real-browser layout and native behavior remain unverified. See [TEACHING_UPDATE.md](../TEACHING_UPDATE.md) for scope, commands, and exact verification limits.

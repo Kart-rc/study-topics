@@ -29,3 +29,7 @@ An independent HTML-link walk checked 40 internal links across the root index an
 - The pages include a responsive viewport, fluid grid, narrow-screen media rule, keyboard focus styles, labels, legends, and live regions.
 - No Chromium, Chrome, or Firefox executable was available locally, so rendered visual layout, keyboard traversal in a real browser, local-storage persistence across reloads, and the browser's native download prompt were not established. The simulated DOM verifies the code paths, not browser integration.
 - The interactive models are intentionally simplified. Each page declares its omissions next to the model; outputs are teaching calculations, not production predictions.
+
+## Plain-language and execution-walkthrough revision
+
+This day now has five executed code examples with recorded state replays and highlighted statements. Core explanations were simplified for Days 1–9; original technical detail is optional. Topic identities, scored quizzes, sources, original lab behavior, and study history were retained. Python/Java execution, replay controls, quiz/save/restore/export checks, and local links passed. Real-browser layout and native behavior remain unverified. See [TEACHING_UPDATE.md](../TEACHING_UPDATE.md) for scope, commands, and exact verification limits.

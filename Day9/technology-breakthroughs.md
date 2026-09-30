@@ -2,7 +2,7 @@
 
 Technology breakthroughs · Day9 · 15 minutes
 
-Understand how difference-frequency generation in an intersubband polaritonic metasurface produced tunable continuous-wave terahertz output—and what a laboratory demonstration does not yet establish.
+Scientists want controllable terahertz light for applications such as spectroscopy.
 
 ## Recall (2 minutes)
 
@@ -10,24 +10,61 @@ Understand how difference-frequency generation in an intersubband polaritonic me
 
 ## Understand (4 minutes)
 
-Terahertz radiation sits between electronics and optics. Tunable, narrowband, continuous-wave sources are especially difficult in the upper part of the 0.1–15 THz range. The reported device pumps an ultrathin nonlinear metasurface with two continuous-wave mid-infrared lasers. Their frequency difference emerges as terahertz radiation: fTHz = |f1 − f2|.
+Scientists want controllable terahertz light for applications such as spectroscopy. Generating useful light in this range is technically difficult.
 
-The 2026 Nature Photonics paper reports a 1–11 THz tuning range and up to 14 μW in the 6–11 THz band. The active structure couples intersubband electronic transitions to optical resonances, producing a second-order nonlinear response reported as three orders of magnitude larger than leading nonlinear crystals for this task. Because the metasurface is deeply subwavelength, bulk phase-matching and absorption constraints are reduced.
-
-This is a research result, not a product forecast. Output power, wall-plug efficiency, thermal behavior, fabrication yield, beam quality, lifetime, packaging, pump integration, and spectroscopy-system performance determine whether the approach crosses from a lab source to a deployable instrument.
+The research device mixes two incoming laser frequencies so their difference appears as a new output frequency. A very thin engineered surface helps this conversion. The paper reports a laboratory result; output power alone does not establish a practical instrument.
 
 
 
-Worked example: Pump lines at 30.0 THz and 20.5 THz produce a 9.5 THz difference. Using a toy normalized efficiency of 0.7 mW/W² and pump powers of 0.216 W and 0.100 W:
-
-fTHz = |30.0 − 20.5| = 9.5 THz
-PTHz = 0.7 mW/W² × 0.216 W × 0.100 W = 0.0151 mW = 15.1 μW
-
-That happens to sit near the reported output scale, but it is not a fit to the device. Real conversion depends strongly on resonances, frequency, coupling, losses, polarization, focusing, and heating.
+Input frequencies of 30.0 and 20.5 THz differ by 9.5 THz. A separate toy power rule gives about 15.1 microwatts from the chosen inputs. That arithmetic is not a fit to the device and must not be presented as its measured output.
 
 
 
-## Explore (5 minutes)
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+pump1_thz = 30.0; pump2_thz = 20.5
+output_thz = abs(pump1_thz - pump2_thz)
+toy_efficiency_mw_per_w2 = 0.7; p1_w = 0.216; p2_w = 0.1
+output_mw = toy_efficiency_mw_per_w2 * p1_w * p2_w
+output_microwatts = output_mw * 1000
+```
+
+1. These are the synthetic incoming frequencies.
+
+   Changed values: `{"pump1_thz": 30.0, "pump2_thz": 20.5}`
+
+2. The difference is 9.5 THz.
+
+   Changed values: `{"output_thz": 9.5}`
+
+3. These power-model inputs are teaching assumptions.
+
+   Changed values: `{"toy_efficiency_mw_per_w2": 0.7, "p1_w": 0.216, "p2_w": 0.1}`
+
+4. The simple product gives 0.01512 mW.
+
+   Changed values: `{"output_mw": 0.015120000000000001}`
+
+5. Convert that toy value to 15.12 microwatts.
+
+   Changed values: `{"output_microwatts": 15.120000000000001}`
+
+[Full runnable example](examples/technology-breakthroughs.py).
+
+Limits: This arithmetic does not simulate the metasurface or reproduce the paper’s reported maximum. Resonances, coupling, temperature, losses, and system efficiency are outside the model.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>Terahertz radiation sits between electronics and optics. Tunable, narrowband, continuous-wave sources are especially difficult in the upper part of the 0.1–15 THz range. The reported device pumps an ultrathin nonlinear metasurface with two continuous-wave mid-infrared lasers. Their frequency difference emerges as terahertz radiation: <code>fTHz = |f1 − f2|</code>.</p><p>The 2026 Nature Photonics paper reports a 1–11 THz tuning range and up to 14 μW in the 6–11 THz band. The active structure couples intersubband electronic transitions to optical resonances, producing a second-order nonlinear response reported as three orders of magnitude larger than leading nonlinear crystals for this task. Because the metasurface is deeply subwavelength, bulk phase-matching and absorption constraints are reduced.</p><p>This is a research result, not a product forecast. Output power, wall-plug efficiency, thermal behavior, fabrication yield, beam quality, lifetime, packaging, pump integration, and spectroscopy-system performance determine whether the approach crosses from a lab source to a deployable instrument.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> Pump lines at 30.0 THz and 20.5 THz produce a 9.5 THz difference. Using a toy normalized efficiency of 0.7 mW/W² and pump powers of 0.216 W and 0.100 W:</p><pre>fTHz = |30.0 − 20.5| = 9.5 THz
+PTHz = 0.7 mW/W² × 0.216 W × 0.100 W = 0.0151 mW = 15.1 μW</pre><p>That happens to sit near the reported output scale, but it is not a fit to the device. Real conversion depends strongly on resonances, frequency, coupling, losses, polarization, focusing, and heating.</p>
+
+</details>
+
+## Explore (remaining exploration time)
 
 Choose two pump frequencies, powers, and a normalized efficiency. Predict the terahertz frequency and toy output. Then move outside 1–11 THz or raise power and explain why the paper does not justify extrapolation.
 

@@ -2,7 +2,7 @@
 
 GenAI engineering · Day4 · 15 minutes
 
-Recover a long-running agent after harness or sandbox failure without making either runtime the sole owner of progress or credentials.
+An agent’s sandbox dies halfway through a repair.
 
 ## Recall (2 minutes)
 
@@ -10,28 +10,70 @@ Recover a long-running agent after harness or sandbox failure without making eit
 
 ## Understand (4 minutes)
 
-A long-running agent has at least three different concerns: the brain and harness decide what to do; the hands execute tools and code; the session records what happened. Coupling all three inside one container makes that container a stateful pet. If it dies, progress, evidence, and execution environment can disappear together.
+An agent’s sandbox dies halfway through a repair. If the work log lived only inside that sandbox, the next session cannot tell which repairs finished.
 
-Anthropic's April 2026 Managed Agents write-up describes stable interfaces around these parts: an external append-only session log, a replaceable harness, and replaceable sandboxes/tools reached through an execute(name, input) → string boundary. A new harness can wake from the durable session, while a failed sandbox can be reprovisioned.
+Separate the decision-maker, the execution environment, and the durable session record. The decision-maker is the model plus harness; the sandbox runs tools; the session record preserves evidence. Replacing one should not erase the others.
 
 
 
-Original teaching case: An agent repairs 300 lineage definitions in three checkpoints. In a coupled design, checkpoint state lives only in the same container as the harness and repository. A sandbox failure after checkpoint 2 loses the trustworthy record of completed work; restarting risks both repetition and omission.
+Two checkpoints are recorded outside the sandbox. The sandbox is then replaced. Recovery reads checkpoint 2 and knows checkpoint 3 is next—but it must reconcile any uncertain external action before repeating it.
 
-In the decoupled model, each completed checkpoint emits an event to a durable session before the next decision. If the sandbox dies, a new hand is provisioned. If the harness dies, a new brain reads the log. Neither recovery guarantees that a repeated external mutation is safe—tool calls still need idempotency keys or outcome reconciliation.
 
-emitEvent(session, checkpointCompleted)
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+session_log = ["checkpoint 1 complete", "checkpoint 2 complete"]
+sandbox = {"temporary_files": 4}
+sandbox = None
+sandbox = {"temporary_files": 0}
+last_verified = session_log[-1]
+next_action = "reconcile, then checkpoint 3"
+```
+
+1. Completed checkpoints are recorded outside the sandbox.
+
+   Changed values: `{"session_log": ["checkpoint 1 complete", "checkpoint 2 complete"]}`
+
+2. The execution environment has temporary state.
+
+   Changed values: `{"sandbox": {"temporary_files": 4}}`
+
+3. That environment fails.
+
+   Changed values: `{"sandbox": null}`
+
+4. A fresh environment starts empty.
+
+   Changed values: `{"sandbox": {"temporary_files": 0}}`
+
+5. The external session still knows checkpoint 2 completed.
+
+   Changed values: `{"last_verified": "checkpoint 2 complete"}`
+
+6. Recovery checks uncertain work before continuing.
+
+   Changed values: `{"next_action": "reconcile, then checkpoint 3"}`
+
+[Full runnable example](examples/genai-engineering.py).
+
+Limits: The list represents a durable external log; this in-memory Python list is not itself durable. Logging after an external effect can leave uncertainty, so use idempotency or authoritative outcome reconciliation.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A long-running agent has at least three different concerns: the brain and harness decide what to do; the hands execute tools and code; the session records what happened. Coupling all three inside one container makes that container a stateful pet. If it dies, progress, evidence, and execution environment can disappear together.</p><p>Anthropic's April 2026 Managed Agents write-up describes stable interfaces around these parts: an external append-only session log, a replaceable harness, and replaceable sandboxes/tools reached through an <code>execute(name, input) → string</code> boundary. A new harness can wake from the durable session, while a failed sandbox can be reprovisioned.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> An agent repairs 300 lineage definitions in three checkpoints. In a coupled design, checkpoint state lives only in the same container as the harness and repository. A sandbox failure after checkpoint 2 loses the trustworthy record of completed work; restarting risks both repetition and omission.</p><p>In the decoupled model, each completed checkpoint emits an event to a durable session before the next decision. If the sandbox dies, a new hand is provisioned. If the harness dies, a new brain reads the log. Neither recovery guarantees that a repeated external mutation is safe—tool calls still need idempotency keys or outcome reconciliation.</p><pre>emitEvent(session, checkpointCompleted)
 execute(sandbox, nextAction)
 on failure:
   wake(session)
   provision(resources)
-  reconcile last action before retry
+  reconcile last action before retry</pre><p>The same separation creates a security boundary. Anthropic reports keeping credentials outside the generated-code sandbox and using a proxy/vault for MCP calls. The general design principle is structural: the hand receives the capability needed for the action, not a vault it can inspect.</p>
 
-The same separation creates a security boundary. Anthropic reports keeping credentials outside the generated-code sandbox and using a proxy/vault for MCP calls. The general design principle is structural: the hand receives the capability needed for the action, not a vault it can inspect.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Complete two checkpoints, then fail the sandbox in coupled mode and resume. Reset and repeat in decoupled mode. Also fail the harness. Explain which event must be durable before an irreversible tool call can be retried safely.
 

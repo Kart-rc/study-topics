@@ -16,7 +16,7 @@ for(const L of lessons){
   }
   let downloaded=false,blob='',storage={};
   const ctx={document:{getElementById:id=>nodes[id],querySelector:s=>{const q=s.match(/name="q(\d+)"/);return q?radios[q[1]]||null:null},createElement:()=>({click:()=>downloaded=true})},localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>storage[k]=v},Blob:class{constructor(data){blob=data.join('')}},URL:{createObjectURL:()=>'',revokeObjectURL:()=>{}},setTimeout:fn=>fn(),console};
-  vm.createContext(ctx);vm.runInContext(match[1],ctx);
+  require('../scripts/trace-dom.cjs').extend(ctx,nodes,html); vm.createContext(ctx);vm.runInContext(match[1],ctx);
   const click=id=>nodes[id].onclick(),world=()=>nodes.world.textContent;
   assert(html.includes('Day1:')&&html.includes('Day5:')&&html.match(/Recall first, then reveal/g).length===2,'Day1/Day5 refreshers missing');
   assert(md.includes('## Sources')&&md.includes('checked 2026-09-28'),'Markdown sources/check date missing');

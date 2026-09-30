@@ -30,7 +30,64 @@ For checkout, a useful response might be “delivery quote unavailable; please t
 
 
 
-## Explore (5 minutes)
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```java
+String state = "closed"; int failures = 0;
+failures += 1;
+failures += 1;
+failures += 1;
+state = failures >= 3 ? "open" : state;
+boolean forwardFourthCall = !state.equals("open");
+state = "half-open";
+boolean probeSucceeded = true;
+state = probeSucceeded ? "closed" : "open";
+```
+
+1. Closed allows calls to reach the service.
+
+   Changed values: `{"state": "closed", "failures": "0"}`
+
+2. The first forwarded call fails.
+
+   Changed values: `{"failures": "1"}`
+
+3. The second call fails.
+
+   Changed values: `{"failures": "2"}`
+
+4. The third call fails.
+
+   Changed values: `{"failures": "3"}`
+
+5. The chosen threshold opens the breaker.
+
+   Changed values: `{"state": "open"}`
+
+6. The next immediate call is blocked locally.
+
+   Changed values: `{"forwardFourthCall": "false"}`
+
+7. For this trace, the waiting period has now elapsed.
+
+   Changed values: `{"state": "half-open"}`
+
+8. Supply a successful probe result.
+
+   Changed values: `{"probeSucceeded": "true"}`
+
+9. The successful probe allows normal calls again.
+
+   Changed values: `{"state": "closed"}`
+
+[Full runnable example](examples/software-engineering.java).
+
+Limits: This sequential state trace is not a thread-safe circuit-breaker library. It supplies the elapsed wait and probe result explicitly. The interactive lab lets you explore failed probes too.
+
+## Explore (remaining exploration time)
 
 Leave the service unhealthy and call it four times. Compare forwarded and blocked counts. Advance five seconds, make the service healthy, then send the probe. Reset and try a failed probe.
 

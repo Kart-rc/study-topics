@@ -2,7 +2,7 @@
 
 Data engineering · Day8 · 15 minutes
 
-Reason about foreground checkpoint cost, recovery replay, and why changelog checkpointing changes latency without changing the state contract.
+A streaming job holds a large amount of state but changes only a small part each batch.
 
 ## Recall (2 minutes)
 
@@ -10,25 +10,62 @@ Reason about foreground checkpoint cost, recovery replay, and why changelog chec
 
 ## Understand (4 minutes)
 
-A stateful Structured Streaming operator has two different obligations: make every committed micro-batch durable, and make recovery bounded. Traditional RocksDB checkpointing uploads a manifest plus newly generated SST files during the commit path. Changelog checkpointing instead writes the changes made since the prior checkpoint; background snapshots later compact that history and trim old changelogs.
+A streaming job holds a large amount of state but changes only a small part each batch. Persisting the changes can reduce the work on the commit path.
 
-The mental model is a database write-ahead log plus periodic base image. The delta can make the foreground commit much smaller when a large state store changes only a little per trigger. The background snapshot is not optional housekeeping: without a recent base, recovery would replay an ever-growing log. Spark documents the mode as backward-compatible in both directions, but a query restart is required when switching it.
-
-Design consequence: do not translate “less checkpoint I/O per batch” into “recovery is free.” Watch commit latency, durable bytes, snapshot age or lag, and restore time together. A slow object store can move work off the hot path while still leaving a recovery liability.
+A changelog records changes since a previous checkpoint. A snapshot records a base state. Recovery restores the base, then replays later changes. Moving snapshot work into the background helps commits, but an old base can leave more recovery work.
 
 
 
-Worked example: A 200 GB RocksDB state store mutates 400 MB per batch. Suppose its incremental-snapshot path uploads 1.2 GB of changed SST files per commit, while a changelog records the 400 MB logical delta. Across 12 batches, the foreground path moves 14.4 GB versus 4.8 GB. If a background snapshot is taken every sixth batch, a failure just before the next snapshot must restore the latest base and replay up to five deltas.
+At 400 MB of changes per batch, twelve changelogs total 4.8 GB. The comparison path uploads 1.2 GB of changed files each batch, or 14.4 GB. With a base every sixth batch, up to five later deltas mean 2 GB of replay in this toy.
 
-foreground snapshot bytes = 12 × 1.2 GB = 14.4 GB
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+batches = 12; delta_gb = 0.4; changed_files_gb = 1.2
+changelog_gb = batches * delta_gb
+file_upload_gb = batches * changed_files_gb
+snapshot_every = 6
+max_replay_gb = (snapshot_every - 1) * delta_gb
+```
+
+1. These are synthetic workload measurements.
+
+   Changed values: `{"batches": 12, "delta_gb": 0.4, "changed_files_gb": 1.2}`
+
+2. The foreground changelog total is 4.8 GB.
+
+   Changed values: `{"changelog_gb": 4.800000000000001}`
+
+3. The comparison path totals 14.4 GB.
+
+   Changed values: `{"file_upload_gb": 14.399999999999999}`
+
+4. A base image bounds the length of replay.
+
+   Changed values: `{"snapshot_every": 6}`
+
+5. Up to five deltas total 2 GB.
+
+   Changed values: `{"max_replay_gb": 2.0}`
+
+[Full runnable example](examples/data-engineering.py).
+
+Limits: This is I/O accounting, not Spark checkpoint execution. It does not say the full 200 GB state is uploaded each batch or that recovery is free. Actual compaction and snapshot scheduling matter.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A stateful Structured Streaming operator has two different obligations: make every committed micro-batch durable, and make recovery bounded. Traditional RocksDB checkpointing uploads a manifest plus newly generated SST files during the commit path. Changelog checkpointing instead writes the changes made since the prior checkpoint; background snapshots later compact that history and trim old changelogs.</p><p>The mental model is a database write-ahead log plus periodic base image. The delta can make the foreground commit much smaller when a large state store changes only a little per trigger. The background snapshot is not optional housekeeping: without a recent base, recovery would replay an ever-growing log. Spark documents the mode as backward-compatible in both directions, but a query restart is required when switching it.</p><p><strong>Design consequence:</strong> do not translate “less checkpoint I/O per batch” into “recovery is free.” Watch commit latency, durable bytes, snapshot age or lag, and restore time together. A slow object store can move work off the hot path while still leaving a recovery liability.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> A 200 GB RocksDB state store mutates 400 MB per batch. Suppose its incremental-snapshot path uploads 1.2 GB of changed SST files per commit, while a changelog records the 400 MB logical delta. Across 12 batches, the foreground path moves 14.4 GB versus 4.8 GB. If a background snapshot is taken every sixth batch, a failure just before the next snapshot must restore the latest base and replay up to five deltas.</p><pre>foreground snapshot bytes = 12 × 1.2 GB = 14.4 GB
 foreground changelog bytes = 12 × 0.4 GB = 4.8 GB
-worst replay after a base = 5 × 0.4 GB = 2.0 GB
+worst replay after a base = 5 × 0.4 GB = 2.0 GB</pre><p>The 1.2 GB is an observed/planned SST-upload input, not a claim that Spark uploads the whole 200 GB state each batch. Measure it from your workload: compaction, key distribution, file layout, and churn determine physical write amplification.</p>
 
-The 1.2 GB is an observed/planned SST-upload input, not a claim that Spark uploads the whole 200 GB state each batch. Measure it from your workload: compaction, key distribution, file layout, and churn determine physical write amplification.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Predict which path moves fewer foreground bytes. Change state size, logical delta, changed-SST upload, snapshot cadence, and failure batch. Then explain why lowering commit latency can increase recovery work if snapshots fall behind.
 

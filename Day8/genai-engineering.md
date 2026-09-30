@@ -2,7 +2,7 @@
 
 GenAI engineering · Day8 · 15 minutes
 
-Use tool annotations to improve routing and confirmation UX while keeping authorization, sandboxing, taint tracking, and idempotency enforcement deterministic.
+A tool describes itself as read-only.
 
 ## Recall (2 minutes)
 
@@ -10,26 +10,63 @@ Use tool annotations to improve routing and confirmation UX while keeping author
 
 ## Understand (4 minutes)
 
-MCP tools may advertise four useful behavioral hints: readOnlyHint, destructiveHint, idempotentHint, and openWorldHint. A harness can use trusted metadata to choose a confirmation flow, decide whether a retry is plausible, or mark returned content as crossing a trust boundary.
+A tool describes itself as read-only. Should the harness let it do anything it asks? A description is useful information, but it is not an enforcement mechanism.
 
-The specification's crucial word is hint. Clients must treat annotations as untrusted unless they come from a trusted server. A server can be wrong or malicious; a boolean cannot prevent file deletion or exfiltration. Hard guarantees belong in capabilities, network policy, sandboxing, schema validation, approval gates, idempotency records, and post-call inspection.
-
-Risk is compositional. Private data, attacker-controlled content, and an external communication path are far more dangerous together than any tool in isolation. Therefore the harness should evaluate the whole execution path and current taint state, not merely trust the annotation on the next call.
+MCP annotations are hints about expected tool behavior. Their usefulness depends on whether the server is trusted. Actual capabilities and policy must still restrict effects. A read-only hint cannot stop a file write; a sandbox permission can.
 
 
 
-Worked example: A tool from a trusted internal server declares readOnlyHint: true and openWorldHint: false; the harness may omit a redundant mutation confirmation while still enforcing read scopes. A new third-party server declares the same flags. The correct posture is pessimistic: treat the hints as informational, apply the server's actual permissions, and require the cautious path.
+The untrusted tool claims to be read-only but proposes a write. The available capability is read only, so the write is blocked. Changing the hint would not grant a new capability.
 
-metadata suggests behavior
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+hint_read_only = True; trusted_server = False
+capabilities = {"read"}
+proposed_action = "write"
+allowed = proposed_action in capabilities
+hint_is_authority = False
+```
+
+1. An untrusted server supplies a reassuring hint.
+
+   Changed values: `{"hint_read_only": true, "trusted_server": false}`
+
+2. The execution environment permits only reading.
+
+   Changed values: `{}`
+
+3. The actual proposal requests a different effect.
+
+   Changed values: `{"proposed_action": "write"}`
+
+4. The enforced capability check denies the write.
+
+   Changed values: `{"allowed": false}`
+
+5. Metadata did not create permission.
+
+   Changed values: `{"hint_is_authority": false}`
+
+[Full runnable example](examples/genai-engineering.py).
+
+Limits: This is a permission-set model, not a complete MCP client. Real policy must evaluate identity, tool scope, arguments, data sensitivity, and external destinations.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>MCP tools may advertise four useful behavioral hints: <code>readOnlyHint</code>, <code>destructiveHint</code>, <code>idempotentHint</code>, and <code>openWorldHint</code>. A harness can use trusted metadata to choose a confirmation flow, decide whether a retry is plausible, or mark returned content as crossing a trust boundary.</p><p>The specification's crucial word is <em>hint</em>. Clients must treat annotations as untrusted unless they come from a trusted server. A server can be wrong or malicious; a boolean cannot prevent file deletion or exfiltration. Hard guarantees belong in capabilities, network policy, sandboxing, schema validation, approval gates, idempotency records, and post-call inspection.</p><p>Risk is compositional. Private data, attacker-controlled content, and an external communication path are far more dangerous together than any tool in isolation. Therefore the harness should evaluate the whole execution path and current taint state, not merely trust the annotation on the next call.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> A tool from a trusted internal server declares <code>readOnlyHint: true</code> and <code>openWorldHint: false</code>; the harness may omit a redundant mutation confirmation while still enforcing read scopes. A new third-party server declares the same flags. The correct posture is pessimistic: treat the hints as informational, apply the server's actual permissions, and require the cautious path.</p><pre>metadata suggests behavior
 policy decides permission
 runtime constrains effects
-evidence verifies outcome
+evidence verifies outcome</pre><p>For retries, <code>idempotentHint: true</code> can improve UX only when the server is trusted. A harness that must prevent duplicate payments still needs an application idempotency key or durable call ledger.</p>
 
-For retries, idempotentHint: true can improve UX only when the server is trusted. A harness that must prevent duplicate payments still needs an application idempotency key or durable call ledger.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Toggle server trust, private context, untrusted input, external communication, destructive and idempotent hints, and an enforced idempotency key. Predict the harness decision and whether an automatic retry is justified.
 

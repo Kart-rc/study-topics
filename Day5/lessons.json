@@ -4,9 +4,9 @@
     "track": "Data engineering",
     "title": "Iceberg partition evolution: new layout, same query",
     "tag": "Foundation · Iceberg 1.11.0",
-    "goal": "Predict how one logical time filter is planned across old and new partition specs without rewriting historical files.",
-    "concept": "<p>A partition is a physical pruning hint, not part of the business question. Apache Iceberg's hidden partitioning lets a query filter on source columns such as <code>event_time</code>; the table derives the appropriate partition filter. That separation makes the layout evolvable.</p><p>When the table changes from day to hour partitioning, existing files stay in their old daily layout and new files use the hourly layout. Iceberg keeps both partition specs in metadata and plans each layout separately. The change is a metadata operation, not an eager rewrite.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A lineage-events table writes Days 1–7 into one file per day. Query latency for a two-hour incident window is dominated by reading a whole day. On Day 8, the platform changes new writes to hourly partitioning.</p><p>The SQL remains <code>WHERE event_time BETWEEN ...</code>. For Day 6, the planner maps that predicate to the old day transform and scans one 24-hour file. For Day 10, it maps the same predicate to the new hour transform and scans two one-hour files. If a query crosses the cutover, both planning rules participate.</p><pre>ALTER TABLE lineage.events\nREPLACE PARTITION FIELD day(event_time)\nWITH hour(event_time);</pre><p>No historical rewrite means no immediate migration blast radius, but it also means old files do not magically gain hourly pruning. A deliberate rewrite or compaction can improve them later. Engine/version support, catalog coordination, file sizing, and manifest maintenance still belong in the production plan.</p>",
+    "goal": "A two-hour incident query reads a whole day of old data.",
+    "concept": "<p>A two-hour incident query reads a whole day of old data. You want future data stored in smaller time groups without rewriting everything today.</p><p>Partition evolution changes the layout for new writes while the table remembers how older files were laid out. Queries still filter by event time. The planner uses the appropriate rule for each file group. Old files do not become more finely divided just because the new rule exists.</p>",
+    "example": "<p>The toy table has one 24-hour file on Day 6 and hourly files on Day 10. A two-hour query touches 24 hours of old file coverage but only two hours of new file coverage. The query’s meaning stays the same.</p>",
     "practice": "Predict the scanned time for a two-hour query before moving the day across the cutover. Then disable evolution and explain why query text can remain stable while physical pruning changes.",
     "boundary": "A fourteen-day table with exactly one daily file or twenty-four hourly files per day and perfect predicate pruning. It does not execute Iceberg or Spark, read manifests, model file statistics, residual filters, partition transforms beyond time, compaction, snapshot isolation, catalog support, skew, or object-store request cost.",
     "sim": "<label>Query day <input id=\"queryDay\" type=\"range\" min=\"1\" max=\"14\" step=\"1\" value=\"6\"></label><label>Hours requested <input id=\"queryHours\" type=\"range\" min=\"1\" max=\"24\" step=\"1\" value=\"2\"></label><label><input id=\"evolve\" type=\"checkbox\" checked> New writes use hourly partitions from Day 8</label><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -49,16 +49,244 @@
         "https://iceberg.apache.org/docs/latest/evolution/#partition-evolution",
         "Living Apache documentation for latest 1.11.0; page publication date not stated"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>A partition is a physical pruning hint, not part of the business question. Apache Iceberg's hidden partitioning lets a query filter on source columns such as <code>event_time</code>; the table derives the appropriate partition filter. That separation makes the layout evolvable.</p><p>When the table changes from day to hour partitioning, existing files stay in their old daily layout and new files use the hourly layout. Iceberg keeps both partition specs in metadata and plans each layout separately. The change is a metadata operation, not an eager rewrite.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A lineage-events table writes Days 1–7 into one file per day. Query latency for a two-hour incident window is dominated by reading a whole day. On Day 8, the platform changes new writes to hourly partitioning.</p><p>The SQL remains <code>WHERE event_time BETWEEN ...</code>. For Day 6, the planner maps that predicate to the old day transform and scans one 24-hour file. For Day 10, it maps the same predicate to the new hour transform and scans two one-hour files. If a query crosses the cutover, both planning rules participate.</p><pre>ALTER TABLE lineage.events\nREPLACE PARTITION FIELD day(event_time)\nWITH hour(event_time);</pre><p>No historical rewrite means no immediate migration blast radius, but it also means old files do not magically gain hourly pruning. A deliberate rewrite or compaction can improve them later. Engine/version support, catalog coordination, file sizing, and manifest maintenance still belong in the production plan.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "old_file_hours = [24]; new_file_hours = [1] * 24",
+          "note": "The two layouts have different file granularity."
+        },
+        {
+          "code": "query_hours = [10, 11]",
+          "note": "The requested interval covers two hours."
+        },
+        {
+          "code": "old_scan_hours = sum(old_file_hours)",
+          "note": "The old day-sized file is still the pruning unit."
+        },
+        {
+          "code": "new_scan_hours = sum(new_file_hours[h] for h in query_hours)",
+          "note": "The new layout selects two hourly files."
+        },
+        {
+          "code": "same_filter = \"event_time in hours 10 and 11\"",
+          "note": "The consumer asks the same question of both layouts."
+        }
+      ],
+      "limit": "This models file coverage, not bytes or an Iceberg planner. File statistics may prune more, and real file sizes vary. Partition evolution does not itself rewrite historical data.",
+      "expect": {
+        "old_scan_hours": 24,
+        "new_scan_hours": 2
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "old_file_hours": [
+              24
+            ],
+            "new_file_hours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "old_file_hours": [
+              24
+            ],
+            "new_file_hours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "query_hours": [
+              10,
+              11
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "old_file_hours": [
+              24
+            ],
+            "new_file_hours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "query_hours": [
+              10,
+              11
+            ],
+            "old_scan_hours": 24
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "old_file_hours": [
+              24
+            ],
+            "new_file_hours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "query_hours": [
+              10,
+              11
+            ],
+            "old_scan_hours": 24,
+            "new_scan_hours": 2
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "old_file_hours": [
+              24
+            ],
+            "new_file_hours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "query_hours": [
+              10,
+              11
+            ],
+            "old_scan_hours": 24,
+            "new_scan_hours": 2,
+            "same_filter": "event_time in hours 10 and 11"
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-25"
   },
   {
     "slug": "software-engineering",
     "track": "Software engineering",
     "title": "Consistent hashing: move a slice, not the whole keyspace",
     "tag": "Foundation · Dynamo paper",
-    "goal": "Trace key ownership on a ring and quantify why membership changes remap fewer keys than modulo sharding.",
-    "concept": "<p>Naive modulo sharding maps <code>hash(key) % nodeCount</code>. It is simple and balanced, but changing the divisor changes the answer for many keys. Adding one cache node can therefore invalidate most placement decisions at once.</p><p>Consistent hashing maps keys and nodes into a fixed circular hash space. A key belongs to the first node clockwise from its position. Adding a node changes ownership only for the arc between that node and its predecessor. Amazon's Dynamo paper used consistent hashing for incremental scale and added virtual nodes to improve balance and represent heterogeneous capacity.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A schema-registry cache has three nodes. Adding a fourth with modulo sharding changes the divisor from three to four, so keys scatter to different owners. The warm-cache event becomes a fleet-wide cold-cache event.</p><p>On a ring, A, B, and C keep their positions. D takes only keys in D's newly claimed clockwise interval. The rest retain their owner. Operationally, the mechanism converts a global reshuffle into bounded movement—but the hottest individual keys can still overload their owners.</p><pre>position = hash(key) on a fixed ring\nowner = first node clockwise from position\nadd D → only predecessor-to-D arc changes owner</pre><p>Production systems rarely stop at one point per host: virtual nodes smooth random imbalance, replicas span failure domains, and membership changes need an agreed view. Consistent hashing minimizes movement; it does not provide consensus, replication, or load fairness by itself.</p>",
+    "goal": "Adding a cache node can unexpectedly move most keys and make many caches cold at once.",
+    "concept": "<p>Adding a cache node can unexpectedly move most keys and make many caches cold at once. A placement rule should make expansion less disruptive.</p><p>Consistent hashing places nodes on a fixed ring. A key belongs to the next node clockwise. Adding a node changes ownership only for the interval it takes over. Real systems often assign several positions per node to improve balance.</p>",
+    "example": "<p>With node positions 20, 50, and 80, keys 25 and 45 belong to B. Add D at 40: key 25 moves to D, while key 45 stays with B. A key beyond 80 wraps around to A.</p>",
     "practice": "Start with three nodes, then add D. Compare ring and modulo remapping. Add E and explain why a low movement count can coexist with a bad hotspot.",
     "boundary": "Sixty synthetic keys, a 64-slot ring, fixed node positions, one owner per key, and a tiny deterministic hash. It omits virtual nodes, replicas, weighted capacity, failure domains, membership consensus, concurrent changes, streaming migration, skewed access popularity, and cryptographic hash quality.",
     "sim": "<label>Mapping strategy <select id=\"mapping\"><option value=\"ring\">Consistent-hash ring</option><option value=\"mod\">Modulo node count</option></select></label><label>Active nodes <input id=\"nodeCount\" type=\"range\" min=\"3\" max=\"5\" step=\"1\" value=\"3\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -101,16 +329,114 @@
         "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf",
         "SOSP; published 2007-10-14"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>Naive modulo sharding maps <code>hash(key) % nodeCount</code>. It is simple and balanced, but changing the divisor changes the answer for many keys. Adding one cache node can therefore invalidate most placement decisions at once.</p><p>Consistent hashing maps keys and nodes into a fixed circular hash space. A key belongs to the first node clockwise from its position. Adding a node changes ownership only for the arc between that node and its predecessor. Amazon's Dynamo paper used consistent hashing for incremental scale and added virtual nodes to improve balance and represent heterogeneous capacity.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A schema-registry cache has three nodes. Adding a fourth with modulo sharding changes the divisor from three to four, so keys scatter to different owners. The warm-cache event becomes a fleet-wide cold-cache event.</p><p>On a ring, A, B, and C keep their positions. D takes only keys in D's newly claimed clockwise interval. The rest retain their owner. Operationally, the mechanism converts a global reshuffle into bounded movement—but the hottest individual keys can still overload their owners.</p><pre>position = hash(key) on a fixed ring\nowner = first node clockwise from position\nadd D → only predecessor-to-D arc changes owner</pre><p>Production systems rarely stop at one point per host: virtual nodes smooth random imbalance, replicas span failure domains, and membership changes need an agreed view. Consistent hashing minimizes movement; it does not provide consensus, replication, or load fairness by itself.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "var ring = new java.util.TreeMap<Integer, String>();",
+          "note": "A sorted map represents clockwise ring positions."
+        },
+        {
+          "code": "ring.put(20, \"A\"); ring.put(50, \"B\"); ring.put(80, \"C\");",
+          "note": "Three nodes occupy fixed positions."
+        },
+        {
+          "code": "String owner25Before = ring.ceilingEntry(25).getValue();",
+          "note": "Key 25 initially belongs to B."
+        },
+        {
+          "code": "ring.put(40, \"D\");",
+          "note": "The new node is inserted without moving old positions."
+        },
+        {
+          "code": "String owner25After = ring.ceilingEntry(25).getValue();",
+          "note": "D now owns key 25."
+        },
+        {
+          "code": "String owner45After = ring.ceilingEntry(45).getValue();",
+          "note": "Key 45 stays with B."
+        },
+        {
+          "code": "String owner90 = ring.firstEntry().getValue();",
+          "note": "Key 90 has no higher position, so it wraps to A."
+        }
+      ],
+      "limit": "Positions are assigned numbers, not actual hashes. This single-point ring omits replicas, virtual nodes, membership agreement, and hot-key handling.",
+      "expect": {
+        "owner25Before": "B",
+        "owner25After": "D",
+        "owner45After": "B"
+      },
+      "language": "java",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "ring": "{}"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "ring": "{20=A, 50=B, 80=C}"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "ring": "{20=A, 50=B, 80=C}",
+            "owner25Before": "B"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "ring": "{20=A, 40=D, 50=B, 80=C}",
+            "owner25Before": "B"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "ring": "{20=A, 40=D, 50=B, 80=C}",
+            "owner25Before": "B",
+            "owner25After": "D"
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "ring": "{20=A, 40=D, 50=B, 80=C}",
+            "owner25Before": "B",
+            "owner25After": "D",
+            "owner45After": "B"
+          }
+        },
+        {
+          "step": 6,
+          "state": {
+            "ring": "{20=A, 40=D, 50=B, 80=C}",
+            "owner25Before": "B",
+            "owner25After": "D",
+            "owner45After": "B",
+            "owner90": "A"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-25"
   },
   {
     "slug": "distinguished-engineer",
     "track": "Distinguished Engineer",
     "title": "Dependency isolation: spend concurrency by failure domain",
     "tag": "Current AWS guidance · July 7, 2026",
-    "goal": "Turn a slow dependency into a contained feature failure instead of a process-wide concurrency collapse.",
-    "concept": "<p>Concurrency is inventory. By Little's Law, the average in-flight work is arrival rate times latency. A downstream dependency that becomes ten times slower can consume roughly ten times the callers, sockets, or task slots even when request rate is unchanged.</p><p>If unrelated features share one pool, the slow path can starve healthy paths. Dependency isolation assigns separate concurrency budgets to meaningful failure domains—dependency, workload class, tenant tier, or operation. Exhaustion then becomes a bounded local failure with fast rejection rather than a process-wide queue.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A governance API has ten outbound slots. Critical policy reads arrive at 4 requests/second and take 200 ms, needing about 0.8 concurrent calls. Bulk lineage enrichment arrives at 6 requests/second. At 200 ms it needs 1.2 slots; at 2 seconds it needs 12.</p><p>With a shared pool, the slow enrichment path can occupy all ten slots and make policy reads wait. With four slots reserved for policy reads and six for enrichment, bulk throughput degrades and rejects quickly while critical reads keep enough inventory.</p><pre>inFlight demand ≈ arrivalRate × latency\nshared pool: unrelated modes compete\nisolated pools: each mode has a bounded blast radius</pre><p>The Distinguished Engineer decision is not “add bulkheads everywhere.” Each pool costs utilization and tuning complexity. Choose boundaries from correlated latency modes, criticality, and telemetry; define admission behavior; and revisit allocations using observed saturation, rejection, and downstream latency.</p>",
+    "goal": "A slow enrichment service uses all ten outbound slots.",
+    "concept": "<p>A slow enrichment service uses all ten outbound slots. Important policy reads now wait, even though their own dependency is healthy.</p><p>A bulkhead is a separate pool of limited resources. Reserving slots for different classes of work can stop one slow class from occupying everything. The tradeoff is that a quiet pool may leave slots unused while another is busy.</p>",
+    "example": "<p>Policy reads need about 4 × 0.2 = 0.8 concurrent slots. Enrichment at six requests per second and two seconds each needs about 12. Reserving four policy slots and six enrichment slots protects the first class while bounding the second.</p>",
     "practice": "Raise bulk dependency latency from 200 ms to 2 seconds. Predict critical throughput with and without isolation. Then explain what metric would tell you a pool is protecting the wrong boundary.",
     "boundary": "A steady-state Little's Law calculator with two workloads, fixed arrival rates, fixed service time for critical traffic, instantaneous admission, and no queue. It omits distributions, retries, timeouts, connection setup, CPU, priority scheduling, adaptive limits, fairness, autoscaling, burstiness, and multi-hop feedback.",
     "sim": "<label>Bulk dependency latency (ms) <input id=\"bulkLatency\" type=\"range\" min=\"200\" max=\"2000\" step=\"200\" value=\"200\"></label><label><input id=\"isolated\" type=\"checkbox\"> Isolate 4 critical slots and 6 bulk slots</label><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -153,16 +479,109 @@
         "https://builder.aws.com/content/3EuxuD6bWtQ6gEp9FaKQfd3Z2AM/using-dependency-isolation-to-contain-concurrency-overload",
         "Updated 2026-07-07"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>Concurrency is inventory. By Little's Law, the average in-flight work is arrival rate times latency. A downstream dependency that becomes ten times slower can consume roughly ten times the callers, sockets, or task slots even when request rate is unchanged.</p><p>If unrelated features share one pool, the slow path can starve healthy paths. Dependency isolation assigns separate concurrency budgets to meaningful failure domains—dependency, workload class, tenant tier, or operation. Exhaustion then becomes a bounded local failure with fast rejection rather than a process-wide queue.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A governance API has ten outbound slots. Critical policy reads arrive at 4 requests/second and take 200 ms, needing about 0.8 concurrent calls. Bulk lineage enrichment arrives at 6 requests/second. At 200 ms it needs 1.2 slots; at 2 seconds it needs 12.</p><p>With a shared pool, the slow enrichment path can occupy all ten slots and make policy reads wait. With four slots reserved for policy reads and six for enrichment, bulk throughput degrades and rejects quickly while critical reads keep enough inventory.</p><pre>inFlight demand ≈ arrivalRate × latency\nshared pool: unrelated modes compete\nisolated pools: each mode has a bounded blast radius</pre><p>The Distinguished Engineer decision is not “add bulkheads everywhere.” Each pool costs utilization and tuning complexity. Choose boundaries from correlated latency modes, criticality, and telemetry; define admission behavior; and revisit allocations using observed saturation, rejection, and downstream latency.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "policy_demand = 4 * 0.2",
+          "note": "Arrival rate times average latency gives mean concurrency demand."
+        },
+        {
+          "code": "enrichment_demand = 6 * 2",
+          "note": "The slow path wants 12 simultaneous slots."
+        },
+        {
+          "code": "shared_slots = 10",
+          "note": "The slow path can exhaust the shared pool."
+        },
+        {
+          "code": "policy_slots = 4; enrichment_slots = 6",
+          "note": "Separate budgets prevent cross-pool borrowing."
+        },
+        {
+          "code": "policy_headroom = policy_slots - policy_demand",
+          "note": "The policy pool has room in this average-load calculation."
+        },
+        {
+          "code": "excess_bulk_demand = enrichment_demand - enrichment_slots",
+          "note": "Six slots of bulk demand must wait or be rejected."
+        }
+      ],
+      "limit": "This uses average demand, not a queueing guarantee. Bursts, tail latency, and scheduling matter. Isolation must also exist in downstream dependencies to contain shared failures.",
+      "expect": {
+        "excess_bulk_demand": 6
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "policy_demand": 0.8
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "policy_demand": 0.8,
+            "enrichment_demand": 12
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "policy_demand": 0.8,
+            "enrichment_demand": 12,
+            "shared_slots": 10
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "policy_demand": 0.8,
+            "enrichment_demand": 12,
+            "shared_slots": 10,
+            "policy_slots": 4,
+            "enrichment_slots": 6
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "policy_demand": 0.8,
+            "enrichment_demand": 12,
+            "shared_slots": 10,
+            "policy_slots": 4,
+            "enrichment_slots": 6,
+            "policy_headroom": 3.2
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "policy_demand": 0.8,
+            "enrichment_demand": 12,
+            "shared_slots": 10,
+            "policy_slots": 4,
+            "enrichment_slots": 6,
+            "policy_headroom": 3.2,
+            "excess_bulk_demand": 6
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-25"
   },
   {
     "slug": "genai-engineering",
     "track": "GenAI engineering",
     "title": "Context compaction: preserve decisions, discard exhaust",
     "tag": "Harness engineering · established 2025 guidance",
-    "goal": "Design a long-running agent's compaction policy around recoverable decisions, open work, and evidence pointers rather than transcript length.",
-    "concept": "<p>An agent context window is working memory, not a durable event store. Keeping every tool result feels safe, but repeated logs, diffs, and search pages consume attention that the next decision needs. Bigger context does not remove relevance dilution.</p><p>Compaction summarizes an aging trace into a smaller continuation context. The selection policy is the engineering work: preserve goal and constraints, architectural decisions with rationale, unresolved risks, progress and next actions, plus identifiers that can re-fetch evidence. Raw tool exhaust is usually cheaper to retrieve again than to carry forever.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A migration agent has a 12,000-token continuation budget. Its trace contains 8,000 tokens of repeated Spark plan output, 3,000 recent conversational tokens, 2,000 tokens of decisions, 1,500 open-task tokens, and 1,000 tokens of file/commit pointers.</p><p>A transcript-tail policy keeps the newest plan output and conversation but can evict the decision that partition changes must remain backward compatible. A structured policy emits a compact handoff: objective, invariants, decisions and reasons, unresolved checks, current artifacts, and re-fetchable evidence pointers.</p><pre>durable log: complete history and artifacts\ncompacted context: smallest high-signal continuation state\npointer: where evidence can be fetched again</pre><p>Summaries are lossy. Keep the underlying trace durable, version the compaction prompt, run probes for required facts after compaction, and evaluate on real long-horizon failures. Never treat a fluent summary as proof that critical evidence survived.</p>",
+    "goal": "A long agent transcript contains thousands of repeated log lines.",
+    "concept": "<p>A long agent transcript contains thousands of repeated log lines. Keeping only the newest text can remove an important earlier decision.</p><p>Context compaction replaces bulky conversation history with a smaller continuation record. Keep the goal, rules, decisions, open checks, and evidence locations. Keep the full evidence separately so a short summary does not become the only source of truth.</p>",
+    "example": "<p>The important rule is “preserve old partition readers.” The toy handoff retains that rule and a pointer to the full trace while dropping repeated plan output. A simple probe then checks that the rule survived.</p>",
     "practice": "Compare transcript-tail and structured policies at 8,000 tokens, then raise the budget. Identify which missing item creates a silent correctness risk rather than an obvious failure.",
     "boundary": "A deterministic greedy packing model with hand-authored token costs and importance order. It does not call an LLM, measure attention, summarize text, model overlapping information, validate factual fidelity, or reproduce Anthropic's implementation or performance.",
     "sim": "<label>Continuation budget (tokens) <input id=\"contextBudget\" type=\"range\" min=\"6000\" max=\"16000\" step=\"1000\" value=\"8000\"></label><label>Compaction policy <select id=\"contextPolicy\"><option value=\"tail\">Keep newest transcript segments</option><option value=\"structured\">Structured high-signal handoff</option></select></label><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -205,16 +624,114 @@
         "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
         "Published 2025-09-29"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>An agent context window is working memory, not a durable event store. Keeping every tool result feels safe, but repeated logs, diffs, and search pages consume attention that the next decision needs. Bigger context does not remove relevance dilution.</p><p>Compaction summarizes an aging trace into a smaller continuation context. The selection policy is the engineering work: preserve goal and constraints, architectural decisions with rationale, unresolved risks, progress and next actions, plus identifiers that can re-fetch evidence. Raw tool exhaust is usually cheaper to retrieve again than to carry forever.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A migration agent has a 12,000-token continuation budget. Its trace contains 8,000 tokens of repeated Spark plan output, 3,000 recent conversational tokens, 2,000 tokens of decisions, 1,500 open-task tokens, and 1,000 tokens of file/commit pointers.</p><p>A transcript-tail policy keeps the newest plan output and conversation but can evict the decision that partition changes must remain backward compatible. A structured policy emits a compact handoff: objective, invariants, decisions and reasons, unresolved checks, current artifacts, and re-fetchable evidence pointers.</p><pre>durable log: complete history and artifacts\ncompacted context: smallest high-signal continuation state\npointer: where evidence can be fetched again</pre><p>Summaries are lossy. Keep the underlying trace durable, version the compaction prompt, run probes for required facts after compaction, and evaluate on real long-horizon failures. Never treat a fluent summary as proof that critical evidence survived.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "record = {\"rule\": \"preserve old partition readers\", \"open_check\": \"replay old data\", \"log_pointer\": \"trace-42\", \"noise\": \"repeated plan output\"}",
+          "note": "The original record mixes essential facts and disposable repetition."
+        },
+        {
+          "code": "handoff = {key: record[key] for key in [\"rule\", \"open_check\", \"log_pointer\"]}",
+          "note": "Select the continuation facts deliberately."
+        },
+        {
+          "code": "record = None",
+          "note": "The active context no longer holds the original record."
+        },
+        {
+          "code": "rule_survives = handoff[\"rule\"] == \"preserve old partition readers\"",
+          "note": "Probe a required fact after compaction."
+        },
+        {
+          "code": "next_step = handoff[\"open_check\"]",
+          "note": "The next action remains explicit."
+        }
+      ],
+      "limit": "This exact dictionary selection is not an LLM summarizer. Real summaries can omit or distort facts; keep durable evidence and evaluate required-fact retention.",
+      "expect": {
+        "rule_survives": true
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "record": {
+              "rule": "preserve old partition readers",
+              "open_check": "replay old data",
+              "log_pointer": "trace-42",
+              "noise": "repeated plan output"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "record": {
+              "rule": "preserve old partition readers",
+              "open_check": "replay old data",
+              "log_pointer": "trace-42",
+              "noise": "repeated plan output"
+            },
+            "handoff": {
+              "rule": "preserve old partition readers",
+              "open_check": "replay old data",
+              "log_pointer": "trace-42"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "record": null,
+            "handoff": {
+              "rule": "preserve old partition readers",
+              "open_check": "replay old data",
+              "log_pointer": "trace-42"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "record": null,
+            "handoff": {
+              "rule": "preserve old partition readers",
+              "open_check": "replay old data",
+              "log_pointer": "trace-42"
+            },
+            "rule_survives": true
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "record": null,
+            "handoff": {
+              "rule": "preserve old partition readers",
+              "open_check": "replay old data",
+              "log_pointer": "trace-42"
+            },
+            "rule_survives": true,
+            "next_step": "replay old data"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-25"
   },
   {
     "slug": "technology-breakthroughs",
     "track": "Technology breakthroughs",
     "title": "Repeat-After-Me: visual injection reaches the tool boundary",
     "tag": "Research spotlight · September 7, 2026",
-    "goal": "Trace a multimodal prompt-injection path from untrusted pixels to a privileged tool and identify where the harness can break it.",
-    "concept": "<p>Multimodal agents turn images into context and model outputs into actions. That creates a transitive trust mistake: an image supplied as data can influence a model that is also authorized to emit exact tool calls. A visually embedded instruction is dangerous only when the rest of the path converts it into an accepted, privileged action.</p><p>Meta's September 7, 2026 paper introduces Repeat-After-Me, a black-box adaptive visual prompt-injection attack. The authors report that it can elicit long, format-compliant strings such as parseable native tool calls and demonstrate attacks across open-weight and commercial vision-language models. Those are research-author claims, not universal production rates.</p>",
-    "example": "<p><strong>Original defensive case:</strong> A support agent reads a customer screenshot. The screenshot influences the model to propose a file-write tool call unrelated to the user's request. If the harness treats model output as authorization and exposes a broad write tool, the pixels have crossed from untrusted data to durable control.</p><p>Break the chain at several independent gates: mark external content as untrusted, bind actions to the user's explicit goal, expose only task-scoped capabilities, validate structured arguments, require approval for sensitive writes, protect policy/config files, and run the tool in a sandbox with credential and network limits.</p><pre>untrusted image → model interpretation → parseable tool call\n→ authorization decision → side effect</pre><p>A model-side refusal helps but is not a security boundary. Conversely, a single keyword filter is not a complete defense. The harness must assume the model can be influenced and enforce authority outside the model.</p>",
+    "goal": "A screenshot should help an assistant understand a support issue.",
+    "concept": "<p>A screenshot should help an assistant understand a support issue. It should not become permission to write an unrelated configuration file.</p><p>Visual prompt-injection research asks whether image content can steer a model toward unwanted actions. The harness must check authority outside the model. A parseable tool call is only a proposal. File and network restrictions should still apply if the model follows a misleading instruction.</p>",
+    "example": "<p>Our defensive example permits a report in /workspace/reports. A proposed write to a policy file fails the scope check, so the mock filesystem stays unchanged. The example demonstrates an enforcement boundary, not an attack recipe.</p>",
     "practice": "Run the path with every gate open. Then restrict capability and protect policy files. Explain which control prevents the action even if the model still emits a perfectly formatted call.",
     "boundary": "A defensive Boolean attack-path tracer. It does not generate an injected image, optimize an attack, call a model or tool, estimate attack success, reproduce the paper's evaluation, or prove any defense sufficient. Gate labels are original teaching abstractions.",
     "sim": "<label><input id=\"visualFollow\" type=\"checkbox\" checked> Model follows instruction embedded in untrusted pixels</label><label><input id=\"parseableCall\" type=\"checkbox\" checked> Output is a parseable tool call</label><label>Granted capability <select id=\"capability\"><option value=\"write\">Broad file write</option><option value=\"read\">Read-only</option><option value=\"none\">No tool</option></select></label><label><input id=\"policyMutable\" type=\"checkbox\" checked> Agent can modify policy/config files</label><button id=\"trace\">Trace request</button><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -257,6 +774,93 @@
         "https://ai.meta.com/research/publications/repeat-after-me-black-box-adaptive-visual-prompt-injection/",
         "Published 2026-09-07; research claims from authors"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>Multimodal agents turn images into context and model outputs into actions. That creates a transitive trust mistake: an image supplied as data can influence a model that is also authorized to emit exact tool calls. A visually embedded instruction is dangerous only when the rest of the path converts it into an accepted, privileged action.</p><p>Meta's September 7, 2026 paper introduces Repeat-After-Me, a black-box adaptive visual prompt-injection attack. The authors report that it can elicit long, format-compliant strings such as parseable native tool calls and demonstrate attacks across open-weight and commercial vision-language models. Those are research-author claims, not universal production rates.</p><h3>Original detailed example</h3><p><strong>Original defensive case:</strong> A support agent reads a customer screenshot. The screenshot influences the model to propose a file-write tool call unrelated to the user's request. If the harness treats model output as authorization and exposes a broad write tool, the pixels have crossed from untrusted data to durable control.</p><p>Break the chain at several independent gates: mark external content as untrusted, bind actions to the user's explicit goal, expose only task-scoped capabilities, validate structured arguments, require approval for sensitive writes, protect policy/config files, and run the tool in a sandbox with credential and network limits.</p><pre>untrusted image → model interpretation → parseable tool call\n→ authorization decision → side effect</pre><p>A model-side refusal helps but is not a security boundary. Conversely, a single keyword filter is not a complete defense. The harness must assume the model can be influenced and enforce authority outside the model.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "allowed_directory = \"/workspace/reports/\"",
+          "note": "The task has a narrow write destination."
+        },
+        {
+          "code": "proposal = {\"path\": \"/config/policy.json\", \"content\": \"unapproved change\"}",
+          "note": "The proposed action is outside that destination."
+        },
+        {
+          "code": "allowed = proposal[\"path\"].startswith(allowed_directory)",
+          "note": "This synthetic path does not meet the task scope."
+        },
+        {
+          "code": "files = {}",
+          "note": "No writes have occurred."
+        },
+        {
+          "code": "files.update({proposal[\"path\"]: proposal[\"content\"]}) if allowed else None",
+          "note": "The mock write is blocked."
+        }
+      ],
+      "limit": "This string check is only for the fixed synthetic paths. It is not a secure filesystem policy: real enforcement must handle path normalization, symlinks, identity, capabilities, and sandbox boundaries. It does not reproduce the research attack.",
+      "expect": {
+        "allowed": false,
+        "files": {}
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "allowed_directory": "/workspace/reports/"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "allowed_directory": "/workspace/reports/",
+            "proposal": {
+              "path": "/config/policy.json",
+              "content": "unapproved change"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "allowed_directory": "/workspace/reports/",
+            "proposal": {
+              "path": "/config/policy.json",
+              "content": "unapproved change"
+            },
+            "allowed": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "allowed_directory": "/workspace/reports/",
+            "proposal": {
+              "path": "/config/policy.json",
+              "content": "unapproved change"
+            },
+            "allowed": false,
+            "files": {}
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "allowed_directory": "/workspace/reports/",
+            "proposal": {
+              "path": "/config/policy.json",
+              "content": "unapproved change"
+            },
+            "allowed": false,
+            "files": {}
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-25"
   }
 ]

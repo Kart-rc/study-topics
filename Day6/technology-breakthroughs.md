@@ -2,7 +2,7 @@
 
 Technology breakthroughs · Day6 · 15 minutes
 
-Distinguish a blood-based multi-cancer signal from a diagnosis, and use base rates to explain why specificity and follow-up matter.
+A test can have high specificity yet produce many false alarms when the condition is uncommon.
 
 ## Recall (2 minutes)
 
@@ -10,23 +10,62 @@ Distinguish a blood-based multi-cancer signal from a diagnosis, and use base rat
 
 ## Understand (4 minutes)
 
-Cell-free DNA circulates in blood. A next-generation sequencing test can look for methylation patterns associated with cancer and predict a likely tissue of origin. That is a notable diagnostic-platform direction: one blood draw can search for signals across multiple cancer types. It is still a screening signal, not a diagnosis.
+A test can have high specificity yet produce many false alarms when the condition is uncommon. Counts make the reason easier to see.
 
-On September 23, 2026, an FDA advisory panel reviewed the Galleri premarket approval application. FDA's 24-hour summary records votes of 10–0 on reasonable assurance of safety, 6–4 on effectiveness, and 7–2 with one abstention on benefit/risk. The panel's advice is non-binding and is not itself FDA approval. The panel emphasized that a positive result does not confirm cancer, a negative does not rule it out, established screening should continue, and long-term outcome impact has not been established.
+Sensitivity is the fraction of affected people the test identifies. Specificity is the fraction of unaffected people it correctly labels negative. Positive predictive value asks a different question: among positive results, how many are true positives? The starting prevalence matters.
 
 
 
-Original synthetic cohort: Screen 10,000 people where 1% have the target condition. At 70% sensitivity and 99% specificity, the toy model finds 70 true positives and produces 99 false positives. The positive predictive value is about 41%: fewer than half of positive signals correspond to the modeled condition, even with 99% specificity.
+In a synthetic group of 10,000, 100 have the condition. At 70% sensitivity, 70 test positive. Of 9,900 unaffected people, 1%—99 people—also test positive. Only 70 of 169 positive signals are true positives, about 41%.
 
-true positives = population × prevalence × sensitivity
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+population = 10000; prevalence = 0.01
+affected = population * prevalence; unaffected = population - affected
+true_positive = affected * 0.70
+false_positive = unaffected * 0.01
+ppv_percent = 100 * true_positive / (true_positive + false_positive)
+```
+
+1. One percent of the synthetic group is affected.
+
+   Changed values: `{"population": 10000, "prevalence": 0.01}`
+
+2. Separate the two starting groups.
+
+   Changed values: `{"affected": 100.0, "unaffected": 9900.0}`
+
+3. The toy sensitivity detects 70 affected people.
+
+   Changed values: `{"true_positive": 70.0}`
+
+4. The toy false-positive rate flags 99 unaffected people.
+
+   Changed values: `{"false_positive": 99.0}`
+
+5. The meaning of a positive result depends on both counts.
+
+   Changed values: `{"ppv_percent": 41.42011834319526}`
+
+[Full runnable example](examples/technology-breakthroughs.py).
+
+Limits: These are invented teaching inputs, not Galleri performance or medical advice. The arithmetic does not establish clinical benefit, screening suitability, or follow-up care.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>Cell-free DNA circulates in blood. A next-generation sequencing test can look for methylation patterns associated with cancer and predict a likely tissue of origin. That is a notable diagnostic-platform direction: one blood draw can search for signals across multiple cancer types. It is still a screening signal, not a diagnosis.</p><p>On September 23, 2026, an FDA advisory panel reviewed the Galleri premarket approval application. FDA's 24-hour summary records votes of 10–0 on reasonable assurance of safety, 6–4 on effectiveness, and 7–2 with one abstention on benefit/risk. The panel's advice is non-binding and is not itself FDA approval. The panel emphasized that a positive result does not confirm cancer, a negative does not rule it out, established screening should continue, and long-term outcome impact has not been established.</p><h3>Original detailed example</h3><p><strong>Original synthetic cohort:</strong> Screen 10,000 people where 1% have the target condition. At 70% sensitivity and 99% specificity, the toy model finds 70 true positives and produces 99 false positives. The positive predictive value is about 41%: fewer than half of positive signals correspond to the modeled condition, even with 99% specificity.</p><pre>true positives = population × prevalence × sensitivity
 false positives = population × (1 − prevalence) × (1 − specificity)
-PPV = true positives / (true positives + false positives)
+PPV = true positives / (true positives + false positives)</pre><p>The numbers are deliberately synthetic and are not Galleri performance estimates. Real multi-cancer evaluation is more complex: cancer-type and stage distributions, episode-based measures, tissue-origin prediction, diagnostic workups, competing risks, subgroup uncertainty, existing screening, harms, and long-term outcomes all matter.</p>
 
-The numbers are deliberately synthetic and are not Galleri performance estimates. Real multi-cancer evaluation is more complex: cancer-type and stage distributions, episode-based measures, tissue-origin prediction, diagnostic workups, competing risks, subgroup uncertainty, existing screening, harms, and long-term outcomes all matter.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Predict PPV before raising prevalence, then vary specificity by tenths of a percent. Explain why a screening program cannot summarize benefit with sensitivity alone.
 

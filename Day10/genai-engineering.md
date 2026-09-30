@@ -30,7 +30,59 @@ Use clear parameter names and examples in the tool description: amount_cents: 25
 
 
 
-## Explore (5 minutes)
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+intent = {"order_id": "A100", "amount_cents": 2500}
+proposal = {"order_id": "A100", "amount_cents": 25}
+shape_ok = isinstance(proposal["amount_cents"], int) and proposal["amount_cents"] > 0
+intent_ok = proposal == intent
+proposal = {"order_id": "A100", "amount_cents": 2500}
+shape_ok = type(proposal["amount_cents"]) is int and proposal["amount_cents"] > 0; intent_ok = proposal == intent
+permission_ok = proposal["order_id"] == "A100" and proposal["amount_cents"] <= 5000
+execute_allowed = shape_ok and intent_ok and permission_ok
+```
+
+1. Trusted request details express $25 as 2,500 cents.
+
+   Changed values: `{"intent": {"order_id": "A100", "amount_cents": 2500}}`
+
+2. The first proposal uses the wrong unit conversion.
+
+   Changed values: `{"proposal": {"order_id": "A100", "amount_cents": 25}}`
+
+3. The amount passes this simplified positive-integer check.
+
+   Changed values: `{"shape_ok": true}`
+
+4. It does not match the requested amount.
+
+   Changed values: `{"intent_ok": false}`
+
+5. Correct the amount before execution.
+
+   Changed values: `{"proposal": {"order_id": "A100", "amount_cents": 2500}}`
+
+6. Recheck the corrected proposal; exact int excludes Python booleans.
+
+   Changed values: `{"intent_ok": true}`
+
+7. The synthetic account owns this order and has sufficient balance.
+
+   Changed values: `{"permission_ok": true}`
+
+8. All independent requirements must pass.
+
+   Changed values: `{"execute_allowed": true}`
+
+[Full runnable example](examples/genai-engineering.py).
+
+Limits: This validates a fixed synthetic request and performs no refund. Production authorization and balance checks must use trusted current state; retries need durable duplicate protection. Real schema validation should reject unexpected fields and types.
+
+## Explore (remaining exploration time)
 
 Try the four proposals. Read which gate fails and why. Run the safe proposal once. Observe that checking alone changes no balance. Try running it again to see the simple duplicate-action guard.
 

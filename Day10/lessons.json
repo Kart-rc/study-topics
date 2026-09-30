@@ -54,7 +54,203 @@
       "Explain why a pending ticket does not prove that Kafka never received E7.",
       "Suppose the consumer also sends an email. Why does its database marker alone not guarantee one email?"
     ],
-    "source_checked_on": "2026-09-29"
+    "source_checked_on": "2026-09-29",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "import sqlite3",
+          "note": "Use Python’s built-in SQLite library for a real local transaction."
+        },
+        {
+          "code": "db = sqlite3.connect(\":memory:\"); db.executescript(\"CREATE TABLE orders(id TEXT PRIMARY KEY); CREATE TABLE outbox(event_id TEXT PRIMARY KEY, status TEXT);\")",
+          "note": "Create the two tables in an in-memory demonstration database."
+        },
+        {
+          "code": "with db:\n    db.execute(\"INSERT INTO orders VALUES (?)\", (\"A100\",))\n    db.execute(\"INSERT INTO outbox VALUES (?, ?)\", (\"E7\", \"pending\"))",
+          "note": "The transaction saves the order and pending ticket together."
+        },
+        {
+          "code": "order_rows = db.execute(\"SELECT * FROM orders\").fetchall(); tickets = db.execute(\"SELECT * FROM outbox\").fetchall()",
+          "note": "Read the committed rows. Both exist."
+        },
+        {
+          "code": "kafka = [\"E7\"]; relay_ack = True",
+          "note": "A list represents the first successful publish."
+        },
+        {
+          "code": "relay_ack = False",
+          "note": "A relay restart loses its temporary acknowledgement; the ticket remains pending."
+        },
+        {
+          "code": "kafka.append(\"E7\")",
+          "note": "Retrying the pending ticket creates a second copy."
+        },
+        {
+          "code": "db.execute(\"UPDATE outbox SET status = ? WHERE event_id = ?\", (\"sent\", \"E7\")); db.commit()",
+          "note": "After the second send, record the successful delivery."
+        },
+        {
+          "code": "tickets = db.execute(\"SELECT * FROM outbox\").fetchall(); distinct_events = list(dict.fromkeys(kafka))",
+          "note": "The outbox is sent; stable E7 identity reveals one logical event in two copies."
+        }
+      ],
+      "limit": "The SQLite transaction actually executes. Kafka is a Python list, and dict.fromkeys only illustrates stable-ID recognition; neither is a production relay or transactional consumer. The database is in memory, so this models a relay restart, not loss of the database process.",
+      "expect": {
+        "order_rows": [
+          [
+            "A100"
+          ]
+        ],
+        "tickets": [
+          [
+            "E7",
+            "sent"
+          ]
+        ],
+        "distinct_events": [
+          "E7"
+        ]
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {}
+        },
+        {
+          "step": 2,
+          "state": {}
+        },
+        {
+          "step": 3,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "pending"
+              ]
+            ]
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "pending"
+              ]
+            ],
+            "kafka": [
+              "E7"
+            ],
+            "relay_ack": true
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "pending"
+              ]
+            ],
+            "kafka": [
+              "E7"
+            ],
+            "relay_ack": false
+          }
+        },
+        {
+          "step": 6,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "pending"
+              ]
+            ],
+            "kafka": [
+              "E7",
+              "E7"
+            ],
+            "relay_ack": false
+          }
+        },
+        {
+          "step": 7,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "pending"
+              ]
+            ],
+            "kafka": [
+              "E7",
+              "E7"
+            ],
+            "relay_ack": false
+          }
+        },
+        {
+          "step": 8,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "sent"
+              ]
+            ],
+            "kafka": [
+              "E7",
+              "E7"
+            ],
+            "relay_ack": false,
+            "distinct_events": [
+              "E7"
+            ]
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5"
   },
   {
     "slug": "software-engineering",
@@ -111,7 +307,126 @@
       "Why is an immediate unavailable response sometimes better than a long wait?",
       "If one probe succeeds but the next hundred calls overload the service, what would you change?"
     ],
-    "source_checked_on": "2026-09-29"
+    "source_checked_on": "2026-09-29",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "String state = \"closed\"; int failures = 0;",
+          "note": "Closed allows calls to reach the service."
+        },
+        {
+          "code": "failures += 1;",
+          "note": "The first forwarded call fails."
+        },
+        {
+          "code": "failures += 1;",
+          "note": "The second call fails."
+        },
+        {
+          "code": "failures += 1;",
+          "note": "The third call fails."
+        },
+        {
+          "code": "state = failures >= 3 ? \"open\" : state;",
+          "note": "The chosen threshold opens the breaker."
+        },
+        {
+          "code": "boolean forwardFourthCall = !state.equals(\"open\");",
+          "note": "The next immediate call is blocked locally."
+        },
+        {
+          "code": "state = \"half-open\";",
+          "note": "For this trace, the waiting period has now elapsed."
+        },
+        {
+          "code": "boolean probeSucceeded = true;",
+          "note": "Supply a successful probe result."
+        },
+        {
+          "code": "state = probeSucceeded ? \"closed\" : \"open\";",
+          "note": "The successful probe allows normal calls again."
+        }
+      ],
+      "limit": "This sequential state trace is not a thread-safe circuit-breaker library. It supplies the elapsed wait and probe result explicitly. The interactive lab lets you explore failed probes too.",
+      "expect": {
+        "forwardFourthCall": "false",
+        "state": "closed"
+      },
+      "language": "java",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "state": "closed",
+            "failures": "0"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "state": "closed",
+            "failures": "1"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "state": "closed",
+            "failures": "2"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "state": "closed",
+            "failures": "3"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "state": "open",
+            "failures": "3"
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "state": "open",
+            "failures": "3",
+            "forwardFourthCall": "false"
+          }
+        },
+        {
+          "step": 6,
+          "state": {
+            "state": "half-open",
+            "failures": "3",
+            "forwardFourthCall": "false"
+          }
+        },
+        {
+          "step": 7,
+          "state": {
+            "state": "half-open",
+            "failures": "3",
+            "forwardFourthCall": "false",
+            "probeSucceeded": "true"
+          }
+        },
+        {
+          "step": 8,
+          "state": {
+            "state": "closed",
+            "failures": "3",
+            "forwardFourthCall": "false",
+            "probeSucceeded": "true"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "presentation_revision": "2026-09-29-option5"
   },
   {
     "slug": "distinguished-engineer",
@@ -168,7 +483,121 @@
       "Name the owner and evidence gate you would require before moving /tracking.",
       "If the router fails, which customers are affected, and how would you reduce that risk?"
     ],
-    "source_checked_on": "2026-09-29"
+    "source_checked_on": "2026-09-29",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "owners = {\"/orders\": \"old\", \"/tracking\": \"old\", \"/returns\": \"old\"}",
+          "note": "Every route begins with one old-system owner."
+        },
+        {
+          "code": "owners[\"/tracking\"] = \"new\"",
+          "note": "Move only the tracking route."
+        },
+        {
+          "code": "order_owner = owners[\"/orders\"]; tracking_owner = owners[\"/tracking\"]",
+          "note": "Order writes stay old while tracking goes new."
+        },
+        {
+          "code": "new_healthy = False; old_data_compatible = True",
+          "note": "The new tracking service fails; the old reader is still compatible."
+        },
+        {
+          "code": "owners[\"/tracking\"] = \"old\" if old_data_compatible else \"recovery required\"",
+          "note": "The compatible fallback can restore the old route."
+        },
+        {
+          "code": "fallback_owner = owners[\"/tracking\"]",
+          "note": "The routing decision is visible in state."
+        }
+      ],
+      "limit": "This is a routing decision table, not a proxy or a data synchronization system. A safe move still requires behavior checks, compatible state, capacity, and a named owner.",
+      "expect": {
+        "order_owner": "old",
+        "tracking_owner": "new",
+        "fallback_owner": "old"
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "old",
+              "/returns": "old"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "new",
+              "/returns": "old"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "new",
+              "/returns": "old"
+            },
+            "order_owner": "old",
+            "tracking_owner": "new"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "new",
+              "/returns": "old"
+            },
+            "order_owner": "old",
+            "tracking_owner": "new",
+            "new_healthy": false,
+            "old_data_compatible": true
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "old",
+              "/returns": "old"
+            },
+            "order_owner": "old",
+            "tracking_owner": "new",
+            "new_healthy": false,
+            "old_data_compatible": true
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "old",
+              "/returns": "old"
+            },
+            "order_owner": "old",
+            "tracking_owner": "new",
+            "new_healthy": false,
+            "old_data_compatible": true,
+            "fallback_owner": "old"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "presentation_revision": "2026-09-29-option5"
   },
   {
     "slug": "genai-engineering",
@@ -230,7 +659,166 @@
       "Explain to a teammate why amount_cents is better than amount, and why the better name is still insufficient.",
       "If permissions change after validation but before execution, where should the final check happen?"
     ],
-    "source_checked_on": "2026-09-29"
+    "source_checked_on": "2026-09-29",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "intent = {\"order_id\": \"A100\", \"amount_cents\": 2500}",
+          "note": "Trusted request details express $25 as 2,500 cents."
+        },
+        {
+          "code": "proposal = {\"order_id\": \"A100\", \"amount_cents\": 25}",
+          "note": "The first proposal uses the wrong unit conversion."
+        },
+        {
+          "code": "shape_ok = isinstance(proposal[\"amount_cents\"], int) and proposal[\"amount_cents\"] > 0",
+          "note": "The amount passes this simplified positive-integer check."
+        },
+        {
+          "code": "intent_ok = proposal == intent",
+          "note": "It does not match the requested amount."
+        },
+        {
+          "code": "proposal = {\"order_id\": \"A100\", \"amount_cents\": 2500}",
+          "note": "Correct the amount before execution."
+        },
+        {
+          "code": "shape_ok = type(proposal[\"amount_cents\"]) is int and proposal[\"amount_cents\"] > 0; intent_ok = proposal == intent",
+          "note": "Recheck the corrected proposal; exact int excludes Python booleans."
+        },
+        {
+          "code": "permission_ok = proposal[\"order_id\"] == \"A100\" and proposal[\"amount_cents\"] <= 5000",
+          "note": "The synthetic account owns this order and has sufficient balance."
+        },
+        {
+          "code": "execute_allowed = shape_ok and intent_ok and permission_ok",
+          "note": "All independent requirements must pass."
+        }
+      ],
+      "limit": "This validates a fixed synthetic request and performs no refund. Production authorization and balance checks must use trusted current state; retries need durable duplicate protection. Real schema validation should reject unexpected fields and types.",
+      "expect": {
+        "execute_allowed": true
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 25
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 25
+            },
+            "shape_ok": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 25
+            },
+            "shape_ok": true,
+            "intent_ok": false
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "shape_ok": true,
+            "intent_ok": false
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "shape_ok": true,
+            "intent_ok": true
+          }
+        },
+        {
+          "step": 6,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "shape_ok": true,
+            "intent_ok": true,
+            "permission_ok": true
+          }
+        },
+        {
+          "step": 7,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "shape_ok": true,
+            "intent_ok": true,
+            "permission_ok": true,
+            "execute_allowed": true
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5"
   },
   {
     "slug": "technology-breakthroughs",
@@ -287,6 +875,99 @@
       "Explain the difference between energy to retain a weight and energy to use it in a computation.",
       "What measurements would you require before comparing this device with a conventional inference system?"
     ],
-    "source_checked_on": "2026-09-29"
+    "source_checked_on": "2026-09-29",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "requested_level = 10; write_power = True",
+          "note": "Choose one of the 16 levels, numbered 0 through 15."
+        },
+        {
+          "code": "stored_level = requested_level if write_power else 0",
+          "note": "The powered programming step stores level 10."
+        },
+        {
+          "code": "write_power = False",
+          "note": "Removing programming power does not change the stored variable."
+        },
+        {
+          "code": "read_light = True; input_value = 0.6",
+          "note": "Reading and arithmetic have separate modeled inputs."
+        },
+        {
+          "code": "output = input_value * stored_level / 15 if read_light else None",
+          "note": "The ideal weighted output is 0.4."
+        },
+        {
+          "code": "read_light = False; output = None",
+          "note": "No reading is available, while the stored level remains 10."
+        }
+      ],
+      "limit": "This is an ideal memory analogy and arithmetic, not device physics. It omits drift, noise, finite retention, energy cost, and calibration. The code cannot validate the research result.",
+      "expect": {
+        "stored_level": 10,
+        "output": null
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "requested_level": 10,
+            "write_power": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "requested_level": 10,
+            "write_power": true,
+            "stored_level": 10
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "requested_level": 10,
+            "write_power": false,
+            "stored_level": 10
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "requested_level": 10,
+            "write_power": false,
+            "stored_level": 10,
+            "read_light": true,
+            "input_value": 0.6
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "requested_level": 10,
+            "write_power": false,
+            "stored_level": 10,
+            "read_light": true,
+            "input_value": 0.6,
+            "output": 0.4
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "requested_level": 10,
+            "write_power": false,
+            "stored_level": 10,
+            "read_light": false,
+            "input_value": 0.6,
+            "output": null
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "presentation_revision": "2026-09-29-option5"
   }
 ]

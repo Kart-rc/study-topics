@@ -28,7 +28,49 @@ The leadership decision is not “is the new service deployed?” It is “who o
 
 
 
-## Explore (5 minutes)
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+owners = {"/orders": "old", "/tracking": "old", "/returns": "old"}
+owners["/tracking"] = "new"
+order_owner = owners["/orders"]; tracking_owner = owners["/tracking"]
+new_healthy = False; old_data_compatible = True
+owners["/tracking"] = "old" if old_data_compatible else "recovery required"
+fallback_owner = owners["/tracking"]
+```
+
+1. Every route begins with one old-system owner.
+
+   Changed values: `{"owners": {"/orders": "old", "/tracking": "old", "/returns": "old"}}`
+
+2. Move only the tracking route.
+
+   Changed values: `{"owners": {"/orders": "old", "/tracking": "new", "/returns": "old"}}`
+
+3. Order writes stay old while tracking goes new.
+
+   Changed values: `{"order_owner": "old", "tracking_owner": "new"}`
+
+4. The new tracking service fails; the old reader is still compatible.
+
+   Changed values: `{"new_healthy": false, "old_data_compatible": true}`
+
+5. The compatible fallback can restore the old route.
+
+   Changed values: `{"owners": {"/orders": "old", "/tracking": "old", "/returns": "old"}}`
+
+6. The routing decision is visible in state.
+
+   Changed values: `{"fallback_owner": "old"}`
+
+[Full runnable example](examples/distinguished-engineer.py).
+
+Limits: This is a routing decision table, not a proxy or a data synchronization system. A safe move still requires behavior checks, compatible state, capacity, and a named owner.
+
+## Explore (remaining exploration time)
 
 Move /tracking to the new service, then request all three routes. Break the new tracking service and request tracking again. Move tracking back to old, then turn off old-data compatibility and observe why fallback is no longer safe.
 

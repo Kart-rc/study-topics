@@ -2,7 +2,7 @@
 
 GenAI engineering · Day9 · 15 minutes
 
-Separate iteration evidence from decision evidence so prompt, tool, and policy changes do not memorize the benchmark that is supposed to approve them.
+A prompt improves on every example the team has studied.
 
 ## Recall (2 minutes)
 
@@ -10,24 +10,61 @@ Separate iteration evidence from decision evidence so prompt, tool, and policy c
 
 ## Understand (4 minutes)
 
-An agent harness improves by examining failures: change the prompt, add a tool constraint, alter retrieval, then rerun cases. That development loop is valuable, but every case the team studies becomes training data for the human-designed system. A score on those same cases measures both general capability and case-specific fixes.
+A prompt improves on every example the team has studied. That does not prove it improved on new requests.
 
-Keep three roles distinct. A development set is visible and diagnostic. A held-out set is representative but untouched until a decision gate. Production monitoring detects drift and rare failures after release. OpenAI's evaluation guidance recommends task-specific data that reflects real distributions, automated scoring where possible, logging, and continuous evaluation. Its deployment-simulation research similarly uses recent de-identified production traffic for representative comparison, while noting that rare tail risks still need targeted evaluation and red teaming.
-
-Harness discipline means versioning prompts, tools, graders, datasets, and environments together; preventing test IDs or reference answers from entering context; limiting holdout peeks; and recording every decision. A held-out number is credible only if selection, leakage, grader reliability, and distribution fit are controlled.
+A development set is for finding and fixing problems. A holdout is a separate set kept out of that tuning loop until a decision point. Once its failures shape the design, it is no longer untouched evidence. You still need production monitoring for new kinds of failure.
 
 
 
-Worked example: A 50-case dev set starts at 70% (35 passes). Each prompt iteration directly fixes two remembered dev cases. After ten iterations, dev reaches 100%, but untouched deployment performance is still 70% if none of the fixes generalize. A separate 200-case holdout would reveal that gap. If the team repeatedly inspects holdout failures and tunes to them, it silently becomes a second dev set.
-
-observed dev = baseline passes + memorized case fixes
-credible gate = untouched, representative cases + reliable graders
-
-The conclusion is not “never inspect failures.” It is to budget diagnostic sets explicitly and refresh decision sets after they have influenced design.
+The toy starts with 35 passes out of 50 development cases. Ten iterations fix two remembered cases each, reaching 50. If none of those fixes generalize, a separate 200-case holdout still has 140 passes, or 70%.
 
 
 
-## Explore (5 minutes)
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+dev_total = 50; dev_pass = 35; holdout_total = 200; holdout_pass = 140
+iterations = 10; memorized_fixes_per_iteration = 2
+dev_pass = min(dev_total, dev_pass + iterations * memorized_fixes_per_iteration)
+dev_percent = 100 * dev_pass / dev_total
+holdout_percent = 100 * holdout_pass / holdout_total
+```
+
+1. Both sets begin at 70%.
+
+   Changed values: `{"dev_total": 50, "dev_pass": 35, "holdout_total": 200, "holdout_pass": 140}`
+
+2. The toy fixes known cases only.
+
+   Changed values: `{"iterations": 10, "memorized_fixes_per_iteration": 2}`
+
+3. The visible set reaches 50 passes.
+
+   Changed values: `{"dev_pass": 50}`
+
+4. Development performance is 100%.
+
+   Changed values: `{"dev_percent": 100.0}`
+
+5. Untouched performance stays at 70% under the stated assumption.
+
+   Changed values: `{"holdout_percent": 70.0}`
+
+[Full runnable example](examples/genai-engineering.py).
+
+Limits: This is an intentionally no-generalization counterexample, not an empirical learning curve. Real fixes can generalize; credible evaluation must measure that on representative, uncontaminated cases.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>An agent harness improves by examining failures: change the prompt, add a tool constraint, alter retrieval, then rerun cases. That development loop is valuable, but every case the team studies becomes training data for the human-designed system. A score on those same cases measures both general capability and case-specific fixes.</p><p>Keep three roles distinct. A development set is visible and diagnostic. A held-out set is representative but untouched until a decision gate. Production monitoring detects drift and rare failures after release. OpenAI's evaluation guidance recommends task-specific data that reflects real distributions, automated scoring where possible, logging, and continuous evaluation. Its deployment-simulation research similarly uses recent de-identified production traffic for representative comparison, while noting that rare tail risks still need targeted evaluation and red teaming.</p><p>Harness discipline means versioning prompts, tools, graders, datasets, and environments together; preventing test IDs or reference answers from entering context; limiting holdout peeks; and recording every decision. A held-out number is credible only if selection, leakage, grader reliability, and distribution fit are controlled.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> A 50-case dev set starts at 70% (35 passes). Each prompt iteration directly fixes two remembered dev cases. After ten iterations, dev reaches 100%, but untouched deployment performance is still 70% if none of the fixes generalize. A separate 200-case holdout would reveal that gap. If the team repeatedly inspects holdout failures and tunes to them, it silently becomes a second dev set.</p><pre>observed dev = baseline passes + memorized case fixes
+credible gate = untouched, representative cases + reliable graders</pre><p>The conclusion is not “never inspect failures.” It is to budget diagnostic sets explicitly and refresh decision sets after they have influenced design.</p>
+
+</details>
+
+## Explore (remaining exploration time)
 
 Change dev-set size, iterations, and targeted fixes per iteration. Predict the visible dev score and the untouched deployment score. Then turn on holdout peeking and explain why the displayed holdout can inflate without real generalization.
 

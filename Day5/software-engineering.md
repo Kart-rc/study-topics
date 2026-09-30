@@ -2,7 +2,7 @@
 
 Software engineering · Day5 · 15 minutes
 
-Trace key ownership on a ring and quantify why membership changes remap fewer keys than modulo sharding.
+Adding a cache node can unexpectedly move most keys and make many caches cold at once.
 
 ## Recall (2 minutes)
 
@@ -10,25 +10,72 @@ Trace key ownership on a ring and quantify why membership changes remap fewer ke
 
 ## Understand (4 minutes)
 
-Naive modulo sharding maps hash(key) % nodeCount. It is simple and balanced, but changing the divisor changes the answer for many keys. Adding one cache node can therefore invalidate most placement decisions at once.
+Adding a cache node can unexpectedly move most keys and make many caches cold at once. A placement rule should make expansion less disruptive.
 
-Consistent hashing maps keys and nodes into a fixed circular hash space. A key belongs to the first node clockwise from its position. Adding a node changes ownership only for the arc between that node and its predecessor. Amazon's Dynamo paper used consistent hashing for incremental scale and added virtual nodes to improve balance and represent heterogeneous capacity.
+Consistent hashing places nodes on a fixed ring. A key belongs to the next node clockwise. Adding a node changes ownership only for the interval it takes over. Real systems often assign several positions per node to improve balance.
 
 
 
-Original teaching case: A schema-registry cache has three nodes. Adding a fourth with modulo sharding changes the divisor from three to four, so keys scatter to different owners. The warm-cache event becomes a fleet-wide cold-cache event.
+With node positions 20, 50, and 80, keys 25 and 45 belong to B. Add D at 40: key 25 moves to D, while key 45 stays with B. A key beyond 80 wraps around to A.
 
-On a ring, A, B, and C keep their positions. D takes only keys in D's newly claimed clockwise interval. The rest retain their owner. Operationally, the mechanism converts a global reshuffle into bounded movement—but the hottest individual keys can still overload their owners.
 
-position = hash(key) on a fixed ring
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```java
+var ring = new java.util.TreeMap<Integer, String>();
+ring.put(20, "A"); ring.put(50, "B"); ring.put(80, "C");
+String owner25Before = ring.ceilingEntry(25).getValue();
+ring.put(40, "D");
+String owner25After = ring.ceilingEntry(25).getValue();
+String owner45After = ring.ceilingEntry(45).getValue();
+String owner90 = ring.firstEntry().getValue();
+```
+
+1. A sorted map represents clockwise ring positions.
+
+   Changed values: `{"ring": "{}"}`
+
+2. Three nodes occupy fixed positions.
+
+   Changed values: `{"ring": "{20=A, 50=B, 80=C}"}`
+
+3. Key 25 initially belongs to B.
+
+   Changed values: `{"owner25Before": "B"}`
+
+4. The new node is inserted without moving old positions.
+
+   Changed values: `{"ring": "{20=A, 40=D, 50=B, 80=C}"}`
+
+5. D now owns key 25.
+
+   Changed values: `{"owner25After": "D"}`
+
+6. Key 45 stays with B.
+
+   Changed values: `{"owner45After": "B"}`
+
+7. Key 90 has no higher position, so it wraps to A.
+
+   Changed values: `{"owner90": "A"}`
+
+[Full runnable example](examples/software-engineering.java).
+
+Limits: Positions are assigned numbers, not actual hashes. This single-point ring omits replicas, virtual nodes, membership agreement, and hot-key handling.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>Naive modulo sharding maps <code>hash(key) % nodeCount</code>. It is simple and balanced, but changing the divisor changes the answer for many keys. Adding one cache node can therefore invalidate most placement decisions at once.</p><p>Consistent hashing maps keys and nodes into a fixed circular hash space. A key belongs to the first node clockwise from its position. Adding a node changes ownership only for the arc between that node and its predecessor. Amazon's Dynamo paper used consistent hashing for incremental scale and added virtual nodes to improve balance and represent heterogeneous capacity.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A schema-registry cache has three nodes. Adding a fourth with modulo sharding changes the divisor from three to four, so keys scatter to different owners. The warm-cache event becomes a fleet-wide cold-cache event.</p><p>On a ring, A, B, and C keep their positions. D takes only keys in D's newly claimed clockwise interval. The rest retain their owner. Operationally, the mechanism converts a global reshuffle into bounded movement—but the hottest individual keys can still overload their owners.</p><pre>position = hash(key) on a fixed ring
 owner = first node clockwise from position
-add D → only predecessor-to-D arc changes owner
+add D → only predecessor-to-D arc changes owner</pre><p>Production systems rarely stop at one point per host: virtual nodes smooth random imbalance, replicas span failure domains, and membership changes need an agreed view. Consistent hashing minimizes movement; it does not provide consensus, replication, or load fairness by itself.</p>
 
-Production systems rarely stop at one point per host: virtual nodes smooth random imbalance, replicas span failure domains, and membership changes need an agreed view. Consistent hashing minimizes movement; it does not provide consensus, replication, or load fairness by itself.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Start with three nodes, then add D. Compare ring and modulo remapping. Add E and explain why a low movement count can coexist with a bad hotspot.
 

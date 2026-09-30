@@ -2,7 +2,7 @@
 
 Software engineering · Day6 · 15 minutes
 
-Quantify how a delayed backup can cut tail latency while exposing the extra-load budget it spends.
+Five reads finish quickly; one takes 900 milliseconds.
 
 ## Recall (2 minutes)
 
@@ -10,22 +10,66 @@ Quantify how a delayed backup can cut tail latency while exposing the extra-load
 
 ## Understand (4 minutes)
 
-A distributed request often completes when its slowest dependency finishes. A rare slow replica can therefore dominate user-visible tail latency even when median service time is healthy. A hedged request sends a backup only after the original has exceeded a delay threshold, then uses the first successful result and cancels or ignores the loser.
+Five reads finish quickly; one takes 900 milliseconds. Waiting for the slowest replica makes the user experience worse.
 
-The threshold is the control surface. Too low, and nearly every request duplicates, raising load enough to create more stragglers. Too high, and the backup arrives too late to change the tail. The 2013 Google paper describes hedged requests as one of several tail-tolerance techniques; it does not make duplication free or safe for arbitrary side effects.
-
-
-
-Original teaching case: Six read replicas would return in 40, 45, 50, 55, 80, and 900 ms. A backup takes 70 ms once launched. With a 100 ms hedge delay, only the 900 ms request duplicates and completes at 170 ms. Five ordinary requests stay single-shot.
-
-completion = min(original, hedgeDelay + backupLatency)
-extra request iff original > hedgeDelay
-
-This is attractive for idempotent reads with independent replica slowdowns. It is dangerous if both attempts can charge a card, contend on the same bottleneck, share a correlated failure, or outlive cancellation. Production designs need idempotency, deadlines, admission control, per-cluster load budgets, outcome deduplication, and telemetry for hedge rate and winner rate.
+A hedged request starts a backup only when the first request is still pending after a delay. The first usable result wins. This can reduce long waits, but the duplicate work consumes capacity and may hit the same bottleneck.
 
 
 
-## Explore (5 minutes)
+The original read takes 900 ms. Start the backup at 100 ms; it takes another 70 ms. The result arrives at 170 ms. A normal 50 ms read finishes before the hedge is launched.
+
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```java
+int originalMs = 900;
+int hedgeDelayMs = 100;
+int backupMs = 70;
+boolean launchBackup = originalMs > hedgeDelayMs;
+int completionMs = Math.min(originalMs, hedgeDelayMs + backupMs);
+boolean hedgeNormalRead = 50 > hedgeDelayMs;
+```
+
+1. The original read is a straggler.
+
+   Changed values: `{"originalMs": "900"}`
+
+2. Wait before creating extra work.
+
+   Changed values: `{"hedgeDelayMs": "100"}`
+
+3. The backup’s runtime starts after launch.
+
+   Changed values: `{"backupMs": "70"}`
+
+4. Only the straggler triggers a backup.
+
+   Changed values: `{"launchBackup": "true"}`
+
+5. The backup wins at 170 ms.
+
+   Changed values: `{"completionMs": "170"}`
+
+6. A 50 ms read does not duplicate.
+
+   Changed values: `{"hedgeNormalRead": "false"}`
+
+[Full runnable example](examples/software-engineering.java).
+
+Limits: This uses fixed independent latencies and does not cancel real work. Hedging state-changing operations can duplicate effects. Even canceled read requests may keep consuming resources.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A distributed request often completes when its slowest dependency finishes. A rare slow replica can therefore dominate user-visible tail latency even when median service time is healthy. A hedged request sends a backup only after the original has exceeded a delay threshold, then uses the first successful result and cancels or ignores the loser.</p><p>The threshold is the control surface. Too low, and nearly every request duplicates, raising load enough to create more stragglers. Too high, and the backup arrives too late to change the tail. The 2013 Google paper describes hedged requests as one of several tail-tolerance techniques; it does not make duplication free or safe for arbitrary side effects.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> Six read replicas would return in 40, 45, 50, 55, 80, and 900 ms. A backup takes 70 ms once launched. With a 100 ms hedge delay, only the 900 ms request duplicates and completes at 170 ms. Five ordinary requests stay single-shot.</p><pre>completion = min(original, hedgeDelay + backupLatency)
+extra request iff original &gt; hedgeDelay</pre><p>This is attractive for idempotent reads with independent replica slowdowns. It is dangerous if both attempts can charge a card, contend on the same bottleneck, share a correlated failure, or outlive cancellation. Production designs need idempotency, deadlines, admission control, per-cluster load budgets, outcome deduplication, and telemetry for hedge rate and winner rate.</p>
+
+</details>
+
+## Explore (remaining exploration time)
 
 Predict the maximum completion time at a 100 ms threshold. Lower the threshold to 50 ms, then decide whether the saved milliseconds justify the new duplicate rate.
 
