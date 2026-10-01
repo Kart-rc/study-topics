@@ -70,5 +70,5 @@ for(const name of ['index.html',...lessons.map(L=>L.slug+'.html')]){
 }
 const state=JSON.parse(fs.readFileSync(path.join(root,'../study-state.json')));
 assert(state.days.filter(d=>d.generation_key==='2026-09-30').length===1,'unique generation key');
-assert(state.days.at(-1).review_keys.join(',')==='Day6+3,Day8+1','oldest due reviews');
+assert(state.days.find(d=>d.folder==='Day10').review_keys.join(',')==='Day6+3,Day8+1','oldest due reviews');
 console.log('PASS local links, standalone pages, unique date and oldest-due review queue.');

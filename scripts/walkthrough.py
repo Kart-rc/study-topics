@@ -108,7 +108,8 @@ def markdown(L):
  if L.get('advanced_detail'):out+='<details><summary>Optional deeper explanation and original worked example</summary>\n\n'+L['advanced_detail']+'\n\n</details>\n\n'
  return out
 if __name__=='__main__':
- for day in range(1,11):
+ manifest=json.loads((R/'study-state.json').read_text())
+ for day in sorted(d['number'] for d in manifest['days']):
   p=R/f'Day{day}/lessons.json';ls=json.loads(p.read_text())
   for L in ls:execute(f'Day{day}',L);print('Executed',day,L['slug'],L['walkthrough']['language'])
   p.write_text(json.dumps(ls,indent=2,ensure_ascii=False)+'\n')

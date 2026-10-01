@@ -1,18 +1,18 @@
 # Engineering field notes
 
-Five 15-minute lessons per day for an experienced data/platform engineering leader: data engineering, software engineering, Distinguished Engineer judgment, GenAI engineering, and technology breakthroughs.
+From Day11: seven 15-minute lessons per day for an experienced data/platform engineering leader: data engineering, software engineering, Distinguished Engineer judgment, GenAI engineering, technology breakthroughs, CI/CD & GitHub Actions, and APIs & Microservices. Days 1–10 contain the original five tracks.
 
 ## Read
 
 Download or clone this repository and open `index.html` in a browser. Choose a Day folder, then a lesson. GitHub's file view displays HTML source; download the repository ZIP from **Code → Download ZIP** to use the interactions locally. No build, API key, account, or external JavaScript is needed to read a lesson.
 
-Each lesson includes 2 minutes of recall, 4 minutes of explanation and worked example, 5 minutes of interactive exploration, and 4 minutes of assessment. Total daily study time is 75 minutes. Sources have dates and a checked date. Established foundations are labeled separately from new research.
+Each lesson includes 2 minutes of recall, 4 minutes of explanation and worked example, 5 minutes of interactive exploration, and 4 minutes of assessment. Total daily study time is 105 minutes from Day11; Days 1–10 remain 75 minutes. Sources have dates and a checked date. Established foundations are labeled separately from new research.
 
 ## Daily generation
 
 A ChatGPT automation runs at **6:50 PM America/New_York**, including daylight-saving changes. It researches and commits the next complete `DayN` bundle. The schedule starts generation; browsing and validation take additional time. This repository does not run an LLM or contain API credentials. `study-state.json` records the automation ID and generated bundles. `DAILY_TASK.md` contains the execution contract.
 
-Day numbers count generated bundles, not completed study sessions. There is at most one new bundle per New York calendar date. Retries repair or reuse that day's bundle. Missing dates do not create empty folders or a multi-day catch-up backlog. Commit the five lessons and updated state together.
+Day numbers count generated bundles, not completed study sessions. There is at most one new bundle per New York calendar date. Retries repair or reuse that day's bundle. Missing dates do not create empty folders or a multi-day catch-up backlog. Commit the complete day-specific lesson set and updated state together.
 
 ## Recall and feedback
 
@@ -48,3 +48,10 @@ Core study time remains 15 minutes per lesson. Original technical detail is avai
 - Run the existing day-specific checks with `node DayN/verify.cjs` for Days 2–10. Day1 model checks are included in the shared verification script.
 
 See [TEACHING_UPDATE.md](TEACHING_UPDATE.md) for the revision scope and actual validation limits.
+
+## New tracks from Day11
+
+- **CI/CD & GitHub Actions:** one focused daily lesson on building, testing, securing, releasing, or operating delivery pipelines.
+- **APIs & Microservices:** one focused daily lesson on REST/OpenAPI, API evolution, GraphQL, gRPC, service architecture, security, resilience, testing, or observability.
+
+Both use the same plain explanations, visuals, code walkthroughs, and quizzes. Seven lessons × 15 minutes = 105 minutes. The daily generation time remains 6:50 PM America/New_York. Spaced review for each new track begins with its first delivered lesson.

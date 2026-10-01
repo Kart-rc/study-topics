@@ -9,7 +9,9 @@
     "Software engineering",
     "Distinguished Engineer",
     "GenAI engineering",
-    "Technology breakthroughs"
+    "Technology breakthroughs",
+    "CI/CD & GitHub Actions",
+    "APIs & Microservices"
   ],
   "review_offsets_days": [
     1,
@@ -220,5 +222,32 @@
     }
   ],
   "submitted_assessments": [],
-  "notes": "Generation and mastery are separate. Do not publish personal assessment answers to this public repository. Use explicit submitted answers privately to adapt reviews."
+  "notes": "Generation and mastery are separate. Do not publish personal assessment answers to this public repository. Use explicit submitted answers privately to adapt reviews.",
+  "track_changes": [
+    {
+      "effective_from_day": 1,
+      "tracks": [
+        "Data engineering",
+        "Software engineering",
+        "Distinguished Engineer",
+        "GenAI engineering",
+        "Technology breakthroughs"
+      ],
+      "total_minutes": 75
+    },
+    {
+      "effective_from_day": 11,
+      "tracks": [
+        "Data engineering",
+        "Software engineering",
+        "Distinguished Engineer",
+        "GenAI engineering",
+        "Technology breakthroughs",
+        "CI/CD & GitHub Actions",
+        "APIs & Microservices"
+      ],
+      "total_minutes": 105,
+      "approved_on": "2026-10-01"
+    }
+  ]
 }

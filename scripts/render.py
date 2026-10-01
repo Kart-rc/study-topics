@@ -10,9 +10,18 @@ CSS += walkthrough.CSS
 def esc(x):return html.escape(str(x))
 def page(title,body,js=''):
  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+'</title><style>'+CSS+'</style></head><body><main>'+body+'</main><script>'+js+'</script></body></html>'
+def expected_tracks(manifest, number):
+ changes=manifest.get('track_changes',[])
+ eligible=[change for change in changes if change['effective_from_day']<=number]
+ return max(eligible,key=lambda c:c['effective_from_day'])['tracks'] if eligible else manifest['tracks']
+def day_count(manifest, day):
+ return len(day.get('lesson_slugs',expected_tracks(manifest,day['number'])))
 def render(folder):
  manifest=json.loads((R/'study-state.json').read_text());day=next(d for d in manifest['days'] if d['folder']==folder)
  lessons=json.loads((R/folder/'lessons.json').read_text());due=[]
+ expected=expected_tracks(manifest,day['number'])
+ if sorted(l['track'] for l in lessons)!=sorted(expected):raise ValueError('Lesson tracks do not match day policy: '+folder)
+ lesson_count=len(lessons);total_minutes=lesson_count*manifest['minutes_per_lesson']
  for prior in manifest['days']:
   if prior['number']>=day['number']:continue
   age=(date.fromisoformat(day['date'])-date.fromisoformat(prior['date'])).days
@@ -69,8 +78,8 @@ $('export').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(
   (R/folder/f'{slug}.md').write_text(md)
  cards=''.join(f'<article class="card"><p class="eyebrow">{esc(l["track"])}</p><h2><a href="{l["slug"]}.html">{esc(l["title"])}</a></h2><p>{esc(l["goal"])}</p><span class="pill">15 minutes</span></article>' for l in lessons)
  prepared=('<p>Prepared in advance at your request for '+esc(day['date'])+'.</p>') if day.get('prepared_in_advance_at_user_request') else ''
- (R/folder/'index.html').write_text(page(folder,f'<nav><a href="../index.html">← All days</a></nav><header><p class="eyebrow">Engineering field notes / {day["date"]}</p><h1>{folder}: see the idea, then follow the code.</h1><p class="lead">Five lessons. 15 minutes each. Read a plain-language example, follow the code as values change, then explore and quiz yourself. Deeper sections are optional.</p><p>75 minutes total. Each lesson includes its own recall and quiz time.</p>{prepared}</header><div class="grid">{cards}</div><section><h2>Make it stick</h2><p>Review intervals: 1, 3, 7, 14, and 30 days after delivery. Future lessons include due questions and refreshers. Export answers and upload them in ChatGPT to target weak areas. Generation does not imply completion.</p></section>'))
+ (R/folder/'index.html').write_text(page(folder,f'<nav><a href="../index.html">← All days</a></nav><header><p class="eyebrow">Engineering field notes / {day["date"]}</p><h1>{folder}: see the idea, then follow the code.</h1><p class="lead">{lesson_count} lessons. 15 minutes each. Read a plain-language example, follow the code as values change, then explore and quiz yourself. Deeper sections are optional.</p><p>{total_minutes} minutes total. Each lesson includes its own recall and quiz time.</p>{prepared}</header><div class="grid">{cards}</div><section><h2>Make it stick</h2><p>Review intervals: 1, 3, 7, 14, and 30 days after delivery. Future lessons include due questions and refreshers. Export answers and upload them in ChatGPT to target weak areas. Generation does not imply completion.</p></section>'))
  (R/'study-state.json').write_text(json.dumps(manifest,indent=2)+'\n')
- cards=''.join(f'<article class="card"><h2><a href="{d["folder"]}/index.html">{d["folder"]}</a></h2><p>{d["date"]} · Five lessons · 75 minutes</p></article>' for d in reversed(manifest['days']))
- (R/'index.html').write_text(page('Engineering field notes',f'<header><p class="eyebrow">Daily study / five tracks</p><h1>Engineering field notes.</h1><p class="lead">A daily practice in systems, software, technical judgment, AI engineering, and emerging research.</p><p>New material is scheduled for 6:50 PM America/New_York. Open any day below. All lessons work offline once downloaded.</p></header><div class="grid">{cards}</div>'))
+ cards=''.join(f'<article class="card"><h2><a href="{d["folder"]}/index.html">{d["folder"]}</a></h2><p>{d["date"]} · {day_count(manifest,d)} lessons · {day_count(manifest,d)*manifest["minutes_per_lesson"]} minutes</p></article>' for d in reversed(manifest['days']))
+ (R/'index.html').write_text(page('Engineering field notes',f'<header><p class="eyebrow">Daily study / seven tracks from Day11</p><h1>Engineering field notes.</h1><p class="lead">A daily practice in systems, software, technical judgment, AI engineering, emerging research, CI/CD, and APIs.</p><p>New material is scheduled for 6:50 PM America/New_York. Open any day below. All lessons work offline once downloaded.</p></header><div class="grid">{cards}</div>'))
 if __name__=='__main__':render(sys.argv[1] if len(sys.argv)>1 else 'Day1')

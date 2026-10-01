@@ -1,9 +1,14 @@
 const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert');
 const {node,extend}=require('./trace-dom.cjs');
 const root=path.join(__dirname,'..');let count=0;
-for(let day=1;day<=10;day++){
+const manifest=JSON.parse(fs.readFileSync(path.join(root,'study-state.json')));
+for(const dayRecord of manifest.days){
+ const day=dayRecord.number;
+ const policies=(manifest.track_changes||[]).filter(p=>p.effective_from_day<=day).sort((a,b)=>b.effective_from_day-a.effective_from_day);
+ const expectedTracks=policies.length?policies[0].tracks:manifest.tracks;
  const folder=path.join(root,'Day'+day),lessons=JSON.parse(fs.readFileSync(path.join(folder,'lessons.json')));
- assert.equal(lessons.length,5);
+ assert.equal(lessons.length,expectedTracks.length);
+ assert.deepEqual(lessons.map(l=>l.track).sort(),[...expectedTracks].sort());
  for(const L of lessons){
   const h=fs.readFileSync(path.join(folder,L.slug+'.html'),'utf8'),nodes={},radios={},storage={};
   for(const [,id] of h.matchAll(/id="(\w+)"/g)){assert(!nodes[id],'duplicate '+id);nodes[id]=node({value:'',checked:false});}
@@ -47,6 +52,6 @@ for(let day=1;day<=10;day++){
   const md=fs.readFileSync(path.join(folder,L.slug+'.md'),'utf8');assert(md.includes('## Step through the code')&&md.includes('```'+L.walkthrough.language));
   count++;
  }
- console.log('PASS Day'+day+': five execution replays, boundaries, quiz/export/save/restore, and links');
+ console.log('PASS Day'+day+': '+lessons.length+' execution replays, boundaries, quiz/export/save/restore, and links');
 }
 console.log('PASS '+count+' lessons. Simulated DOM does not establish real-browser layout or download behavior.');
