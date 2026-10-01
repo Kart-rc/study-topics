@@ -1,0 +1,27 @@
+openapi: 3.1.1
+info:
+  title: Order intake teaching API
+  version: 1.0.0
+paths:
+  /orders:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sku, quantity]
+              properties:
+                sku:
+                  type: string
+                  minLength: 1
+                quantity:
+                  type: integer
+                  minimum: 1
+              additionalProperties: false
+      responses:
+        '201':
+          description: Order accepted
+        '400':
+          description: Invalid request
