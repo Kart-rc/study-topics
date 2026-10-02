@@ -30,13 +30,18 @@ def render(folder):
    key=f"{prior['folder']}+{offset}"
    previously={k for d in manifest['days'] if d['number']<day['number'] for k in d.get('review_keys',[])}
    if age>=offset and key not in previously:due.append((prior,key))
- # Two source topics per track fit the two-minute recall budget; defer the rest.
+ # Select up to two source topics for each track. A global folder cap would
+ # starve tracks introduced later when older bundles did not contain them.
  due.sort(key=lambda pair: (date.fromisoformat(pair[0]['date'])+timedelta(days=int(pair[1].split('+')[1])),pair[0]['number']))
- chosen=[]
- for prior,key in due:
-  if prior['folder'] not in chosen and len(chosen)<2: chosen.append(prior['folder'])
- due=[(p,k) for p,k in due if p['folder'] in chosen]
- day['review_keys']=sorted({k for _,k in due})
+ prior_lessons={p['folder']:json.loads((R/p['folder']/'lessons.json').read_text()) for p,_ in due}
+ due_by_track={}
+ for track in expected:
+  selected=[]
+  for prior,key in due:
+   if len(selected)>=2:break
+   if any(old['track']==track for old in prior_lessons[prior['folder']]):selected.append((prior,key))
+  due_by_track[track]=selected
+ day['review_keys']=sorted({key for selected in due_by_track.values() for _,key in selected})
  for L in lessons:
   slug=L['slug'];qs=L['questions'];quiz=''
   walk_html=walkthrough.html_block(L) if L.get("walkthrough") else ""
@@ -46,10 +51,10 @@ def render(folder):
   sources=''.join(f'<li><a href="{esc(u)}">{esc(t)}</a> — {esc(d)}; checked {checked}.</li>' for t,u,d in L['sources'])
   review=''
   seen=set()
-  for prior,key in due:
+  for prior,key in due_by_track[L['track']]:
    if prior['folder'] in seen:continue
    seen.add(prior['folder'])
-   old=json.loads((R/prior['folder']/'lessons.json').read_text())
+   old=prior_lessons[prior['folder']]
    p=next((x for x in old if x['track']==L['track']),None)
    if p:
     q,options,a,why=p['questions'][0]

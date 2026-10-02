@@ -21,7 +21,7 @@
     30
   ],
   "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
-  "last_generated_day": 11,
+  "last_generated_day": 12,
   "days": [
     {
       "number": 1,
@@ -241,6 +241,29 @@
         "apis-microservices"
       ],
       "validation": "Executed code traces, interactive models, quizzes, save/export, source and local links verified; real-browser layout and native behavior unverified. See Day11/VALIDATION.md."
+    },
+    {
+      "number": 12,
+      "folder": "Day12",
+      "date": "2026-10-02",
+      "generation_key": "2026-10-02",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day11+1",
+        "Day4+7",
+        "Day9+1"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs",
+        "ci-cd-github-actions",
+        "apis-microservices"
+      ],
+      "validation": "Executed code traces, interactive models, quizzes, save/export, source and local links verified; real-browser layout and native behavior unverified. See Day12/VALIDATION.md."
     }
   ],
   "submitted_assessments": [],
