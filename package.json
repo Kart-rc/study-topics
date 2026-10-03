@@ -1,0 +1,12 @@
+{
+  "name": "study-topics-validation",
+  "private": true,
+  "scripts": {
+    "test": "npm run test:models && npm run test:browser",
+    "test:models": "node tests/browser/bundle.cjs --verify",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
