@@ -2,7 +2,7 @@
 
 Data engineering · Day4 · 15 minutes
 
-Trace the crash window in consume-transform-produce, then state exactly where Kafka's exactly-once boundary ends.
+A normalizer reads Kafka record 10 and writes a derived record.
 
 ## Recall (2 minutes)
 
@@ -10,28 +10,63 @@ Trace the crash window in consume-transform-produce, then state exactly where Ka
 
 ## Understand (4 minutes)
 
-Idempotent production prevents a producer retry from appending the same batch twice. A consume-transform-produce application has a second problem: it must make the derived output and the consumed input offset agree. If it writes output, crashes, and has not committed the offset, the replacement reads the input again.
+A normalizer reads Kafka record 10 and writes a derived record. It crashes before saving where it should resume. On restart, it may write the derived record again.
 
-Kafka transactions can atomically commit records across topic partitions together with the consumer-group offsets. A downstream consumer using isolation.level=read_committed hides records from aborted transactions. Current Kafka 4.3 documentation also requires disabling automatic offset commits for the direct producer/consumer pattern and assigning a transactional.id to the producer.
+A Kafka transaction can group Kafka output and the consumer’s next position into one decision. They commit together or abort together. A reader configured for committed data hides aborted output. An unrelated database or HTTP call is outside this boundary.
 
 
 
-Original teaching case: A lineage normalizer reads input offset 10 and emits a canonical lineage edge. The process fails immediately after the output send.
+The first attempt prepares an edge but aborts. The second prepares it again and commits it with next offset 11. A committed reader sees one edge even though there were two physical attempts.
 
-Without a transaction, the first edge remains visible while offset 10 remains uncommitted. The restarted consumer processes offset 10 again, so two edges are visible unless the sink independently deduplicates them.
 
-With a transaction, the first attempt's output and offset update abort together. The retry commits one output and offset 11. The log can still contain an aborted record, so a read_uncommitted consumer may observe both physical attempts. The transaction guarantee depends on the reader honoring the transaction markers.
 
-beginTransaction()
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+visible = []; next_offset = 10
+pending = ["edge from record 10"]
+pending = []
+pending = ["edge from record 10"]; staged_offset = 11
+visible, next_offset = pending.copy(), staged_offset
+```
+
+1. No derived output is committed yet.
+
+   Changed values: `{"visible": [], "next_offset": 10}`
+
+2. The first attempt stages its output.
+
+   Changed values: `{"pending": ["edge from record 10"]}`
+
+3. Abort discards this attempt from committed visibility.
+
+   Changed values: `{"pending": []}`
+
+4. Retry stages output and the next position.
+
+   Changed values: `{"pending": ["edge from record 10"], "staged_offset": 11}`
+
+5. This single toy step represents the Kafka transaction commit.
+
+   Changed values: `{"visible": ["edge from record 10"], "next_offset": 11}`
+
+[Full runnable example](examples/data-engineering.py).
+
+Limits: The tuple assignment stands for a Kafka transaction, not a client API implementation. It omits transaction markers and fencing. Only a committed reader gets this visibility rule; external side effects remain separate.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>Idempotent production prevents a producer retry from appending the same batch twice. A consume-transform-produce application has a second problem: it must make the derived output and the consumed input offset agree. If it writes output, crashes, and has not committed the offset, the replacement reads the input again.</p><p>Kafka transactions can atomically commit records across topic partitions together with the consumer-group offsets. A downstream consumer using <code>isolation.level=read_committed</code> hides records from aborted transactions. Current Kafka 4.3 documentation also requires disabling automatic offset commits for the direct producer/consumer pattern and assigning a <code>transactional.id</code> to the producer.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A lineage normalizer reads input offset 10 and emits a canonical lineage edge. The process fails immediately after the output send.</p><p>Without a transaction, the first edge remains visible while offset 10 remains uncommitted. The restarted consumer processes offset 10 again, so two edges are visible unless the sink independently deduplicates them.</p><p>With a transaction, the first attempt's output and offset update abort together. The retry commits one output and offset 11. The log can still contain an aborted record, so a <code>read_uncommitted</code> consumer may observe both physical attempts. The transaction guarantee depends on the reader honoring the transaction markers.</p><pre>beginTransaction()
 produce(derivedEdge)
 sendOffsetsToTransaction(offset 11)
-commitTransaction()  // output + position become visible together
+commitTransaction()  // output + position become visible together</pre><p>The precise boundary matters: Kafka can coordinate Kafka output topics and Kafka offsets. A write to an arbitrary REST API, Snowflake table, or object store does not join that transaction merely because its input came from Kafka. Such sinks need their own idempotency key, transactional connector, or colocated output/offset checkpoint.</p>
 
-The precise boundary matters: Kafka can coordinate Kafka output topics and Kafka offsets. A write to an arbitrary REST API, Snowflake table, or object store does not join that transaction merely because its input came from Kafka. Such sinks need their own idempotency key, transactional connector, or colocated output/offset checkpoint.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Predict the visible output count for all four combinations of transaction on/off and read-committed on/off. Then explain why an external API call inside the application is outside this atomic boundary.
 

@@ -1,0 +1,1172 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "One bookmark, no gap: handing a snapshot to CDC",
+    "goal": "Use one log position to connect a database snapshot to the live change stream without skipping a change.",
+    "tag": "Foundation · Debezium 3.7 snapshot-to-stream boundary",
+    "concept": "<p>Imagine photographing a departure board while new trains are being added. The photo gives a complete starting view. A bookmark tells you exactly where to start reading the live update tape.</p><p>Change data capture (CDC) does the same thing for a database. First it reads a consistent snapshot. It also records a source-log position. Then it streams changes from that position.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Snapshot at 100</strong><p>O42 = queued</p></div><div class=\"tile active\"><strong>Bookmark</strong><p>After LSN 100</p></div><div class=\"tile\"><strong>Live log</strong><p>101: O42 paid<br>102: O43 queued</p></div></div><p class=\"arrow\">Snapshot state + changes after 100 = current state</p></div><p><strong>LSN</strong> means log sequence number: a position on the database change tape. The exact name varies by database.</p>",
+    "example": "<p>Our snapshot contains order O42 as <code>queued</code> at position 100. While the snapshot is being copied, two committed changes arrive.</p><ol><li>Keep the snapshot row: O42 is queued.</li><li>Replay change 101: O42 becomes paid.</li><li>Replay change 102: O43 appears as queued.</li></ol><pre><code>snapshot, boundary = read_snapshot_and_position()\nfor change in log.after(boundary):\n    apply(change)</code></pre><p>Starting after 101 creates a gap: the payment at 101 disappears. Starting after 99 replays the boundary record too. An idempotent upsert may hide that duplicate in one table, but an append-only downstream sink would still see it.</p>",
+    "practice": "Predict the final orders. Move the stream bookmark earlier or later, then inspect duplicate and missing events.",
+    "boundary": "This is an exclusive-boundary toy with one ordered log. Real connectors coordinate locks or repeatable-read snapshots, persist offsets, handle schema history, retention, restarts, and database-specific log coordinates. Downstream consumers must still handle replay safely.",
+    "sim": "<label>Start streaming after LSN <select id=\"startAfter\"><option value=\"100\">100 · correct boundary</option><option value=\"99\">99 · too early</option><option value=\"101\">101 · too late</option></select></label><button id=\"runHandoff\">Build current view</button><div id=\"handoffTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const snapshotState={O42:'queued'};const logEvents=[{lsn:100,id:'O42',status:'queued'},{lsn:101,id:'O42',status:'paid'},{lsn:102,id:'O43',status:'queued'}];function paint(){const start=Number(startAfter.value);const state={...snapshotState};const replay=logEvents.filter(e=>e.lsn>start);replay.forEach(e=>state[e.id]=e.status);const missed=logEvents.filter(e=>e.lsn>100&&e.lsn<=start);const repeated=logEvents.filter(e=>e.lsn>start&&e.lsn<=100);handoffTiles.replaceChildren();Object.entries(state).forEach(([id,status])=>{const t=document.createElement('div');t.className='tile active';t.innerHTML='<strong>'+id+'</strong><p>'+status+'</p>';handoffTiles.appendChild(t)});world.textContent='Snapshot: O42=queued @100\\nReplayed LSNs: '+(replay.map(e=>e.lsn).join(', ')||'none')+'\\nFinal: '+JSON.stringify(state)+'\\nMissing live changes: '+(missed.map(e=>e.lsn).join(', ')||'none')+'\\nRepeated boundary changes: '+(repeated.map(e=>e.lsn).join(', ')||'none');}runHandoff.onclick=paint;startAfter.onchange=paint;paint();",
+    "questions": [
+      [
+        "The snapshot is at 100 and streaming starts after 101. What is wrong?",
+        [
+          "LSN 101 is missed",
+          "LSN 100 is read twice and nothing is missed",
+          "The snapshot becomes newer"
+        ],
+        0,
+        "The payment at 101 is neither in the snapshot nor in the replay. That is a gap."
+      ],
+      [
+        "Why keep the snapshot position?",
+        [
+          "To join the still picture to the live log at one boundary",
+          "To choose a Kafka partition count",
+          "To make every sink exactly once"
+        ],
+        0,
+        "The position says which committed changes belong after the snapshot."
+      ],
+      [
+        "What does the toy not guarantee?",
+        [
+          "That replay after 100 includes 101 and 102",
+          "That every downstream side effect is idempotent",
+          "That starting after 101 misses 101"
+        ],
+        1,
+        "The connector boundary prevents a source gap; sinks must still make their own replay behavior safe."
+      ]
+    ],
+    "written_questions": [
+      "Explain why the snapshot alone is stale before it finishes copying.",
+      "If the source log is deleted before catch-up, what fails and what alert would expose it?"
+    ],
+    "sources": [
+      [
+        "Debezium 3.7 MySQL connector: snapshot workflow",
+        "https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-snapshots",
+        "Living 3.7 documentation; snapshot records a binlog position and later streams from it"
+      ],
+      [
+        "Debezium 3.7 MySQL connector: setting the binlog position",
+        "https://debezium.io/documentation/reference/stable/connectors/mysql.html#setting-the-binlog-position",
+        "Living 3.7 documentation; moving later can skip events and moving earlier can duplicate them"
+      ]
+    ],
+    "source_checked_on": "2026-10-04",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "snapshot = {'O42': 'queued'}\nboundary_lsn = 100",
+          "note": "Capture the starting rows and the source position that belongs to that snapshot."
+        },
+        {
+          "code": "log = [(100, 'O42', 'queued'), (101, 'O42', 'paid'), (102, 'O43', 'queued')]",
+          "note": "The toy log includes the boundary record plus two later changes."
+        },
+        {
+          "code": "replay = [event for event in log if event[0] > boundary_lsn]\nreplay_lsns = [event[0] for event in replay]",
+          "note": "Use one explicit rule: replay only records after position 100."
+        },
+        {
+          "code": "current = snapshot.copy()\nfor lsn, order_id, status in replay:\n    current[order_id] = status",
+          "note": "Apply 101 and 102 in order. The current view now contains both orders."
+        }
+      ],
+      "expect": {
+        "replay_lsns": [
+          101,
+          102
+        ],
+        "current": {
+          "O42": "paid",
+          "O43": "queued"
+        }
+      },
+      "limit": "Executes an in-memory Python list with an exclusive integer boundary. It does not connect to MySQL, Debezium, Kafka, or a real sink.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "snapshot": {
+              "O42": "queued"
+            },
+            "boundary_lsn": 100
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "snapshot": {
+              "O42": "queued"
+            },
+            "boundary_lsn": 100,
+            "log": [
+              [
+                100,
+                "O42",
+                "queued"
+              ],
+              [
+                101,
+                "O42",
+                "paid"
+              ],
+              [
+                102,
+                "O43",
+                "queued"
+              ]
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "snapshot": {
+              "O42": "queued"
+            },
+            "boundary_lsn": 100,
+            "log": [
+              [
+                100,
+                "O42",
+                "queued"
+              ],
+              [
+                101,
+                "O42",
+                "paid"
+              ],
+              [
+                102,
+                "O43",
+                "queued"
+              ]
+            ],
+            "replay": [
+              [
+                101,
+                "O42",
+                "paid"
+              ],
+              [
+                102,
+                "O43",
+                "queued"
+              ]
+            ],
+            "replay_lsns": [
+              101,
+              102
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "snapshot": {
+              "O42": "queued"
+            },
+            "boundary_lsn": 100,
+            "log": [
+              [
+                100,
+                "O42",
+                "queued"
+              ],
+              [
+                101,
+                "O42",
+                "paid"
+              ],
+              [
+                102,
+                "O43",
+                "queued"
+              ]
+            ],
+            "replay": [
+              [
+                101,
+                "O42",
+                "paid"
+              ],
+              [
+                102,
+                "O43",
+                "queued"
+              ]
+            ],
+            "replay_lsns": [
+              101,
+              102
+            ],
+            "current": {
+              "O42": "paid",
+              "O43": "queued"
+            },
+            "lsn": 102,
+            "order_id": "O43",
+            "status": "queued"
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "advanced_detail": "<p>Debezium’s MySQL workflow takes a repeatable-read snapshot, records the binlog position, emits snapshot reads with that position, records completion in connector offsets, and then continues streaming. Operations teams should monitor snapshot duration, retained-log headroom, offset persistence, and sink lag as one recovery envelope.</p>"
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Write the recovery note first: WAL before data pages",
+    "goal": "See why a database can acknowledge a commit before every changed table page reaches disk.",
+    "tag": "Foundation · PostgreSQL 18 write-ahead logging",
+    "concept": "<p>A warehouse manager changes a shelf but first writes the change in a fireproof notebook. If power fails before the shelf label is updated, the notebook can restore the intended result.</p><p>A database calls that durable notebook a <strong>write-ahead log (WAL)</strong>. “Ahead” is the rule: flush the log record before allowing the changed data page to reach durable storage.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile active\"><strong>1 · WAL durable</strong><p>O42: stock 5 → 4</p></div><div class=\"tile\"><strong>2 · Commit success</strong><p>Client may continue</p></div><div class=\"tile\"><strong>3 · Data page later</strong><p>Stock page becomes 4</p></div></div><p class=\"arrow\">Crash between 2 and 3? REDO reads WAL and writes 4.</p></div>",
+    "example": "<p>Order O42 buys one item. The on-disk page still says stock is 5.</p><ol><li>Create WAL record: set stock to 4.</li><li>Flush that record to durable storage.</li><li>Acknowledge the transaction.</li><li>Write the data page later.</li></ol><pre><code>append_wal(\"stock=4\")\nflush_wal()\nack_commit()\nwrite_page_later()</code></pre><p>If the server crashes after the flush but before the page write, recovery redoes <code>stock=4</code>. If it crashes before the WAL flush, the transaction was not durably committed and must not be acknowledged.</p>",
+    "practice": "Choose the crash point. Predict the value on the data page before recovery and the value after REDO.",
+    "boundary": "This model shows REDO for one value. Real recovery also handles transaction boundaries, checksums, torn pages, checkpoints, full-page images, replication, and storage guarantees. WAL durability still depends on correct hardware and operating-system flush behavior.",
+    "sim": "<label>Crash point <select id=\"crashPoint\"><option value=\"before\">Before WAL flush</option><option value=\"middle\" selected>After WAL flush, before page write</option><option value=\"after\">After data-page write</option></select></label><label><input id=\"breakRule\" type=\"checkbox\"> Break the rule: write the page before flushing WAL</label><button id=\"recoverWal\">Crash and recover</button><div id=\"walTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const point=crashPoint.value;const broken=breakRule.checked;let wal=false,page=5,ack=false;if(broken){page=4;}else if(point==='middle'||point==='after'){wal=true;ack=true;if(point==='after')page=4;}const recovered=wal?4:page;walTiles.innerHTML='<div class=\"tile '+(wal?'active':'')+'\"><strong>WAL</strong><p>'+(wal?'stock=4 durable':'not durable')+'</p></div><div class=\"tile\"><strong>Page at crash</strong><p>stock='+page+'</p></div><div class=\"tile '+(wal?'active':'')+'\"><strong>After recovery</strong><p>stock='+recovered+'</p></div>';world.textContent=(broken?'UNSAFE ORDER: page changed without a durable recovery record.\\n':'Correct WAL order.\\n')+'Commit acknowledged: '+ack+'\\nREDO available: '+wal+'\\nRecovered stock: '+recovered;}recoverWal.onclick=paint;[crashPoint,breakRule].forEach(x=>x.onchange=paint);paint();",
+    "questions": [
+      [
+        "The crash happens after WAL is flushed but before the data page is written. What restores stock=4?",
+        [
+          "REDO from the WAL record",
+          "The client resends the SQL",
+          "A cache always survives"
+        ],
+        0,
+        "The durable log contains the committed change, so recovery can redo it."
+      ],
+      [
+        "Why is the order called write-ahead?",
+        [
+          "The log becomes durable before the related data page",
+          "Data pages are always written twice",
+          "Reads must happen before writes"
+        ],
+        0,
+        "The recovery description must reach durable storage before the page it describes."
+      ],
+      [
+        "What is outside this toy?",
+        [
+          "A single value changing from 5 to 4",
+          "Checkpoint and torn-page recovery details",
+          "Replaying a durable record"
+        ],
+        1,
+        "Production databases coordinate many pages and transactions and rely on stronger storage behavior than this scalar model."
+      ]
+    ],
+    "written_questions": [
+      "Explain how WAL lets the database delay a data-page flush after commit.",
+      "Suppose the storage device lies about flush completion. Which guarantee is lost?"
+    ],
+    "sources": [
+      [
+        "PostgreSQL 18: Write-Ahead Logging (WAL)",
+        "https://www.postgresql.org/docs/current/wal-intro.html",
+        "Current PostgreSQL 18 documentation; foundation"
+      ],
+      [
+        "PostgreSQL 18: WAL configuration and checkpoints",
+        "https://www.postgresql.org/docs/current/wal-configuration.html",
+        "Current PostgreSQL 18 documentation; foundation"
+      ]
+    ],
+    "source_checked_on": "2026-10-04",
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "int pageStock = 5;\nint walStock = 4;\nboolean walDurable = false;",
+          "note": "The data page still has 5. The log record describes the intended value 4."
+        },
+        {
+          "code": "walDurable = true;\nboolean commitAcknowledged = true;",
+          "note": "Flush the WAL record, then acknowledge the commit."
+        },
+        {
+          "code": "boolean crashedBeforePageWrite = true;",
+          "note": "Power fails while the old data page is still on disk."
+        },
+        {
+          "code": "int recoveredStock = walDurable ? walStock : pageStock;",
+          "note": "Recovery sees durable WAL and redoes the committed value."
+        }
+      ],
+      "expect": {
+        "walDurable": "true",
+        "commitAcknowledged": "true",
+        "crashedBeforePageWrite": "true",
+        "recoveredStock": "4"
+      },
+      "limit": "Runs a four-variable Java model. It does not execute PostgreSQL, force an fsync, model UNDO, or test a storage device.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "pageStock": "5",
+            "walStock": "4",
+            "walDurable": "false"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "pageStock": "5",
+            "walStock": "4",
+            "walDurable": "true",
+            "commitAcknowledged": "true"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "pageStock": "5",
+            "walStock": "4",
+            "walDurable": "true",
+            "commitAcknowledged": "true",
+            "crashedBeforePageWrite": "true"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "pageStock": "5",
+            "walStock": "4",
+            "walDurable": "true",
+            "commitAcknowledged": "true",
+            "crashedBeforePageWrite": "true",
+            "recoveredStock": "4"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "advanced_detail": "<p>WAL turns random page flushing into sequential log flushing on the commit path. That improves throughput, but the log is now a critical durability dependency. Track WAL flush latency, checkpoint pressure, archive health, replication lag, and recovery-time objectives together.</p>"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Three copies, one mistake: correlated failure",
+    "goal": "Recognize when replicas share the same cause of failure and use deployment waves to preserve a healthy comparison group.",
+    "tag": "Foundation · AWS Builders’ Library correlated-failure guidance",
+    "concept": "<p>Three spare house keys do not help if all three are inside the same locked bag. The count is three; the failure cause is still one.</p><p>Replicas improve availability only when important failures are independent. A bad fleet-wide configuration, shared DNS dependency, or simultaneous rollout can make many copies fail together. That is a <strong>correlated failure</strong>.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Cell A</strong><p>config v2</p></div><div class=\"tile\"><strong>Cell B</strong><p>config v2</p></div><div class=\"tile\"><strong>Cell C</strong><p>config v2</p></div></div><p class=\"arrow\">One bad config → three failures. Replication did not create independence.</p></div>",
+    "example": "<p>Checkout has three cells and needs two healthy cells.</p><ol><li>A fleet-wide rollout sends bad config v2 to A, B, and C. Healthy cells: 0.</li><li>A one-cell wave sends v2 only to A. Its error rate jumps.</li><li>The gate stops. B and C remain on v1. Healthy cells: 2.</li></ol><pre><code>affected = min(wave_size, replicas)\nhealthy = replicas - affected\ncontinue_rollout = healthy >= required_healthy and error_rate <= gate</code></pre><p>The wave does not make the configuration correct. It limits exposure long enough for evidence to stop the change.</p>",
+    "practice": "Set a deployment wave size. Predict how many cells remain healthy after the first bad wave and whether the service still meets its two-cell target.",
+    "boundary": "The arithmetic assumes the new version immediately fails every cell it reaches and the old version remains healthy. Real failures can be delayed, partial, or caused by shared control planes, identities, dependencies, data, and operator actions.",
+    "sim": "<label>Cells changed in first wave <input id=\"waveSize\" type=\"range\" min=\"1\" max=\"3\" value=\"1\"><span id=\"waveValue\"></span></label><label>Healthy cells required <select id=\"needHealthy\"><option value=\"1\">1</option><option value=\"2\" selected>2</option><option value=\"3\">3</option></select></label><button id=\"deployWave\">Deploy bad v2</button><div id=\"cellTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const wave=Number(waveSize.value),need=Number(needHealthy.value),healthy=3-wave;waveValue.textContent=wave;cellTiles.replaceChildren();['A','B','C'].forEach((name,i)=>{const bad=i<wave;const t=document.createElement('div');t.className='tile'+(bad?'':' active');t.innerHTML='<strong>Cell '+name+'</strong><p>'+(bad?'v2 · failing':'v1 · healthy')+'</p>';cellTiles.appendChild(t)});world.textContent='Affected by one cause: '+wave+'\\nHealthy cells: '+healthy+' of 3\\nAvailability target: '+(healthy>=need?'MET':'MISSED')+'\\nRollout gate: STOP because the changed wave is failing';}deployWave.onclick=paint;[waveSize,needHealthy].forEach(x=>x.oninput=paint);paint();",
+    "questions": [
+      [
+        "Bad v2 reaches all three cells at once. How many independent software-version outcomes were tested?",
+        [
+          "Three",
+          "One shared outcome",
+          "Zero deployments"
+        ],
+        1,
+        "All cells received the same risky change together, so the rollout created one shared failure cause."
+      ],
+      [
+        "Why does a one-cell wave help?",
+        [
+          "It proves v2 can never fail later",
+          "It preserves two unchanged cells while evidence is collected",
+          "It removes every shared dependency"
+        ],
+        1,
+        "A small wave limits exposure and leaves a healthy comparison group; it is not a universal proof."
+      ],
+      [
+        "Where can this design still fail?",
+        [
+          "A shared DNS or identity dependency can take every cell down",
+          "One bad cell can be stopped",
+          "Two cells can remain on v1"
+        ],
+        0,
+        "Runtime cells are not independent if they rely on one failing dependency or control plane."
+      ]
+    ],
+    "written_questions": [
+      "Explain why replica count is not the same as failure independence.",
+      "Name one shared dependency in your platform and one signal that could reveal it."
+    ],
+    "sources": [
+      [
+        "AWS Builders’ Library: Minimizing correlated failures in distributed systems",
+        "https://builder.aws.com/content/3Ev2H7t3l2eZa9xBXiZcAjz12JK/minimizing-correlated-failures-in-distributed-systems",
+        "AWS article surfaced in its current Builder Center edition in 2026; foundation"
+      ],
+      [
+        "AWS Well-Architected DevOps Guidance: cell-based deployment and release",
+        "https://docs.aws.amazon.com/wellarchitected/latest/devops-guidance/dl.ads.6-utilize-cell-based-architectures-for-granular-deployment-and-release.html",
+        "Published 2023-09-21; living guidance"
+      ]
+    ],
+    "source_checked_on": "2026-10-04",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "replicas = 3\nrequired_healthy = 2\nbad_change = True",
+          "note": "The service has three cells and needs two healthy cells."
+        },
+        {
+          "code": "fleet_wave = 3\nfleet_healthy = replicas - fleet_wave if bad_change else replicas",
+          "note": "A fleet-wide wave couples all three cells to one bad change."
+        },
+        {
+          "code": "safe_wave = 1\nsafe_healthy = replicas - safe_wave if bad_change else replicas",
+          "note": "A one-cell wave contains the first impact to one cell."
+        },
+        {
+          "code": "target_met = safe_healthy >= required_healthy\nrollout_action = \"stop\" if bad_change else \"continue\"",
+          "note": "The service retains two healthy cells, and the evidence gate stops the rollout."
+        }
+      ],
+      "expect": {
+        "fleet_healthy": 0,
+        "safe_healthy": 2,
+        "target_met": true,
+        "rollout_action": "stop"
+      },
+      "limit": "Executes deterministic blast-radius arithmetic. It does not estimate real failure probability, detect hidden dependencies, or choose a safe observation window.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "replicas": 3,
+            "required_healthy": 2,
+            "bad_change": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "replicas": 3,
+            "required_healthy": 2,
+            "bad_change": true,
+            "fleet_wave": 3,
+            "fleet_healthy": 0
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "replicas": 3,
+            "required_healthy": 2,
+            "bad_change": true,
+            "fleet_wave": 3,
+            "fleet_healthy": 0,
+            "safe_wave": 1,
+            "safe_healthy": 2
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "replicas": 3,
+            "required_healthy": 2,
+            "bad_change": true,
+            "fleet_wave": 3,
+            "fleet_healthy": 0,
+            "safe_wave": 1,
+            "safe_healthy": 2,
+            "target_met": true,
+            "rollout_action": "stop"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "advanced_detail": "<p>A Distinguished Engineer should ask for a <em>cause map</em>, not only a replica map: power, network, DNS, IAM, base image, deployment system, schema, operator path, and recovery control plane. Independence must exist along the failure modes that matter.</p>"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Break the tool on purpose: fault-inject agent results",
+    "goal": "Test whether an agent harness stops safely when a tool times out, reports an error, or returns the wrong shape.",
+    "tag": "Harness engineering · MCP draft tool-result contracts",
+    "concept": "<p>A cashier does not treat every paper from the card terminal as “payment approved.” The paper might say declined, be blank, or never arrive.</p><p>An agent harness needs the same discipline for tools. Before giving a result to the model, check four things: the call finished before its deadline, the protocol completed, <code>isError</code> is false, and structured data matches the declared schema.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Tool result</strong><p>success, error, malformed, or timeout</p></div><div class=\"tile active\"><strong>Harness gate</strong><p>deadline + error flag + schema</p></div><div class=\"tile\"><strong>Agent</strong><p>uses only validated data</p></div></div><p class=\"arrow\">Bad result → typed failure path, not invented success.</p></div>",
+    "example": "<p>The shipping tool should return <code>{shipment_id, eta_days}</code>.</p><ol><li>A valid result reaches the model: S7 arrives in 2 days.</li><li>An <code>isError: true</code> result becomes a tool failure the model may handle.</li><li>A missing <code>eta_days</code> field fails schema validation.</li><li>A timeout ends at the harness deadline; it is not an empty success.</li></ol><pre><code>result = call_with_timeout(tool, 2.0)\nif result.is_error: raise ToolFailure(...)\nvalidate(result.structured_content, schema)</code></pre><p>The test should assert the final outcome and the tool trace: no shipment promise was sent after a failed contract.</p>",
+    "practice": "Choose a tool behavior. Predict whether the harness passes data to the model, asks for recovery, or stops at the deadline.",
+    "boundary": "This lab models result handling, not transport, cancellation, retries, side-effect idempotence, authentication, or prompt-injection defenses. A schema proves shape, not that the ETA is truthful.",
+    "sim": "<label>Injected tool behavior <select id=\"toolCase\"><option value=\"valid\">Valid structured result</option><option value=\"error\">isError: true</option><option value=\"malformed\">Missing eta_days</option><option value=\"timeout\">No result before deadline</option></select></label><button id=\"runTool\">Run harness gate</button><div id=\"toolTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const cases={valid:{done:true,isError:false,data:{shipment_id:'S7',eta_days:2}},error:{done:true,isError:true,data:null},malformed:{done:true,isError:false,data:{shipment_id:'S7'}},timeout:{done:false,isError:false,data:null}};function paint(){const r=cases[toolCase.value];const shape=!!(r.data&&typeof r.data.shipment_id==='string'&&Number.isInteger(r.data.eta_days));let decision='PASS TO MODEL';if(!r.done)decision='STOP · deadline exceeded';else if(r.isError)decision='RECOVER · tool execution error';else if(!shape)decision='STOP · output schema mismatch';toolTiles.innerHTML='<div class=\"tile\"><strong>Deadline</strong><p>'+(r.done?'completed':'expired')+'</p></div><div class=\"tile\"><strong>isError</strong><p>'+r.isError+'</p></div><div class=\"tile '+(decision==='PASS TO MODEL'?'active':'')+'\"><strong>Decision</strong><p>'+decision+'</p></div>';world.textContent='Raw result: '+JSON.stringify(r,null,2)+'\\nSchema valid: '+shape+'\\nHarness: '+decision;}runTool.onclick=paint;toolCase.onchange=paint;paint();",
+    "questions": [
+      [
+        "The tool returns isError=true with readable text. What should the harness call it?",
+        [
+          "A successful answer because content exists",
+          "A tool execution failure",
+          "A schema version"
+        ],
+        1,
+        "MCP uses isError=true for actionable tool execution errors even when explanatory content is present."
+      ],
+      [
+        "Why inject a missing eta_days field in tests?",
+        [
+          "To prove the harness rejects a shape that violates the contract",
+          "To make the model more creative",
+          "To test DNS independence"
+        ],
+        0,
+        "The harness should detect malformed structured content before the model relies on it."
+      ],
+      [
+        "What can output-schema validation not prove?",
+        [
+          "That eta_days is present and an integer",
+          "That the claimed ETA is factually correct",
+          "That shipment_id is a string"
+        ],
+        1,
+        "Schema validation checks representation. Semantic truth needs other evidence and controls."
+      ]
+    ],
+    "written_questions": [
+      "Describe the safe user-visible result when the shipping tool times out.",
+      "If retrying the tool can buy a second label, what extra control is required?"
+    ],
+    "sources": [
+      [
+        "Model Context Protocol draft: Tools, structured content and error handling",
+        "https://modelcontextprotocol.io/specification/draft/server/tools",
+        "Current draft checked 2026-10-04; not a finalized protocol version"
+      ],
+      [
+        "Model Context Protocol 2025-06-18: Tools",
+        "https://modelcontextprotocol.io/specification/2025-06-18/server/tools",
+        "Stable specification dated 2025-06-18; foundation for isError and structuredContent"
+      ]
+    ],
+    "source_checked_on": "2026-10-04",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "result = {'done': True, 'isError': False, 'structuredContent': {'shipment_id': 'S7', 'eta_days': 2}}",
+          "note": "Start with one concrete tool result."
+        },
+        {
+          "code": "deadline_ok = result['done']\nexecution_ok = not result['isError']",
+          "note": "Separate transport completion from the tool’s own success signal."
+        },
+        {
+          "code": "data = result['structuredContent']\nschema_ok = isinstance(data.get('shipment_id'), str) and isinstance(data.get('eta_days'), int)",
+          "note": "Validate the fields before the agent can use them."
+        },
+        {
+          "code": "decision = 'use result' if deadline_ok and execution_ok and schema_ok else 'safe failure'",
+          "note": "Only the fully validated result crosses the harness gate."
+        }
+      ],
+      "expect": {
+        "deadline_ok": true,
+        "execution_ok": true,
+        "schema_ok": true,
+        "decision": "use result"
+      },
+      "limit": "Executes dictionary and type checks in Python. It does not call an MCP server, enforce wall-clock cancellation, or judge whether a valid-looking ETA is true.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "result": {
+              "done": true,
+              "isError": false,
+              "structuredContent": {
+                "shipment_id": "S7",
+                "eta_days": 2
+              }
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "result": {
+              "done": true,
+              "isError": false,
+              "structuredContent": {
+                "shipment_id": "S7",
+                "eta_days": 2
+              }
+            },
+            "deadline_ok": true,
+            "execution_ok": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "result": {
+              "done": true,
+              "isError": false,
+              "structuredContent": {
+                "shipment_id": "S7",
+                "eta_days": 2
+              }
+            },
+            "deadline_ok": true,
+            "execution_ok": true,
+            "data": {
+              "shipment_id": "S7",
+              "eta_days": 2
+            },
+            "schema_ok": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "result": {
+              "done": true,
+              "isError": false,
+              "structuredContent": {
+                "shipment_id": "S7",
+                "eta_days": 2
+              }
+            },
+            "deadline_ok": true,
+            "execution_ok": true,
+            "data": {
+              "shipment_id": "S7",
+              "eta_days": 2
+            },
+            "schema_ok": true,
+            "decision": "use result"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "advanced_detail": "<p>Build a fault matrix for each high-impact tool: timeout, protocol error, execution error, malformed structured content, semantically impossible value, duplicated success, and success after cancellation. Assert both the user outcome and the absence of forbidden side effects.</p>"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Let the right answer settle: a scaffolded DNA computer",
+    "goal": "Understand how a 2026 molecular computer makes matching DNA tiles energetically more favorable than mismatched outputs.",
+    "tag": "New research · Nature paper published 2026-09-16",
+    "concept": "<p>Shake letter tiles in a box designed so the correct sentence clicks together more strongly than the wrong ones. You do not place every tile by hand; the physical system settles toward the best fit.</p><p>The reported Scaffolded DNA Computer (SDC) uses a long DNA scaffold with positions for competing tiles. Neighboring tile “colors” are molecular domains. Matching neighbors are energetically favored; mismatches carry a penalty and can be replaced.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Input + program tiles</strong><p>Compete for scaffold positions</p></div><div class=\"tile\"><strong>Mismatch</strong><p>Energetic penalty</p></div><div class=\"tile active\"><strong>Target arrangement</strong><p>All neighbor colors match</p></div></div><p class=\"arrow\">The intended output is designed to be the favored equilibrium state.</p></div>",
+    "example": "<p>The paper’s parity example uses input <code>10100100</code>. It contains three 1s, so odd parity is 1.</p><ol><li>Each input pair and running parity is encoded into eligible tiles.</li><li>Tiles bind to scaffold positions.</li><li>A neighbor mismatch is less favorable and can be replaced.</li><li>The fully matching arrangement reports output 1.</li></ol><pre><code>parity = 0\nfor bit in \"10100100\":\n    parity ^= int(bit)</code></pre><p>The paper demonstrates ten programs, including an 8-bit parity detector and addition of 25-bit numbers, described as a 100-bit computation. Our code below computes parity digitally; it is only a map for understanding the molecular experiment.</p>",
+    "practice": "Enter eight bits and choose a candidate output. Watch the digital parity trace, then see whether the candidate would be the favored target in the toy energy view.",
+    "boundary": "The interactive model is not molecular simulation. Its one-point mismatch score is an analogy, not a measured energy, yield, rate, or error model from the paper. It cannot establish scalability, manufacturing cost, or advantage over silicon.",
+    "sim": "<label>Eight input bits <input id=\"dnaBits\" value=\"10100100\" maxlength=\"8\" pattern=\"[01]{8}\"></label><label>Candidate output <select id=\"dnaCandidate\"><option value=\"0\">0 · even</option><option value=\"1\" selected>1 · odd</option></select></label><button id=\"foldDna\">Evaluate candidate</button><div id=\"dnaTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const bits=dnaBits.value;const valid=/^[01]{8}$/.test(bits);if(!valid){world.textContent='Enter exactly eight 0/1 bits.';dnaTiles.replaceChildren();return;}let p=0;const trace=[];for(const b of bits){p^=Number(b);trace.push(p)}const c=Number(dnaCandidate.value),match=c===p;dnaTiles.innerHTML='<div class=\"tile\"><strong>Input</strong><p>'+bits+'</p></div><div class=\"tile\"><strong>Running parity</strong><p>'+trace.join(' → ')+'</p></div><div class=\"tile '+(match?'active':'')+'\"><strong>Candidate '+c+'</strong><p>'+(match?'matches target · toy penalty 0':'mismatch · toy penalty 1')+'</p></div>';world.textContent='Digital parity target: '+p+' ('+(p?'odd':'even')+')\\nCandidate: '+c+'\\nToy energy view: '+(match?'favored target':'penalized mismatch')+'\\nThis is an analogy, not a molecular simulation.';}foldDna.onclick=paint;[dnaBits,dnaCandidate].forEach(x=>x.oninput=paint);paint();",
+    "questions": [
+      [
+        "Input 10100100 contains three 1s. What parity output is expected?",
+        [
+          "0, even",
+          "1, odd",
+          "The paper has no parity program"
+        ],
+        1,
+        "Three is odd, so the reported parity convention outputs 1."
+      ],
+      [
+        "Why can mismatched tile arrangements be replaced?",
+        [
+          "They carry an energetic penalty relative to matching neighbors",
+          "JavaScript removes them from the molecule",
+          "Every tile is manually moved"
+        ],
+        0,
+        "The molecular design makes matching compute domains more favorable."
+      ],
+      [
+        "What does the browser lab not demonstrate?",
+        [
+          "Digital XOR parity",
+          "A real DNA energy landscape, yield, or runtime",
+          "Whether three is odd"
+        ],
+        1,
+        "The lab is an intuition aid; the Nature experiment is the evidence for molecular behavior."
+      ]
+    ],
+    "written_questions": [
+      "Explain “the answer is the favored equilibrium” without using the word equilibrium.",
+      "What evidence would you require before calling this a practical data-center computer?"
+    ],
+    "sources": [
+      [
+        "Stérin et al., “A thermodynamically favoured molecular computer,” Nature",
+        "https://www.nature.com/articles/s41586-026-10996-5",
+        "Published 2026-09-16; peer-reviewed original research"
+      ],
+      [
+        "Data and code for the Nature article, Zenodo",
+        "https://doi.org/10.5281/zenodo.15869377",
+        "Published 2026; original research artifact linked by the paper"
+      ]
+    ],
+    "source_checked_on": "2026-10-04",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "input_bits = '10100100'\nrunning = 0\ntrace = []",
+          "note": "Use the same eight-bit input shown in the paper’s parity example."
+        },
+        {
+          "code": "for bit in input_bits:\n    running ^= int(bit)\n    trace.append(running)",
+          "note": "Digital XOR exposes the parity state after each bit."
+        },
+        {
+          "code": "target_output = running\ncandidates = {0: int(0 != target_output), 1: int(1 != target_output)}",
+          "note": "The toy score assigns one penalty to the wrong candidate and zero to the target."
+        },
+        {
+          "code": "favored_candidate = min(candidates, key=candidates.get)",
+          "note": "Candidate 1 is favored in this teaching analogy."
+        }
+      ],
+      "expect": {
+        "trace": [
+          1,
+          1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "target_output": 1,
+        "candidates": {
+          "0": 1,
+          "1": 0
+        },
+        "favored_candidate": 1
+      },
+      "limit": "Runs digital XOR and a declared toy penalty. It does not simulate DNA binding, temperature, kinetics, concentrations, fluorescence, or the paper’s partition function.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "input_bits": "10100100",
+            "running": 0,
+            "trace": []
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "input_bits": "10100100",
+            "running": 1,
+            "trace": [
+              1,
+              1,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1
+            ],
+            "bit": "0"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "input_bits": "10100100",
+            "running": 1,
+            "trace": [
+              1,
+              1,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1
+            ],
+            "bit": "0",
+            "target_output": 1,
+            "candidates": {
+              "0": 1,
+              "1": 0
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "input_bits": "10100100",
+            "running": 1,
+            "trace": [
+              1,
+              1,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1
+            ],
+            "bit": "0",
+            "target_output": 1,
+            "candidates": {
+              "0": 1,
+              "1": 0
+            },
+            "favored_candidate": 1
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "advanced_detail": "<p>The research claim is larger than “DNA can store bits.” The authors program a physical energy landscape so the correct computation output outcompetes many off-target configurations. The demonstrated system remains a research device; enterprise relevance today is conceptual, not a replacement plan for CPUs or GPUs.</p>"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "One pipeline contract: reusable GitHub Actions workflows",
+    "goal": "Separate a caller’s deployment choice from a shared workflow’s implementation using typed inputs and explicit secrets.",
+    "tag": "Foundation · GitHub Actions workflow_call",
+    "concept": "<p>A restaurant can reuse one kitchen recipe while each table supplies an order slip. The slip says “staging” or “production”; it does not rewrite the recipe.</p><p>A reusable GitHub Actions workflow is that shared recipe. It lives in <code>.github/workflows</code>, declares <code>workflow_call</code>, and defines the inputs and secrets a caller may pass.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Caller workflow</strong><p>environment = staging</p></div><div class=\"tile active\"><strong>Reusable workflow</strong><p>typed input + named secret</p></div><div class=\"tile\"><strong>Deploy job</strong><p>same tested steps</p></div></div><p class=\"arrow\">The caller chooses values; the callee owns the steps.</p></div>",
+    "example": "<p>Two services use one deployment workflow.</p><pre><code>on:\n  workflow_call:\n    inputs:\n      environment: {required: true, type: string}\n    secrets:\n      deploy_token: {required: true}</code></pre><p>The caller uses the workflow at the job level, not inside <code>steps</code>:</p><pre><code>jobs:\n  deploy:\n    uses: acme/platform/.github/workflows/deploy.yml@v3\n    with:\n      environment: staging\n    secrets:\n      deploy_token: $&#123;&#123; secrets.DEPLOY_TOKEN &#125;&#125;</code></pre><p>This creates a visible contract. It does not automatically make the shared workflow safe: pin trustworthy refs, keep permissions narrow, and understand that environment secrets have special behavior.</p>",
+    "practice": "Change the caller’s input type and secret choice. Predict whether the contract accepts the call before any deployment steps run.",
+    "boundary": "This is a local contract checker, not the GitHub Actions expression engine. It does not fetch a workflow ref, enforce repository access, model nested workflows, permissions, environments, billing, or runner execution.",
+    "sim": "<label>environment value <select id=\"workflowInput\"><option value=\"staging\">\"staging\" · string</option><option value=\"true\">true · boolean</option></select></label><label>deploy_token <select id=\"workflowSecret\"><option value=\"named\">pass named secret</option><option value=\"missing\">omit secret</option><option value=\"inherit\">inherit all caller secrets</option></select></label><button id=\"callWorkflow\">Validate call</button><div id=\"workflowTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const typeOk=workflowInput.value==='staging';const secretOk=workflowSecret.value!=='missing';const least=workflowSecret.value==='named';const accepted=typeOk&&secretOk;workflowTiles.innerHTML='<div class=\"tile '+(typeOk?'active':'')+'\"><strong>Typed input</strong><p>'+(typeOk?'string accepted':'boolean rejected')+'</p></div><div class=\"tile '+(secretOk?'active':'')+'\"><strong>Secret</strong><p>'+(secretOk?'available':'missing')+'</p></div><div class=\"tile '+(accepted?'active':'')+'\"><strong>Result</strong><p>'+(accepted?'workflow may start':'contract blocks call')+'</p></div>';world.textContent='Input type valid: '+typeOk+'\\nRequired secret present: '+secretOk+'\\nLeast secret exposure: '+least+'\\nDecision: '+(accepted?'ACCEPT':'REJECT');}callWorkflow.onclick=paint;[workflowInput,workflowSecret].forEach(x=>x.onchange=paint);paint();",
+    "questions": [
+      [
+        "Where does a reusable workflow declare its caller contract?",
+        [
+          "Under on.workflow_call inputs and secrets",
+          "Inside a README only",
+          "Inside the caller’s first shell step"
+        ],
+        0,
+        "workflow_call is the trigger and contract surface for inputs and secrets."
+      ],
+      [
+        "How does a caller invoke a reusable workflow?",
+        [
+          "With jobs.<job_id>.uses",
+          "With run inside a step",
+          "By copying every step"
+        ],
+        0,
+        "Reusable workflows are called at the job level. Actions are used inside steps."
+      ],
+      [
+        "What is a boundary of reuse?",
+        [
+          "A shared workflow automatically receives every environment secret",
+          "Environment secrets cannot be passed through workflow_call in the same way as named caller secrets",
+          "Typed inputs never need validation"
+        ],
+        1,
+        "GitHub documents special environment-secret behavior; secret flow must be designed explicitly."
+      ]
+    ],
+    "written_questions": [
+      "Explain what belongs in the caller versus the reusable workflow.",
+      "If @v3 is moved to new code, what supply-chain risk appears and how would you reduce it?"
+    ],
+    "sources": [
+      [
+        "GitHub Docs: Reuse workflows",
+        "https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows",
+        "Living GitHub Actions documentation; checked 2026-10-04"
+      ],
+      [
+        "GitHub Docs: Workflow syntax for workflow_call",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_call",
+        "Living GitHub Actions reference; checked 2026-10-04"
+      ]
+    ],
+    "source_checked_on": "2026-10-04",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "contract = {'environment_type': 'string', 'secret_required': True}",
+          "note": "Represent the reusable workflow’s declared contract."
+        },
+        {
+          "code": "caller = {'environment': 'staging', 'deploy_token': 'present'}",
+          "note": "The caller supplies one string input and one named secret."
+        },
+        {
+          "code": "input_ok = isinstance(caller['environment'], str)\nsecret_ok = caller.get('deploy_token') == 'present'",
+          "note": "Validate the two requirements independently."
+        },
+        {
+          "code": "call_status = 'accepted' if input_ok and secret_ok else 'rejected'",
+          "note": "Only a caller satisfying the contract reaches the shared jobs."
+        }
+      ],
+      "expect": {
+        "input_ok": true,
+        "secret_ok": true,
+        "call_status": "accepted"
+      },
+      "limit": "Executes a Python model of two contract checks. It does not parse YAML or run GitHub Actions; the YAML shown is explanatory and version-sensitive behavior comes from GitHub Docs.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "contract": {
+              "environment_type": "string",
+              "secret_required": true
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "contract": {
+              "environment_type": "string",
+              "secret_required": true
+            },
+            "caller": {
+              "environment": "staging",
+              "deploy_token": "present"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "contract": {
+              "environment_type": "string",
+              "secret_required": true
+            },
+            "caller": {
+              "environment": "staging",
+              "deploy_token": "present"
+            },
+            "input_ok": true,
+            "secret_ok": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "contract": {
+              "environment_type": "string",
+              "secret_required": true
+            },
+            "caller": {
+              "environment": "staging",
+              "deploy_token": "present"
+            },
+            "input_ok": true,
+            "secret_ok": true,
+            "call_status": "accepted"
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "advanced_detail": "<p>For platform teams, reusable workflows are an API. Version them, publish compatibility expectations, pin third-party actions, set minimal <code>permissions</code>, expose useful outputs, and instrument call adoption and failure rates. Reuse can centralize both good controls and bad mistakes.</p>"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "One author query, not three: GraphQL request batching",
+    "goal": "Remove a GraphQL N+1 query pattern by batching repeated author lookups once per request.",
+    "tag": "Foundation · GraphQL.js DataLoader pattern",
+    "concept": "<p>A waiter does not walk to the kitchen separately for every item on one table’s order. The waiter gathers the slips and makes one trip.</p><p>GraphQL field resolvers run independently. If three posts each resolve an author by calling the database, you can get one query for posts plus three author queries. That is the <strong>N+1 problem</strong>.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Posts query</strong><p>1 database call</p></div><div class=\"tile\"><strong>Three resolvers</strong><p>u1, u2, u1</p></div><div class=\"tile active\"><strong>Request loader</strong><p>batch [u1, u2] in 1 call</p></div></div><p class=\"arrow\">Naive: 4 calls · batched: 2 calls</p></div>",
+    "example": "<p>The response contains posts P1, P2, and P3. Their author IDs are u1, u2, and u1.</p><ol><li>Fetch the posts: one query.</li><li>Each resolver calls <code>loader.load(authorId)</code>.</li><li>The loader collects keys for the same execution turn.</li><li>It fetches unique authors u1 and u2 in one database call and returns results in key order.</li></ol><pre><code>userLoader = new DataLoader(ids => getUsersByIds(ids))\nresolve(post, _, ctx) {\n  return ctx.userLoader.load(post.authorId)\n}</code></pre><p>Create the loader per request. A long-lived cross-user cache can return stale data or leak information across authorization contexts.</p>",
+    "practice": "Add or remove posts. Compare naive resolver calls with one request-scoped batch, including repeated author IDs.",
+    "boundary": "The model counts logical database calls. It does not model SQL limits, batching windows, async scheduling, authorization, cache invalidation, errors per key, or the required result ordering in a real DataLoader batch function.",
+    "sim": "<label><input id=\"post1\" type=\"checkbox\" checked> P1 → u1</label><label><input id=\"post2\" type=\"checkbox\" checked> P2 → u2</label><label><input id=\"post3\" type=\"checkbox\" checked> P3 → u1</label><button id=\"resolveGraphql\">Resolve authors</button><div id=\"queryTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const ids=[];if(post1.checked)ids.push('u1');if(post2.checked)ids.push('u2');if(post3.checked)ids.push('u1');const unique=[...new Set(ids)],naive=1+ids.length,batched=1+(ids.length?1:0);queryTiles.innerHTML='<div class=\"tile\"><strong>Naive</strong><p>'+naive+' DB calls</p></div><div class=\"tile active\"><strong>Batched</strong><p>'+batched+' DB calls</p></div><div class=\"tile\"><strong>Batch keys</strong><p>'+(unique.join(', ')||'none')+'</p></div>';world.textContent='Posts selected: '+ids.length+'\\nResolver loads: '+JSON.stringify(ids)+'\\nUnique author keys: '+JSON.stringify(unique)+'\\nNaive total: '+naive+'\\nBatched total: '+batched;}resolveGraphql.onclick=paint;[post1,post2,post3].forEach(x=>x.onchange=paint);paint();",
+    "questions": [
+      [
+        "Three posts have author IDs u1, u2, u1. How many author keys should the request batch fetch?",
+        [
+          "Three separate keys including duplicate u1",
+          "Two unique keys: u1 and u2",
+          "No author keys"
+        ],
+        1,
+        "The request cache deduplicates the repeated u1 lookup, and the batch fetches u1 and u2 together."
+      ],
+      [
+        "Why create a DataLoader per request?",
+        [
+          "To keep caching scoped to the request and its authorization context",
+          "Because GraphQL forbids arrays",
+          "To make every cache permanent"
+        ],
+        0,
+        "Request scope avoids unintended reuse across users and limits staleness."
+      ],
+      [
+        "What contract must the batch function preserve?",
+        [
+          "Results correspond to input keys in the same order",
+          "Every key must return the same user",
+          "The database must use GraphQL internally"
+        ],
+        0,
+        "DataLoader requires each output position to line up with the corresponding input key."
+      ]
+    ],
+    "written_questions": [
+      "Explain why independent resolvers create N+1 without coordination.",
+      "If u2 is forbidden for this caller, where should authorization be enforced?"
+    ],
+    "sources": [
+      [
+        "GraphQL.js: Solving the N+1 Problem with DataLoader",
+        "https://www.graphql-js.org/docs/n1-dataloader/",
+        "Living GraphQL.js documentation; checked 2026-10-04"
+      ],
+      [
+        "DataLoader repository and API",
+        "https://github.com/graphql/dataloader",
+        "Primary open-source implementation documentation; living source"
+      ]
+    ],
+    "source_checked_on": "2026-10-04",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "posts = [{'id': 'P1', 'author': 'u1'}, {'id': 'P2', 'author': 'u2'}, {'id': 'P3', 'author': 'u1'}]",
+          "note": "Use three posts with one repeated author."
+        },
+        {
+          "code": "naive_author_calls = len(posts)\nnaive_total_calls = 1 + naive_author_calls",
+          "note": "Without coordination, each field resolver performs its own author lookup."
+        },
+        {
+          "code": "batch_keys = list(dict.fromkeys(post['author'] for post in posts))",
+          "note": "The request loader keeps first-seen order and removes duplicate u1."
+        },
+        {
+          "code": "batched_author_calls = 1 if batch_keys else 0\nbatched_total_calls = 1 + batched_author_calls",
+          "note": "One posts query plus one author batch reduces four calls to two."
+        }
+      ],
+      "expect": {
+        "naive_total_calls": 4,
+        "batch_keys": [
+          "u1",
+          "u2"
+        ],
+        "batched_total_calls": 2
+      },
+      "limit": "Executes Python call-count arithmetic. It does not run GraphQL.js, DataLoader, a database, asynchronous scheduling, or authorization checks.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "posts": [
+              {
+                "id": "P1",
+                "author": "u1"
+              },
+              {
+                "id": "P2",
+                "author": "u2"
+              },
+              {
+                "id": "P3",
+                "author": "u1"
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "posts": [
+              {
+                "id": "P1",
+                "author": "u1"
+              },
+              {
+                "id": "P2",
+                "author": "u2"
+              },
+              {
+                "id": "P3",
+                "author": "u1"
+              }
+            ],
+            "naive_author_calls": 3,
+            "naive_total_calls": 4
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "posts": [
+              {
+                "id": "P1",
+                "author": "u1"
+              },
+              {
+                "id": "P2",
+                "author": "u2"
+              },
+              {
+                "id": "P3",
+                "author": "u1"
+              }
+            ],
+            "naive_author_calls": 3,
+            "naive_total_calls": 4,
+            "batch_keys": [
+              "u1",
+              "u2"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "posts": [
+              {
+                "id": "P1",
+                "author": "u1"
+              },
+              {
+                "id": "P2",
+                "author": "u2"
+              },
+              {
+                "id": "P3",
+                "author": "u1"
+              }
+            ],
+            "naive_author_calls": 3,
+            "naive_total_calls": 4,
+            "batch_keys": [
+              "u1",
+              "u2"
+            ],
+            "batched_author_calls": 1,
+            "batched_total_calls": 2
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "advanced_detail": "<p>Batching is not a license for unbounded <code>IN</code> queries. Cap batch size, keep authorization in the data access path, expose per-operation database-call metrics, and combine batching with GraphQL operation complexity controls.</p>"
+  }
+]

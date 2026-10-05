@@ -1,0 +1,719 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Spark changelog checkpoints: persist the delta, snapshot in the background",
+    "tag": "Foundation · Apache Spark 3.5, released September 13 2023",
+    "goal": "A streaming job holds a large amount of state but changes only a small part each batch.",
+    "concept": "<p>A streaming job holds a large amount of state but changes only a small part each batch. Persisting the changes can reduce the work on the commit path.</p><p>A changelog records changes since a previous checkpoint. A snapshot records a base state. Recovery restores the base, then replays later changes. Moving snapshot work into the background helps commits, but an old base can leave more recovery work.</p>",
+    "example": "<p>At 400 MB of changes per batch, twelve changelogs total 4.8 GB. The comparison path uploads 1.2 GB of changed files each batch, or 14.4 GB. With a base every sixth batch, up to five later deltas mean 2 GB of replay in this toy.</p>",
+    "practice": "Predict which path moves fewer foreground bytes. Change state size, logical delta, changed-SST upload, snapshot cadence, and failure batch. Then explain why lowering commit latency can increase recovery work if snapshots fall behind.",
+    "boundary": "A byte-accounting teaching model. It treats per-batch delta and changed-SST upload as constants and represents each background snapshot as one full logical-state transfer. Spark snapshots are incremental, implementation details and compaction affect physical bytes, uploads may overlap, and restore time depends on storage throughput, parallelism, checksums, cache state, and version. It does not execute Spark or prove compatibility for a particular checkpoint.",
+    "sim": "<label>Logical state (GB) <input id=\"stateGb\" type=\"range\" min=\"10\" max=\"500\" step=\"10\" value=\"200\"></label><label>Changelog per batch (MB) <input id=\"deltaMb\" type=\"range\" min=\"50\" max=\"2000\" step=\"50\" value=\"400\"></label><label>Changed SST upload per batch (MB) <input id=\"sstMb\" type=\"range\" min=\"100\" max=\"5000\" step=\"100\" value=\"1200\"></label><label>Background snapshot every N batches <input id=\"snapshotEvery\" type=\"range\" min=\"2\" max=\"20\" step=\"1\" value=\"6\"></label><label>Failure after batch <input id=\"failureBatch\" type=\"range\" min=\"1\" max=\"30\" step=\"1\" value=\"12\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const state=+stateGb.value*1024,delta=+deltaMb.value,sst=+sstMb.value,n=+snapshotEvery.value,b=+failureBatch.value;const lastBase=Math.floor(b/n)*n;const replayBatches=b-lastBase;const snapshotFg=b*sst;const changeFg=b*delta;const snapshotBg=Math.floor(b/n)*state;world.textContent='Through batch '+b+'\\nTraditional foreground changed-SST upload: '+(snapshotFg/1024).toFixed(1)+' GB\\nChangelog foreground upload: '+(changeFg/1024).toFixed(1)+' GB\\nToy background base snapshots: '+(snapshotBg/1024).toFixed(1)+' GB\\nLatest completed base: batch '+lastBase+'\\nDeltas to replay: '+replayBatches+' ('+(replayBatches*delta/1024).toFixed(1)+' GB)\\n\\nHot-path winner in this toy: '+(changeFg<snapshotFg?'CHANGELOG':'INCREMENTAL SNAPSHOT')+'\\nA background snapshot bounds replay; it does not make durability free.'};[stateGb,deltaMb,sstMb,snapshotEvery,failureBatch].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "A 300 GB state store changes 100 MB per trigger, while compaction produces 900 MB of new SST files. What should you predict?",
+        [
+          "Changelog checkpointing can reduce foreground durable bytes",
+          "Both modes must upload all 300 GB each trigger",
+          "Changelog removes the need for durable storage"
+        ],
+        0,
+        "The benefit comes from persisting the small change instead of the larger set of changed physical files."
+      ],
+      [
+        "Why does Spark still create snapshots in the background?",
+        [
+          "To make each query stateless",
+          "To bound replay and trim accumulated changelogs",
+          "To avoid ever restarting the query"
+        ],
+        1,
+        "A recent base keeps recovery from replaying an unbounded history of deltas."
+      ],
+      [
+        "Which observation most directly tests the operational boundary of this optimization?",
+        [
+          "Only the input records per second",
+          "Only the RocksDB logical row count",
+          "Checkpoint commit latency together with snapshot age and restore time"
+        ],
+        2,
+        "Foreground latency can improve while recovery exposure grows, so both paths must be measured."
+      ]
+    ],
+    "sources": [
+      [
+        "Apache Spark 4.0 Structured Streaming guide: RocksDB state store changelog checkpointing",
+        "https://spark.apache.org/docs/4.0.0/streaming/apis-on-dataframes-and-datasets.html#rocksdb-state-store-changelog-checkpointing",
+        "Living versioned documentation; feature introduced in Spark 3.5.0"
+      ],
+      [
+        "Apache Spark 3.5.0 release notes",
+        "https://spark.apache.org/releases/spark-release-3-5-0.html",
+        "Released 2023-09-13"
+      ],
+      [
+        "Apache JIRA SPARK-43421: implement changelog checkpointing",
+        "https://issues.apache.org/jira/browse/SPARK-43421",
+        "Created 2023-06-01; resolved for 3.5.0"
+      ]
+    ],
+    "advanced_detail": "<p>A stateful Structured Streaming operator has two different obligations: make every committed micro-batch durable, and make recovery bounded. Traditional RocksDB checkpointing uploads a manifest plus newly generated SST files during the commit path. Changelog checkpointing instead writes the changes made since the prior checkpoint; background snapshots later compact that history and trim old changelogs.</p><p>The mental model is a database write-ahead log plus periodic base image. The delta can make the foreground commit much smaller when a large state store changes only a little per trigger. The background snapshot is not optional housekeeping: without a recent base, recovery would replay an ever-growing log. Spark documents the mode as backward-compatible in both directions, but a query restart is required when switching it.</p><p><strong>Design consequence:</strong> do not translate “less checkpoint I/O per batch” into “recovery is free.” Watch commit latency, durable bytes, snapshot age or lag, and restore time together. A slow object store can move work off the hot path while still leaving a recovery liability.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> A 200 GB RocksDB state store mutates 400 MB per batch. Suppose its incremental-snapshot path uploads 1.2 GB of changed SST files per commit, while a changelog records the 400 MB logical delta. Across 12 batches, the foreground path moves 14.4 GB versus 4.8 GB. If a background snapshot is taken every sixth batch, a failure just before the next snapshot must restore the latest base and replay up to five deltas.</p><pre>foreground snapshot bytes = 12 × 1.2 GB = 14.4 GB\nforeground changelog bytes = 12 × 0.4 GB = 4.8 GB\nworst replay after a base = 5 × 0.4 GB = 2.0 GB</pre><p>The 1.2 GB is an observed/planned SST-upload input, not a claim that Spark uploads the whole 200 GB state each batch. Measure it from your workload: compaction, key distribution, file layout, and churn determine physical write amplification.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "batches = 12; delta_gb = 0.4; changed_files_gb = 1.2",
+          "note": "These are synthetic workload measurements."
+        },
+        {
+          "code": "changelog_gb = batches * delta_gb",
+          "note": "The foreground changelog total is 4.8 GB."
+        },
+        {
+          "code": "file_upload_gb = batches * changed_files_gb",
+          "note": "The comparison path totals 14.4 GB."
+        },
+        {
+          "code": "snapshot_every = 6",
+          "note": "A base image bounds the length of replay."
+        },
+        {
+          "code": "max_replay_gb = (snapshot_every - 1) * delta_gb",
+          "note": "Up to five deltas total 2 GB."
+        }
+      ],
+      "limit": "This is I/O accounting, not Spark checkpoint execution. It does not say the full 200 GB state is uploaded each batch or that recovery is free. Actual compaction and snapshot scheduling matter.",
+      "expect": {
+        "max_replay_gb": 2
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "batches": 12,
+            "delta_gb": 0.4,
+            "changed_files_gb": 1.2
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "batches": 12,
+            "delta_gb": 0.4,
+            "changed_files_gb": 1.2,
+            "changelog_gb": 4.800000000000001
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "batches": 12,
+            "delta_gb": 0.4,
+            "changed_files_gb": 1.2,
+            "changelog_gb": 4.800000000000001,
+            "file_upload_gb": 14.399999999999999
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "batches": 12,
+            "delta_gb": 0.4,
+            "changed_files_gb": 1.2,
+            "changelog_gb": 4.800000000000001,
+            "file_upload_gb": 14.399999999999999,
+            "snapshot_every": 6
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "batches": 12,
+            "delta_gb": 0.4,
+            "changed_files_gb": 1.2,
+            "changelog_gb": 4.800000000000001,
+            "file_upload_gb": 14.399999999999999,
+            "snapshot_every": 6,
+            "max_replay_gb": 2.0
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-28"
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Optimistic concurrency: make a lost update fail loudly",
+    "tag": "Foundation · DynamoDB conditional writes",
+    "goal": "Two workers read stock 10, each reserve one item, and each write 9.",
+    "concept": "<p>Two workers read stock 10, each reserve one item, and each write 9. Both writes succeed, but one reservation disappears from the stored count.</p><p>Optimistic concurrency adds a version check to the write. Save the new quantity only if the version still matches the one you read. A rejected stale writer must reread and recompute. An atomic write alone does not protect an entire read-modify-write sequence.</p>",
+    "example": "<p>Both workers read version 7. A stores 9 at version 8. B’s version-7 attempt fails. B refreshes, subtracts from 9, and stores 8 at version 9. The same rule applies to the four-worker example in the lab.</p>",
+    "practice": "Choose the number of simultaneous writers and decrement size. Predict the silent-loss result, then compare versioned retries and total attempts. Raise contention until the retry cost changes your design choice.",
+    "boundary": "A synchronized-round model where every remaining writer reads the same version and exactly one conditional write wins per round. Real arrivals, backoff, adaptive capacity, partition distribution, SDK retries, consumed capacity, and application merge logic vary. It models one item in one Region; it does not model DynamoDB global-table reconciliation, multi-item transactions, or external side effects.",
+    "sim": "<label>Concurrent writers <input id=\"writers\" type=\"range\" min=\"2\" max=\"12\" step=\"1\" value=\"4\"></label><label>Units reserved per writer <input id=\"decrement\" type=\"range\" min=\"1\" max=\"5\" step=\"1\" value=\"1\"></label><label>Starting quantity <input id=\"quantity\" type=\"range\" min=\"10\" max=\"100\" step=\"5\" value=\"10\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const n=+writers.value,d=+decrement.value,q=+quantity.value;const unguarded=Math.max(0,q-d);const guarded=Math.max(0,q-n*d);const attempts=n*(n+1)/2;world.textContent=n+' writers all read quantity '+q+' at version 7.\\n\\nBlind read-modify-write final quantity: '+unguarded+'\\nSilent lost reservations: '+Math.max(0,n-1)+'\\n\\nVersioned conditional-write final quantity: '+guarded+'\\nSuccessful writes: '+n+'\\nConflicts before eventual success: '+(attempts-n)+'\\nTotal conditional attempts in synchronized rounds: '+attempts+'\\n\\nThe guarded value is correct only if every reservation remains valid when recomputed.'};[writers,decrement,quantity].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Two workers read version 12; worker A commits version 13 before worker B writes. What should B's conditional update do?",
+        [
+          "Overwrite A because B read successfully",
+          "Fail as a conflict so B can reread and recompute",
+          "Acquire a permanent table lock"
+        ],
+        1,
+        "The version mismatch converts the stale decision into an explicit conflict."
+      ],
+      [
+        "Why is a generic automatic retry of the same stale payload unsafe?",
+        [
+          "The business decision may need recomputation against the new value",
+          "DynamoDB does not support retries",
+          "Conditional writes are never atomic"
+        ],
+        0,
+        "Retrying must re-establish the precondition; resending the stale new value can still be wrong."
+      ],
+      [
+        "Where does this single-item pattern stop being sufficient?",
+        [
+          "A low-contention update within one Region",
+          "A read followed by a conditional update",
+          "A cross-Region global-table invariant or external side effect that must be atomic"
+        ],
+        2,
+        "The condition is evaluated for one item in one Region; other systems and global reconciliation create wider boundaries."
+      ]
+    ],
+    "sources": [
+      [
+        "Amazon DynamoDB Developer Guide: optimistic locking with version number",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/BestPractices_OptimisticLocking.html",
+        "Living AWS documentation; publication date not stated"
+      ],
+      [
+        "Amazon DynamoDB Developer Guide: handling concurrent updates",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/BestPractices_ImplementingVersionControl.html",
+        "Living AWS documentation; publication date not stated"
+      ],
+      [
+        "Amazon DynamoDB Developer Guide: condition expressions",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ConditionExpressions.html",
+        "Living AWS documentation; publication date not stated"
+      ]
+    ],
+    "advanced_detail": "<p>An individual DynamoDB write is atomic, but a read-modify-write workflow spans time: read quantity 10, decide quantity 9, then write 9. If two workers read 10 and both write 9, one decrement disappears even though both atomic writes succeeded. The missing boundary is whether the item is still the version each worker read.</p><p>Optimistic concurrency control stores a version number. A writer sends both its update and a condition such as <code>Version = 41</code>; the successful write sets the new value and increments the version. A stale writer receives <code>ConditionalCheckFailedException</code>, rereads, recomputes, and decides whether retrying is still valid. The conflict is useful information, not an infrastructure error to hide with a blind retry.</p><p>This fits low-contention, inexpensive single-item work. High contention creates retry amplification. Multi-item invariants need transactions or redesign. DynamoDB global tables reconcile concurrent cross-Region updates with last-writer-wins, so a per-item version check in one Region does not provide the same global optimistic-lock guarantee.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> Four allocators read <code>{remaining: 10, version: 7}</code> and each reserve one unit. Without a condition, every writer stores 9; the final count is 9 even though four reservations were acknowledged. With <code>ConditionExpression: Version = :seen</code>, one write succeeds. The other three conflict, reread versions 8, 9, and 10 over successive rounds, and the final count is 6.</p><pre>SET remaining = :new, Version = :seen + 1\nCONDITION Version = :seen</pre><p>That protects the database value. It does not make an external payment, Kafka publish, or warehouse write atomic with the DynamoDB update; those need an idempotent workflow, outbox, or transaction boundary suited to the systems involved.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "int remaining = 10; int version = 7;",
+          "note": "The item begins with ten units."
+        },
+        {
+          "code": "int seenA = version; int seenB = version;",
+          "note": "Both workers read the same version."
+        },
+        {
+          "code": "remaining -= 1; version += 1;",
+          "note": "A’s conditional update succeeds."
+        },
+        {
+          "code": "boolean allowB = seenB == version;",
+          "note": "B’s stale version is rejected."
+        },
+        {
+          "code": "seenB = version;",
+          "note": "B rereads the current state."
+        },
+        {
+          "code": "remaining -= 1; version += 1;",
+          "note": "The refreshed reservation succeeds in this sequential toy."
+        }
+      ],
+      "limit": "This single-threaded Java example stands for an atomic database condition, not safe unsynchronized Java concurrency. Real retries must revalidate business rules; external effects and multi-Region writes need separate reasoning.",
+      "expect": {
+        "allowB": "false",
+        "remaining": "8",
+        "version": "9"
+      },
+      "language": "java",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "remaining": "10",
+            "version": "7"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "remaining": "10",
+            "version": "7",
+            "seenA": "7",
+            "seenB": "7"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "remaining": "9",
+            "version": "8",
+            "seenA": "7",
+            "seenB": "7"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "remaining": "9",
+            "version": "8",
+            "seenA": "7",
+            "seenB": "7",
+            "allowB": "false"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "remaining": "9",
+            "version": "8",
+            "seenA": "7",
+            "seenB": "8",
+            "allowB": "false"
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "remaining": "8",
+            "version": "9",
+            "seenA": "7",
+            "seenB": "8",
+            "allowB": "false"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-28"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Fault injection: bound the experiment before you create the fault",
+    "tag": "Operational foundation · AWS Fault Injection Service",
+    "goal": "A fault experiment has a stop alarm.",
+    "concept": "<p>A fault experiment has a stop alarm. That does not mean customer impact stops the instant a metric crosses its threshold.</p><p>Fault injection deliberately creates a failure to test a stated hypothesis. Bound the target, watch customer-facing signals, and define how to stop and recover. Alarm evaluation, stop propagation, and system recovery all take time.</p>",
+    "example": "<p>The toy alarm needs two ten-second breaching periods, followed by eight seconds for stopping and recovery. That gives 28 seconds of modeled exposure. At 4% failures, multiplying rate by time gives 112 percent-seconds, not a count of affected users.</p>",
+    "practice": "Set experiment duration, observed error rate, stop threshold, metric period, evaluation periods, and recovery delay. Predict whether the guardrail fires and how much modeled exposure accumulates before recovery.",
+    "boundary": "A deterministic alarm-lag and impact-seconds calculator. CloudWatch alarm behavior can include missing data, ingestion delay, percentile rules, composite alarms, and state transitions. FIS action stop time and workload recovery vary. The model does not call AWS, select safe targets, estimate users, or guarantee that the chosen metric detects every harmful condition.",
+    "sim": "<label>Experiment duration (s) <input id=\"experimentSec\" type=\"range\" min=\"30\" max=\"600\" step=\"10\" value=\"120\"></label><label>Observed error rate (%) <input id=\"errorPct\" type=\"range\" min=\"0\" max=\"20\" step=\"0.5\" value=\"4\"></label><label>Stop threshold (%) <input id=\"thresholdPct\" type=\"range\" min=\"0.5\" max=\"10\" step=\"0.5\" value=\"1\"></label><label>Metric period (s) <input id=\"periodSec\" type=\"range\" min=\"10\" max=\"60\" step=\"10\" value=\"10\"></label><label>Breaching periods required <input id=\"periods\" type=\"range\" min=\"1\" max=\"5\" step=\"1\" value=\"2\"></label><label>Stop + recovery delay (s) <input id=\"recoverySec\" type=\"range\" min=\"0\" max=\"60\" step=\"2\" value=\"8\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const duration=+experimentSec.value,error=+errorPct.value,threshold=+thresholdPct.value,period=+periodSec.value,n=+periods.value,recovery=+recoverySec.value;const breaches=error>threshold;const active=breaches?Math.min(duration,n*period+recovery):duration;world.textContent='Hypothesis boundary: error rate ≤ '+threshold.toFixed(1)+'%\\nObserved synthetic rate: '+error.toFixed(1)+'%\\nGuardrail: '+(breaches?'TRIGGERS':'DOES NOT TRIGGER')+'\\nModeled fault + recovery window: '+active+' s\\nModeled exposure: '+(error*active).toFixed(0)+' %-seconds\\n\\n'+(breaches?'The alarm limits duration after detection; it does not erase impact.':'No alarm means the experiment runs to its planned end. Check whether the metric can miss harm.')};[experimentSec,errorPct,thresholdPct,periodSec,periods,recoverySec].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "A stop alarm needs three 60-second breaching periods. What should the experiment owner assume?",
+        [
+          "The fault is harmless for three minutes",
+          "Potentially harmful exposure continues while evidence accumulates",
+          "FIS will stop before the first breaching sample"
+        ],
+        1,
+        "The evaluation window is part of the blast-radius budget, not a grace period without impact."
+      ],
+      [
+        "Why state the hypothesis before selecting an FIS action?",
+        [
+          "It identifies the steady-state metric and acceptable boundary the action is meant to test",
+          "It automatically provisions rollback capacity",
+          "It removes the need for monitoring"
+        ],
+        0,
+        "A falsifiable expectation determines what to measure and when to stop."
+      ],
+      [
+        "Which boundary can a technically correct CPU stop condition miss?",
+        [
+          "A customer-facing failure that does not push CPU past the threshold",
+          "The ARN format of the alarm",
+          "The fact that the experiment has a name"
+        ],
+        0,
+        "Guardrails see only the signals encoded in them, so business and technical steady state both matter."
+      ]
+    ],
+    "sources": [
+      [
+        "AWS FIS User Guide: planning your experiments",
+        "https://docs.aws.amazon.com/fis/latest/userguide/getting-started-planning.html",
+        "Living AWS documentation; publication date not stated"
+      ],
+      [
+        "AWS FIS User Guide: stop conditions",
+        "https://docs.aws.amazon.com/fis/latest/userguide/stop-conditions.html",
+        "Living AWS documentation; publication date not stated"
+      ],
+      [
+        "AWS FIS User Guide: safety levers",
+        "https://docs.aws.amazon.com/fis/latest/userguide/safety-lever.html",
+        "Living AWS documentation; publication date not stated"
+      ]
+    ],
+    "advanced_detail": "<p>A production game day is not “break something and watch.” It is a controlled experiment: name the steady state, state a falsifiable hypothesis, inject one bounded fault, and stop when the customer-impact boundary is crossed. AWS FIS performs real actions on real resources, so target selection, IAM scope, stop alarms, recovery procedures, and an accountable operator are part of the architecture—not meeting logistics.</p><p>A stop condition connects a CloudWatch alarm to the experiment. When the alarm enters its configured state, FIS stops the experiment and it cannot be resumed. That is a guardrail, not an instantaneous shield. Metric publication, alarm periods and evaluation windows, FIS reaction, and system recovery all consume time after impact begins.</p><p>Distinguished Engineer judgment appears in the escalation path: prove observability and rollback in test, start with one target, expand only when evidence supports the hypothesis, and use both technical and business steady-state metrics. A CPU alarm can look healthy while sign-ins fail.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> An experiment removes one of 20 service tasks. The hypothesis says sign-in failures stay below 1%. The stop alarm uses 10-second periods and requires two breaching periods; allow another 8 seconds for stop propagation and recovery.</p><pre>earliest modeled stop = 2 × 10 s + 8 s = 28 s\nif observed failures = 4%, impact-seconds = 4 × 28 = 112 %-seconds</pre><p>That compact number is useful for comparing designs, not for predicting affected users. Traffic varies, alarms may ingest late samples, and stopping the injection does not instantly heal queues, connections, or retries. The decision document should name the maximum tolerable exposure in real customer terms.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "period_seconds = 10; required_periods = 2",
+          "note": "The alarm needs two breaching periods."
+        },
+        {
+          "code": "detection_seconds = period_seconds * required_periods",
+          "note": "This simplified alignment produces 20 seconds to detection."
+        },
+        {
+          "code": "stop_and_recover_seconds = 8",
+          "note": "Stopping and recovering take additional time."
+        },
+        {
+          "code": "exposure_seconds = detection_seconds + stop_and_recover_seconds",
+          "note": "The modeled exposure totals 28 seconds."
+        },
+        {
+          "code": "impact_percent_seconds = 4 * exposure_seconds",
+          "note": "This comparison metric is 112 percent-seconds."
+        }
+      ],
+      "limit": "This is an illustrative timing budget, not a prediction of AWS FIS alarm timing. Publication delays, period alignment, evaluation rules, and recovery behavior can lengthen or otherwise change exposure.",
+      "expect": {
+        "exposure_seconds": 28
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "period_seconds": 10,
+            "required_periods": 2
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "period_seconds": 10,
+            "required_periods": 2,
+            "detection_seconds": 20
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "period_seconds": 10,
+            "required_periods": 2,
+            "detection_seconds": 20,
+            "stop_and_recover_seconds": 8
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "period_seconds": 10,
+            "required_periods": 2,
+            "detection_seconds": 20,
+            "stop_and_recover_seconds": 8,
+            "exposure_seconds": 28
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "period_seconds": 10,
+            "required_periods": 2,
+            "detection_seconds": 20,
+            "stop_and_recover_seconds": 8,
+            "exposure_seconds": 28,
+            "impact_percent_seconds": 112
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-28"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "MCP tool annotations: risk vocabulary, not a security boundary",
+    "tag": "Current development · MCP 2026-07-28 specification",
+    "goal": "A tool describes itself as read-only.",
+    "concept": "<p>A tool describes itself as read-only. Should the harness let it do anything it asks? A description is useful information, but it is not an enforcement mechanism.</p><p>MCP annotations are hints about expected tool behavior. Their usefulness depends on whether the server is trusted. Actual capabilities and policy must still restrict effects. A read-only hint cannot stop a file write; a sandbox permission can.</p>",
+    "example": "<p>The untrusted tool claims to be read-only but proposes a write. The available capability is read only, so the write is blocked. Changing the hint would not grant a new capability.</p>",
+    "practice": "Toggle server trust, private context, untrusted input, external communication, destructive and idempotent hints, and an enforced idempotency key. Predict the harness decision and whether an automatic retry is justified.",
+    "boundary": "An illustrative conservative policy, not the MCP specification's mandated authorization algorithm. Trust establishment, per-tool permissions, human approval, data classification, taint propagation, network egress, result validation, and audit requirements are deployment-specific. The model cannot inspect real server behavior, and a trusted server can still contain bugs.",
+    "sim": "<label><input id=\"trustedServer\" type=\"checkbox\" checked> Server identity and release are trusted</label><label><input id=\"privateData\" type=\"checkbox\" checked> Current context includes private data</label><label><input id=\"untrustedInput\" type=\"checkbox\" checked> Current context includes untrusted content</label><label><input id=\"openWorld\" type=\"checkbox\" checked> Tool advertises openWorldHint</label><label><input id=\"destructive\" type=\"checkbox\"> Tool advertises destructiveHint</label><label><input id=\"idempotent\" type=\"checkbox\" checked> Tool advertises idempotentHint</label><label><input id=\"idempotencyKey\" type=\"checkbox\"> Harness enforces an idempotency key / durable ledger</label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const trusted=trustedServer.checked;const external=trusted?openWorld.checked:true;const destructiveEffective=trusted?destructive.checked:true;const trifecta=privateData.checked&&untrustedInput.checked&&external;let decision=trifecta?'BLOCK / require path redesign':destructiveEffective?'REQUIRE EXPLICIT APPROVAL':'ALLOW UNDER LEAST-PRIVILEGE POLICY';const retry=idempotencyKey.checked||(trusted&&idempotent.checked);world.textContent='Annotation trust: '+(trusted?'accepted as routing evidence':'UNTRUSTED — pessimistic defaults')+'\\nExternal communication potential: '+(external?'YES':'no')+'\\nPrivate + untrusted + external combination: '+(trifecta?'PRESENT':'not present')+'\\nHarness decision: '+decision+'\\nAutomatic retry: '+(retry?'PERMITTED BY THIS TOY POLICY':'NOT PERMITTED')+'\\n\\nHints affect UX. Capabilities, sandboxing, egress policy, approvals, and ledgers enforce safety.'};[trustedServer,privateData,untrustedInput,openWorld,destructive,idempotent,idempotencyKey].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "An unknown MCP server marks a tool readOnlyHint=true. What may a secure client conclude?",
+        [
+          "The tool cannot mutate anything",
+          "The hint is untrusted; enforce permissions and use the cautious path",
+          "The tool may bypass sandboxing"
+        ],
+        1,
+        "The specification requires clients to treat annotations from untrusted servers as untrusted."
+      ],
+      [
+        "Why keep annotations if they are not enforcement?",
+        [
+          "They provide shared risk vocabulary for routing, warnings, confirmation UX, and cautious retries",
+          "They replace authorization checks",
+          "They cryptographically attest implementation behavior"
+        ],
+        0,
+        "Trusted hints can improve client behavior without being confused with hard controls."
+      ],
+      [
+        "What remains unsafe even with idempotentHint=true from a trusted server?",
+        [
+          "A duplicate-sensitive operation without a real idempotency mechanism or ledger",
+          "A pure local calculation",
+          "Displaying the tool title"
+        ],
+        0,
+        "A hint cannot guarantee that a payment, message, or mutation will be deduplicated."
+      ]
+    ],
+    "sources": [
+      [
+        "Model Context Protocol specification: Tools",
+        "https://modelcontextprotocol.io/specification/2026-07-28/server/tools",
+        "Specification revision 2026-07-28"
+      ],
+      [
+        "MCP Blog: Tool Annotations as Risk Vocabulary—What Hints Can and Can't Do",
+        "https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/",
+        "Published 2026-03-16"
+      ]
+    ],
+    "advanced_detail": "<p>MCP tools may advertise four useful behavioral hints: <code>readOnlyHint</code>, <code>destructiveHint</code>, <code>idempotentHint</code>, and <code>openWorldHint</code>. A harness can use trusted metadata to choose a confirmation flow, decide whether a retry is plausible, or mark returned content as crossing a trust boundary.</p><p>The specification's crucial word is <em>hint</em>. Clients must treat annotations as untrusted unless they come from a trusted server. A server can be wrong or malicious; a boolean cannot prevent file deletion or exfiltration. Hard guarantees belong in capabilities, network policy, sandboxing, schema validation, approval gates, idempotency records, and post-call inspection.</p><p>Risk is compositional. Private data, attacker-controlled content, and an external communication path are far more dangerous together than any tool in isolation. Therefore the harness should evaluate the whole execution path and current taint state, not merely trust the annotation on the next call.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> A tool from a trusted internal server declares <code>readOnlyHint: true</code> and <code>openWorldHint: false</code>; the harness may omit a redundant mutation confirmation while still enforcing read scopes. A new third-party server declares the same flags. The correct posture is pessimistic: treat the hints as informational, apply the server's actual permissions, and require the cautious path.</p><pre>metadata suggests behavior\npolicy decides permission\nruntime constrains effects\nevidence verifies outcome</pre><p>For retries, <code>idempotentHint: true</code> can improve UX only when the server is trusted. A harness that must prevent duplicate payments still needs an application idempotency key or durable call ledger.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "hint_read_only = True; trusted_server = False",
+          "note": "An untrusted server supplies a reassuring hint."
+        },
+        {
+          "code": "capabilities = {\"read\"}",
+          "note": "The execution environment permits only reading."
+        },
+        {
+          "code": "proposed_action = \"write\"",
+          "note": "The actual proposal requests a different effect."
+        },
+        {
+          "code": "allowed = proposed_action in capabilities",
+          "note": "The enforced capability check denies the write."
+        },
+        {
+          "code": "hint_is_authority = False",
+          "note": "Metadata did not create permission."
+        }
+      ],
+      "limit": "This is a permission-set model, not a complete MCP client. Real policy must evaluate identity, tool scope, arguments, data sensitivity, and external destinations.",
+      "expect": {
+        "allowed": false
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "hint_read_only": true,
+            "trusted_server": false
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "hint_read_only": true,
+            "trusted_server": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "hint_read_only": true,
+            "trusted_server": false,
+            "proposed_action": "write"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "hint_read_only": true,
+            "trusted_server": false,
+            "proposed_action": "write",
+            "allowed": false
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "hint_read_only": true,
+            "trusted_server": false,
+            "proposed_action": "write",
+            "allowed": false,
+            "hint_is_authority": false
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-28"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Bioresorbable ingestible batteries: power the therapy, then remove the battery",
+    "tag": "New peer-reviewed research · Nature Chemical Engineering, September 21 2026",
+    "goal": "A swallowed electronic device needs power while it works, then a safe end of life.",
+    "concept": "<p>A swallowed electronic device needs power while it works, then a safe end of life. The battery’s lifecycle matters as much as its initial output.</p><p>The research in this lesson studies a battery designed to operate and later resorb. Reported laboratory and animal demonstrations are evidence at those stages, not evidence of a ready human treatment. For engineering, start with load, usable capacity, and voltage under load.</p>",
+    "example": "<p>With a synthetic 100-microamp load, 3.5 mAh nominal capacity, and 80% usable capacity, the estimate is 28 hours. Doubling the load to 200 microamps halves that estimate to 14 hours under the same assumptions.</p>",
+    "practice": "Vary nominal capacity, average current, and usable fraction. Predict runtime before moving the controls. Then explain why a 1.84 V open-circuit measurement and a swine demonstration do not establish a human therapy.",
+    "boundary": "A constant-current energy-budget calculator using one reported capacity point as a default. It ignores current-density dependence, voltage curve, pulse load, internal resistance, conversion losses beyond the chosen margin, temperature, gastric chemistry, packaging, manufacturing variation, degradation kinetics, and biological outcomes. It is not a medical-device design, safety assessment, or clinical prediction.",
+    "sim": "<label>Nominal capacity (mAh) <input id=\"capacityMah\" type=\"range\" min=\"0.5\" max=\"5\" step=\"0.1\" value=\"3.5\"></label><label>Average electronics load (μA) <input id=\"loadUa\" type=\"range\" min=\"25\" max=\"500\" step=\"25\" value=\"100\"></label><label>Usable capacity after margins (%) <input id=\"usablePct\" type=\"range\" min=\"30\" max=\"100\" step=\"5\" value=\"80\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const cap=+capacityMah.value,load=+loadUa.value/1000,usable=+usablePct.value/100;const hours=cap*usable/load;world.textContent='Nominal capacity: '+cap.toFixed(1)+' mAh\\nAverage load: '+(load*1000).toFixed(0)+' μA\\nUsable energy fraction: '+(usable*100).toFixed(0)+'%\\nToy runtime: '+hours.toFixed(1)+' hours ('+(hours/24).toFixed(2)+' days)\\n\\nThe paper reports 1.84 V peak open circuit and swine prototypes. This calculator does not predict in-vivo or human performance.'};[capacityMah,loadUa,usablePct].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "If average load doubles while usable capacity stays fixed, what does the first-order model predict?",
+        [
+          "Runtime doubles",
+          "Runtime halves",
+          "Open-circuit voltage doubles"
+        ],
+        1,
+        "Runtime in the constant-current budget is capacity divided by load."
+      ],
+      [
+        "Why is 1.84 V not enough to size the electronics?",
+        [
+          "It is a peak open-circuit value; delivered voltage and capacity depend on load and time",
+          "Voltage is irrelevant to electronics",
+          "All batteries deliver exactly their open-circuit voltage under load"
+        ],
+        0,
+        "A useful power budget needs the discharge curve, load behavior, thresholds, and conversion losses."
+      ],
+      [
+        "What is the strongest justified claim from the reported evidence?",
+        [
+          "The system is proven safe and effective in humans",
+          "A bioresorbable battery powered two ingestible prototype applications demonstrated in swine",
+          "Every component of any ingestible device will dissolve harmlessly"
+        ],
+        1,
+        "The paper demonstrates an animal-stage platform; it does not establish human clinical benefit or universal system resorption."
+      ]
+    ],
+    "sources": [
+      [
+        "Nature Chemical Engineering: Bioresorbable batteries for transient ingestible bioelectronics",
+        "https://www.nature.com/articles/s44286-026-00443-7",
+        "Published 2026-09-21; received 2025-11-23; accepted 2026-08-12"
+      ],
+      [
+        "Nature News: Edible batteries power medical devices in the body",
+        "https://www.nature.com/articles/d41586-026-02987-3",
+        "Published 2026-09-21"
+      ]
+    ],
+    "advanced_detail": "<p>Ingestible electronics usually face an awkward lifecycle: a device needs enough energy to sense, communicate, or stimulate tissue, but persistent batteries add retrieval, obstruction, toxicity, and electronic-waste concerns. The reported platform uses a magnesium–molybdenum trioxide paper battery with a bio-ionic-liquid electrolyte so the power source can operate in the gastrointestinal environment and later resorb.</p><p>The peer-reviewed paper reports a peak open-circuit voltage of 1.84 V. Its large-area design reached 3.5 mAh at a stated current density and maintained about 1.6 V for a day under continuous discharge in the reported test. The team integrated the battery into RFID medication-tracking and gastric electrical-stimulation capsules and demonstrated operation in swine.</p><p>This is a platform result, not a human treatment. The gastric-stimulation study reported four independent animals for the ghrelin measurement and two for tissue histology. Translation still depends on dose, retention time, degradation products, manufacturing consistency, complete system materials, human anatomy, safety, and clinical benefit.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> Treat 3.5 mAh as a nominal capacity and assume an electronics load of 100 μA with 80% usable capacity after conversion and margins. A first-order runtime estimate is:</p><pre>runtime = 3.5 mAh × 0.80 ÷ 0.10 mA = 28 hours</pre><p>This is an engineering budget, not a reproduction of the paper's in-vivo runtime. Capacity depends on current density and environment; pulsed stimulation, voltage thresholds, self-discharge, packaging, and converter efficiency make a real load profile more complicated. Open-circuit voltage is not the voltage delivered under load.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "capacity_mah = 3.5; usable_fraction = 0.8",
+          "note": "Capacity and a synthetic allowance define usable charge."
+        },
+        {
+          "code": "usable_mah = round(capacity_mah * usable_fraction, 3)",
+          "note": "The budget has 2.8 mAh available."
+        },
+        {
+          "code": "load_ma = 0.1",
+          "note": "100 microamps equals 0.1 milliamps."
+        },
+        {
+          "code": "runtime_hours = round(usable_mah / load_ma, 2)",
+          "note": "The first-order estimate is 28 hours."
+        },
+        {
+          "code": "double_load_hours = round(usable_mah / (2 * load_ma), 2)",
+          "note": "Twice the load gives 14 hours in this ideal estimate."
+        }
+      ],
+      "limit": "This is a charge budget, not an in-vivo runtime claim or medical guidance. Voltage cutoff, environment, pulses, losses, packaging, and safety affect real operation.",
+      "expect": {
+        "runtime_hours": 28
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "capacity_mah": 3.5,
+            "usable_fraction": 0.8
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "capacity_mah": 3.5,
+            "usable_fraction": 0.8,
+            "usable_mah": 2.8
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "capacity_mah": 3.5,
+            "usable_fraction": 0.8,
+            "usable_mah": 2.8,
+            "load_ma": 0.1
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "capacity_mah": 3.5,
+            "usable_fraction": 0.8,
+            "usable_mah": 2.8,
+            "load_ma": 0.1,
+            "runtime_hours": 28.0
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "capacity_mah": 3.5,
+            "usable_fraction": 0.8,
+            "usable_mah": 2.8,
+            "load_ma": 0.1,
+            "runtime_hours": 28.0,
+            "double_load_hours": 14.0
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-28"
+  }
+]

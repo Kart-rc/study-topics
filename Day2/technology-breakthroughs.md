@@ -2,7 +2,7 @@
 
 Technology breakthroughs · Day2 · 15 minutes
 
-Explain why individually relevant results can form a poor set, and identify what offline-trained retrieval does—and does not—remove from serving.
+An assistant retrieves three documents, but two repeat the same freshness evidence.
 
 ## Recall (2 minutes)
 
@@ -10,32 +10,63 @@ Explain why individually relevant results can form a poor set, and identify what
 
 ## Understand (4 minutes)
 
-Some retrieval tasks need a complementary set rather than several near-duplicates. Retrieve-for-Train (R4T) uses offline reinforcement learning to train a fan-out language model against set-level rewards, synthesizes training pairs, then trains a compact diffusion retriever. The serving model generates target embeddings without repeating the same language-model fan-out reasoning at query time. Google Research's September 15, 2026 write-up.
+An assistant retrieves three documents, but two repeat the same freshness evidence. The result looks relevant while missing lineage information needed to explain the incident.
 
-The underlying paper was submitted March 6, 2026. It reports retrieval-quality improvements and lower query-time fan-out latency on fashion and music benchmarks. This is research evidence about those settings, not proof of faster or safer enterprise incident diagnosis. Read the original paper.
+Retrieve-for-Train studies learning retrieval sets that work well together. Our small example uses a simpler rule: reward relevant items, then add a bonus for a kind of evidence not selected yet. This makes the difference between ranking one item and choosing a useful set visible.
 
 
 
-Original teaching case: Ask a data-platform assistant for evidence explaining a late dataset. Its candidate list contains two highly relevant freshness reports, followed by volume, lineage, and contract evidence. Selecting only the highest independent relevance scores can spend the entire result budget on the same facet.
+After choosing freshness A, freshness B has relevance 0.89 and lineage has 0.75. A new-facet bonus of 0.20 raises lineage to 0.95. The second choice changes because freshness is already represented.
 
-Our six-item toy collection is visible below. A greedy selector gives each new facet a bonus. At bonus 0, the three selected items are freshness A, freshness B, and volume. At bonus 0.2, the set becomes freshness A, volume, and lineage. You traded a little average item relevance for broader evidence coverage.
 
-The teaching algorithm is deliberately simple:
 
-candidateScore = relevance
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+selected_facets = ["freshness"]; bonus = 0.20
+candidates = [("freshness B", "freshness", 0.89), ("lineage", "lineage", 0.75)]
+scores = {name: relevance + (bonus if facet not in selected_facets else 0) for name, facet, relevance in candidates}
+winner = max(scores, key=scores.get)
+without_bonus = max(candidates, key=lambda item: item[2])[0]
+```
+
+1. The first result already covers freshness.
+
+   Changed values: `{"selected_facets": ["freshness"], "bonus": 0.2}`
+
+2. Compare a repeated facet with a new one.
+
+   Changed values: `{"candidates": [["freshness B", "freshness", 0.89], ["lineage", "lineage", 0.75]]}`
+
+3. Only new facets receive the bonus.
+
+   Changed values: `{"scores": {"freshness B": 0.89, "lineage": 0.95}}`
+
+4. Lineage wins at 0.95 over 0.89.
+
+   Changed values: `{"winner": "lineage"}`
+
+5. Without the bonus, freshness B wins.
+
+   Changed values: `{"without_bonus": "freshness B"}`
+
+[Full runnable example](examples/technology-breakthroughs.py).
+
+Limits: This two-candidate illustration is not the paper’s training algorithm. Diversity can select irrelevant evidence unless relevance and permission constraints also hold. A facet label is not proof of factual support.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>Some retrieval tasks need a complementary set rather than several near-duplicates. Retrieve-for-Train (R4T) uses offline reinforcement learning to train a fan-out language model against set-level rewards, synthesizes training pairs, then trains a compact diffusion retriever. The serving model generates target embeddings without repeating the same language-model fan-out reasoning at query time. <a href="https://research.google/blog/bypassing-inference-bottlenecks-accelerating-complex-ai-search-with-retrieve-for-train/">Google Research's September 15, 2026 write-up</a>.</p><p>The underlying paper was submitted March 6, 2026. It reports retrieval-quality improvements and lower query-time fan-out latency on fashion and music benchmarks. This is research evidence about those settings, not proof of faster or safer enterprise incident diagnosis. <a href="https://arxiv.org/abs/2603.06397">Read the original paper</a>.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> Ask a data-platform assistant for evidence explaining a late dataset. Its candidate list contains two highly relevant freshness reports, followed by volume, lineage, and contract evidence. Selecting only the highest independent relevance scores can spend the entire result budget on the same facet.</p><p>Our six-item toy collection is visible below. A greedy selector gives each new facet a bonus. At bonus 0, the three selected items are freshness A, freshness B, and volume. At bonus 0.2, the set becomes freshness A, volume, and lineage. You traded a little average item relevance for broader evidence coverage.</p><p>The teaching algorithm is deliberately simple:</p><pre>candidateScore = relevance
                + noveltyBonus × isNewFacet
 choose highest scoring eligible candidate
-repeat until three results are selected
+repeat until three results are selected</pre><p>This is <em>not</em> R4T's learning algorithm. It exposes the objective that makes set-level training interesting. A relevance floor prevents an unrelated item from winning merely because its category is novel. Yet even a diverse set is not necessarily sufficient: the correct explanation might require two complementary freshness documents, and a single “lineage” label says nothing about edge quality.</p><p>For a proposed offline pilot, freeze a permission-filtered corpus snapshot and an expert-written task set. Compare plain top-k retrieval, a simple diversified baseline like this one, and the learned method at equal result counts. Evaluate factual support, needed-facet coverage, unnecessary duplication, latency, and update cost. Hold out new incident types rather than only paraphrasing training queries.</p><p>Moving reasoning offline trades repeated serving work for training, refresh, and monitoring responsibilities. A changing catalog or tenant permission can invalidate yesterday's targets. Authorization still needs enforcement at serving time. My inference is that this technique merits a bounded retrieval experiment, not an immediate replacement for a live, permission-aware evidence pipeline.</p>
 
-This is not R4T's learning algorithm. It exposes the objective that makes set-level training interesting. A relevance floor prevents an unrelated item from winning merely because its category is novel. Yet even a diverse set is not necessarily sufficient: the correct explanation might require two complementary freshness documents, and a single “lineage” label says nothing about edge quality.
+</details>
 
-For a proposed offline pilot, freeze a permission-filtered corpus snapshot and an expert-written task set. Compare plain top-k retrieval, a simple diversified baseline like this one, and the learned method at equal result counts. Evaluate factual support, needed-facet coverage, unnecessary duplication, latency, and update cost. Hold out new incident types rather than only paraphrasing training queries.
-
-Moving reasoning offline trades repeated serving work for training, refresh, and monitoring responsibilities. A changing catalog or tenant permission can invalidate yesterday's targets. Authorization still needs enforcement at serving time. My inference is that this technique merits a bounded retrieval experiment, not an immediate replacement for a live, permission-aware evidence pipeline.
-
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Predict the selected facets with novelty bonus 0, then 0.2. Explain why an unrelated but novel item should remain excluded. Write a case where two documents from the same facet are both necessary, and identify the evaluation signal that would catch over-diversification.
 

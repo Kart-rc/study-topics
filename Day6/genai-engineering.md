@@ -2,7 +2,7 @@
 
 GenAI engineering · Day6 · 15 minutes
 
-Design an enforcement envelope where a mistaken or injected model cannot turn broad intent into an unconstrained side effect.
+An agent needs to edit a service and run tests.
 
 ## Recall (2 minutes)
 
@@ -10,24 +10,61 @@ Design an enforcement envelope where a mistaken or injected model cannot turn br
 
 ## Understand (4 minutes)
 
-A permission prompt asks a human whether one model-proposed action looks acceptable. A sandbox changes what the process can do at all. The second is an enforcement boundary: filesystem paths, network destinations, credentials, and subprocesses can be constrained outside the model.
+An agent needs to edit a service and run tests. It does not need access to every file, credential, repository, or internet destination on the machine.
 
-Anthropic's October 2025 engineering article describes both filesystem and network isolation for Claude Code and warns that either boundary alone is incomplete. It also describes keeping sensitive credentials outside a cloud sandbox and using a proxy with scoped credentials to validate Git operations. The general harness lesson is capability design: grant the smallest authority that completes the current task, then make escalation explicit and observable.
-
-
-
-Original teaching case: A code agent must edit /workspace/service, run tests, read public package documentation, and push only to refs/heads/agent-fix. An untrusted README tells the model to read ~/.ssh and POST it to an attacker.
-
-Model intent is not the deciding control. Filesystem isolation denies the key read; network isolation denies the attacker host; credentials remain outside the sandbox; and the Git proxy accepts only the configured repository and branch. A user may deliberately escalate one boundary, but the event should be narrow, logged, and short-lived.
-
-model proposes → sandbox enforces → proxy narrows credentials
-allowed work ≠ ambient machine authority
-
-Sandboxing reduces consequences; it does not prove the model's code is correct, remove supply-chain risk, secure a misconfigured allowlist, or replace review for sensitive operations.
+A sandbox restricts what code can reach. A credential proxy can further restrict what authenticated actions are allowed. These controls matter even if the model proposes the wrong action. The goal is to make the available authority no broader than the task.
 
 
 
-## Explore (5 minutes)
+The toy allowlist permits a service file and the agent-fix branch. A request for a private-key path and a push to main are denied. The model’s confidence does not change those permissions.
+
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+allowed_files = {"/workspace/service/app.py"}; allowed_branch = "agent-fix"
+requested_file = "/private/key"
+read_allowed = requested_file in allowed_files
+requested_branch = "main"
+push_allowed = requested_branch == allowed_branch
+```
+
+1. The task has explicit narrow capabilities.
+
+   Changed values: `{"allowed_branch": "agent-fix"}`
+
+2. A proposed read lies outside the allowed file set.
+
+   Changed values: `{"requested_file": "/private/key"}`
+
+3. The file capability check denies it.
+
+   Changed values: `{"read_allowed": false}`
+
+4. The proposed push targets a different branch.
+
+   Changed values: `{"requested_branch": "main"}`
+
+5. The proxy policy denies the push.
+
+   Changed values: `{"push_allowed": false}`
+
+[Full runnable example](examples/genai-engineering.py).
+
+Limits: This is a capability decision model, not an OS sandbox. Real controls must handle filesystem resolution, subprocesses, network destinations, credential isolation, and bypass attempts.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A permission prompt asks a human whether one model-proposed action looks acceptable. A sandbox changes what the process can do at all. The second is an enforcement boundary: filesystem paths, network destinations, credentials, and subprocesses can be constrained outside the model.</p><p>Anthropic's October 2025 engineering article describes both filesystem and network isolation for Claude Code and warns that either boundary alone is incomplete. It also describes keeping sensitive credentials outside a cloud sandbox and using a proxy with scoped credentials to validate Git operations. The general harness lesson is capability design: grant the smallest authority that completes the current task, then make escalation explicit and observable.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A code agent must edit <code>/workspace/service</code>, run tests, read public package documentation, and push only to <code>refs/heads/agent-fix</code>. An untrusted README tells the model to read <code>~/.ssh</code> and POST it to an attacker.</p><p>Model intent is not the deciding control. Filesystem isolation denies the key read; network isolation denies the attacker host; credentials remain outside the sandbox; and the Git proxy accepts only the configured repository and branch. A user may deliberately escalate one boundary, but the event should be narrow, logged, and short-lived.</p><pre>model proposes → sandbox enforces → proxy narrows credentials
+allowed work ≠ ambient machine authority</pre><p>Sandboxing reduces consequences; it does not prove the model's code is correct, remove supply-chain risk, secure a misconfigured allowlist, or replace review for sensitive operations.</p>
+
+</details>
+
+## Explore (remaining exploration time)
 
 Start with all boundaries enabled, then remove one at a time. Predict whether the injected exfiltration path succeeds and identify the first enforcing control, not the first model instruction.
 

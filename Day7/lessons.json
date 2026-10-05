@@ -4,109 +4,744 @@
     "track": "Data engineering",
     "title": "Spark Real-Time Mode: eligibility before milliseconds",
     "tag": "Current development · Apache Spark 4.1",
-    "goal": "Decide when Structured Streaming Real-Time Mode changes the latency floor—and when query shape makes it the wrong execution mode.",
-    "concept": "<p>Traditional Structured Streaming repeatedly plans and executes micro-batches. Making the trigger smaller can reduce batching delay, but scheduler and coordination work become a larger fraction of every batch. Spark 4.1 introduces Real-Time Mode (RTM), a different execution path for continuous, sub-second processing; the release describes first official support for Scala stateless workloads.</p><p>The architectural question comes before the trigger value: is the query inside the supported surface? Spark 4.1 documents an allowlist and rejects unsupported sources, operators, or sinks; its error catalog also says async progress tracking is unsupported. Stateful aggregation, stream-stream joins, and arbitrary state are not merely tuning problems if the RTM scope does not support them.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A Kafka fraud pre-filter parses events, applies a stateless rule, and writes candidates to another Kafka topic. At 20,000 events/s, four tasks each processing 8,000 events/s provide 32,000 events/s of toy capacity. A 500 ms micro-batch contributes about 250 ms average batching wait before processing; a 50 ms real-time epoch contributes about 25 ms in this deliberately simple model.</p><p>Add a per-card rolling counter and the choice changes. The business logic now needs durable keyed state. In Spark 4.1, shrinking the RTM epoch does not make that unsupported operator eligible; use a supported stateful mode or redesign the split so only the stateless prefix runs in RTM.</p><pre>eligibility = supported source + stateless operator graph + supported sink\ncapacity = tasks × per-task rate\napproximate batching wait = epoch / 2</pre><p>Before adoption, validate connector semantics, checkpoint/restart behavior, backpressure, CPU overhead, observability, and the exact Spark distribution your managed platform exposes.</p>",
+    "goal": "A fraud pre-filter needs low delay.",
+    "concept": "<p>A fraud pre-filter needs low delay. Reducing a processing interval sounds attractive, but the chosen mode must first support the work the query performs.</p><p>Spark Real-Time Mode uses a different execution approach from ordinary micro-batches. In the lesson’s Spark 4.1 scope, the supported stateless path is the starting point. Adding a per-card rolling count introduces stored state and changes eligibility. A smaller time setting cannot add missing operator support.</p>",
+    "example": "<p>Four tasks at 8,000 events per second provide 32,000 events per second of toy capacity for 20,000 arrivals. The stateless filter is eligible under our simplified check. Turning on the rolling counter fails that check before latency is considered.</p>",
     "practice": "Predict the result for a stateless query at 20,000 events/s, then add state and raise input above capacity. Explain why latency tuning cannot repair either ineligibility or sustained overload.",
     "boundary": "A stateless eligibility flag plus a steady-rate capacity and half-epoch waiting estimate. It does not run Spark, reproduce RTM scheduling, model Kafka partitions, sinks, serialization, network, checkpointing, recovery, backpressure, skew, GC, executor loss, stateful support added after 4.1, or any managed-service version differences.",
     "sim": "<label>Input rate (events/s) <input id=\"inputRate\" type=\"range\" min=\"5000\" max=\"50000\" step=\"1000\" value=\"20000\"></label><label>Tasks <input id=\"tasks\" type=\"range\" min=\"1\" max=\"8\" step=\"1\" value=\"4\"></label><label>Epoch/trigger (ms) <input id=\"epochMs\" type=\"range\" min=\"25\" max=\"1000\" step=\"25\" value=\"50\"></label><label><input id=\"stateful\" type=\"checkbox\"> Query needs keyed state</label><pre id=\"world\" aria-live=\"polite\"></pre>",
     "js": "const show=()=>{const rate=+inputRate.value,n=+tasks.value,epoch=+epochMs.value,capacity=n*8000,eligible=!stateful.checked,util=100*rate/capacity;world.textContent='Spark 4.1 RTM eligibility in this toy: '+(eligible?'ELIGIBLE stateless shape':'INELIGIBLE: keyed state requested')+'\\nCapacity estimate: '+capacity.toLocaleString()+' events/s\\nInput: '+rate.toLocaleString()+' events/s | utilization: '+util.toFixed(0)+'%\\nApproximate batching wait: '+(epoch/2).toFixed(1)+' ms\\nOutcome: '+(!eligible?'Choose a supported stateful execution path or split the graph.':util>100?'OVERLOADED: epochs cannot drain sustained input.':'Capacity headroom exists; validate end-to-end behavior.')};[inputRate,tasks,epochMs,stateful].forEach(e=>e.oninput=show);show();",
     "questions": [
-      ["A Spark 4.1 query adds a keyed rolling count. What should happen before tuning its RTM epoch?", ["Confirm that the stateful graph is supported; otherwise choose another path", "Set the epoch to one millisecond", "Disable checkpoints"], 0, "Execution-mode eligibility is a correctness constraint, not a latency knob."],
-      ["Why can a smaller epoch fail to improve a saturated stream?", ["Input still exceeds processing capacity", "Epochs automatically add executors", "Kafka stops retaining offsets"], 0, "A scheduling interval cannot remove sustained capacity debt."],
-      ["Which claim is outside this model?", ["Half an epoch is used as a teaching estimate", "A real deployment will achieve the displayed latency", "Stateful shape changes eligibility in the lesson"], 1, "The calculator omits the runtime factors required to predict production latency." ]
+      [
+        "A Spark 4.1 query adds a keyed rolling count. What should happen before tuning its RTM epoch?",
+        [
+          "Confirm that the stateful graph is supported; otherwise choose another path",
+          "Set the epoch to one millisecond",
+          "Disable checkpoints"
+        ],
+        0,
+        "Execution-mode eligibility is a correctness constraint, not a latency knob."
+      ],
+      [
+        "Why can a smaller epoch fail to improve a saturated stream?",
+        [
+          "Input still exceeds processing capacity",
+          "Epochs automatically add executors",
+          "Kafka stops retaining offsets"
+        ],
+        0,
+        "A scheduling interval cannot remove sustained capacity debt."
+      ],
+      [
+        "Which claim is outside this model?",
+        [
+          "Half an epoch is used as a teaching estimate",
+          "A real deployment will achieve the displayed latency",
+          "Stateful shape changes eligibility in the lesson"
+        ],
+        1,
+        "The calculator omits the runtime factors required to predict production latency."
+      ]
     ],
     "sources": [
-      ["Apache Spark 4.1.0 release notes", "https://spark.apache.org/releases/spark-release-4-1-0.html", "Apache release page; page publication date not stated"],
-      ["Apache Spark 4.1.0 error catalog: STREAMING_REAL_TIME_MODE", "https://spark.apache.org/docs/4.1.0/sql-error-conditions.html#streaming_real_time_mode", "Spark 4.1.0 documentation"]
-    ]
+      [
+        "Apache Spark 4.1.0 release notes",
+        "https://spark.apache.org/releases/spark-release-4-1-0.html",
+        "Apache release page; page publication date not stated"
+      ],
+      [
+        "Apache Spark 4.1.0 error catalog: STREAMING_REAL_TIME_MODE",
+        "https://spark.apache.org/docs/4.1.0/sql-error-conditions.html#streaming_real_time_mode",
+        "Spark 4.1.0 documentation"
+      ]
+    ],
+    "advanced_detail": "<p>Traditional Structured Streaming repeatedly plans and executes micro-batches. Making the trigger smaller can reduce batching delay, but scheduler and coordination work become a larger fraction of every batch. Spark 4.1 introduces Real-Time Mode (RTM), a different execution path for continuous, sub-second processing; the release describes first official support for Scala stateless workloads.</p><p>The architectural question comes before the trigger value: is the query inside the supported surface? Spark 4.1 documents an allowlist and rejects unsupported sources, operators, or sinks; its error catalog also says async progress tracking is unsupported. Stateful aggregation, stream-stream joins, and arbitrary state are not merely tuning problems if the RTM scope does not support them.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A Kafka fraud pre-filter parses events, applies a stateless rule, and writes candidates to another Kafka topic. At 20,000 events/s, four tasks each processing 8,000 events/s provide 32,000 events/s of toy capacity. A 500 ms micro-batch contributes about 250 ms average batching wait before processing; a 50 ms real-time epoch contributes about 25 ms in this deliberately simple model.</p><p>Add a per-card rolling counter and the choice changes. The business logic now needs durable keyed state. In Spark 4.1, shrinking the RTM epoch does not make that unsupported operator eligible; use a supported stateful mode or redesign the split so only the stateless prefix runs in RTM.</p><pre>eligibility = supported source + stateless operator graph + supported sink\ncapacity = tasks × per-task rate\napproximate batching wait = epoch / 2</pre><p>Before adoption, validate connector semantics, checkpoint/restart behavior, backpressure, CPU overhead, observability, and the exact Spark distribution your managed platform exposes.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "arrivals = 20000; tasks = 4; rate_per_task = 8000",
+          "note": "Define a synthetic stateless workload."
+        },
+        {
+          "code": "capacity = tasks * rate_per_task",
+          "note": "The nominal capacity is 32,000 events per second."
+        },
+        {
+          "code": "has_stateful_counter = False",
+          "note": "The first query only parses and filters."
+        },
+        {
+          "code": "eligible = not has_stateful_counter",
+          "note": "This one teaching constraint is satisfied."
+        },
+        {
+          "code": "has_stateful_counter = True",
+          "note": "A per-card rolling count adds state."
+        },
+        {
+          "code": "eligible = not has_stateful_counter",
+          "note": "The same simplified eligibility check now fails."
+        }
+      ],
+      "limit": "This is a scope check for the version described in the original lesson, not automatic Spark plan validation. Connector support, exact distribution, restart behavior, and resource demand require current platform documentation.",
+      "expect": {
+        "capacity": 32000,
+        "eligible": false
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "arrivals": 20000,
+            "tasks": 4,
+            "rate_per_task": 8000
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "arrivals": 20000,
+            "tasks": 4,
+            "rate_per_task": 8000,
+            "capacity": 32000
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "arrivals": 20000,
+            "tasks": 4,
+            "rate_per_task": 8000,
+            "capacity": 32000,
+            "has_stateful_counter": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "arrivals": 20000,
+            "tasks": 4,
+            "rate_per_task": 8000,
+            "capacity": 32000,
+            "has_stateful_counter": false,
+            "eligible": true
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "arrivals": 20000,
+            "tasks": 4,
+            "rate_per_task": 8000,
+            "capacity": 32000,
+            "has_stateful_counter": true,
+            "eligible": true
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "arrivals": 20000,
+            "tasks": 4,
+            "rate_per_task": 8000,
+            "capacity": 32000,
+            "has_stateful_counter": true,
+            "eligible": false
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-27"
   },
   {
     "slug": "software-engineering",
     "track": "Software engineering",
     "title": "Deadline propagation: pass the remaining budget",
     "tag": "Foundation · gRPC deadline guidance",
-    "goal": "Trace one end-to-end latency budget across RPC hops and stop work that can no longer help the caller.",
-    "concept": "<p>A per-hop timeout answers “how long may I wait here?” An end-to-end deadline answers the user-facing question: “after what instant is this result no longer useful?” If every hop starts a fresh 500 ms timeout, a three-hop request can consume far more than the caller's 500 ms budget.</p><p>Deadline propagation carries the remaining budget downstream. gRPC implementations can convert an incoming absolute deadline into a timeout with elapsed time deducted, avoiding dependence on synchronized clocks. When the deadline expires, cancellation must propagate—but application code is still responsible for stopping spawned work.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A lineage UI gives an impact query 500 ms. The API spends 140 ms on authentication and graph planning, then calls a scoring service that needs 420 ms.</p><pre>remaining budget = 500 − 140 = 360 ms\npropagated call: cancel at 360 ms; total ≈ 500 ms\nfresh 500 ms hop: finish at 560 ms; caller already left</pre><p>Propagation does not make the downstream faster. It prevents 60 ms of work that cannot reach the caller, releases a connection sooner, and preserves capacity for requests that can still succeed. The server must observe cancellation inside long CPU loops, database work, and child tasks; otherwise the deadline is only a client-side illusion.</p>",
+    "goal": "A user gives a request 500 milliseconds.",
+    "concept": "<p>A user gives a request 500 milliseconds. The API spends 140 ms before calling the next service. Giving that next call a fresh 500 ms exceeds the user’s original budget.</p><p>A deadline is the time by which the whole operation must finish. Pass the remaining budget to downstream work. A timeout controls how long one call waits; resetting it at every hop can keep work running after the caller has left.</p>",
+    "example": "<p>After 140 ms, 360 ms remain. The downstream operation needs 420 ms, so it cannot finish in time. If it observes cancellation, the propagated deadline limits total work to about 500 ms instead of 560.</p>",
     "practice": "Predict whether the default request succeeds. Disable propagation, then increase pre-work. Explain where useless work appears and what telemetry would reveal it.",
     "boundary": "One caller, one intermediate service, and one downstream latency with deterministic timing. It omits parallel fan-out, retries, queuing, network variance, clock conversion details, cancellation lag, cleanup cost, partial results, streaming RPCs, database cancellation support, and deadline selection from real latency distributions.",
     "sim": "<label>Caller deadline (ms) <input id=\"deadlineMs\" type=\"range\" min=\"200\" max=\"1000\" step=\"50\" value=\"500\"></label><label>Intermediate pre-work (ms) <input id=\"preworkMs\" type=\"range\" min=\"0\" max=\"600\" step=\"20\" value=\"140\"></label><label>Downstream service time (ms) <input id=\"downstreamMs\" type=\"range\" min=\"50\" max=\"800\" step=\"10\" value=\"420\"></label><label><input id=\"propagate\" type=\"checkbox\" checked> Propagate remaining deadline</label><pre id=\"world\" aria-live=\"polite\"></pre>",
     "js": "const show=()=>{const d=+deadlineMs.value,p=+preworkMs.value,s=+downstreamMs.value,remaining=Math.max(0,d-p),hopBudget=propagate.checked?remaining:d,spent=Math.min(s,hopBudget),total=p+spent,success=p<d&&s<=hopBudget&&total<=d,waste=Math.max(0,total-d);world.textContent='Caller budget: '+d+' ms\\nSpent before child RPC: '+p+' ms\\nChild budget: '+hopBudget+' ms'+(propagate.checked?' (remaining budget)':' (fresh per-hop timeout)')+'\\nChild work performed: '+spent+' ms\\nCaller-visible result: '+(success?'SUCCESS at '+total+' ms':'DEADLINE EXCEEDED')+'\\nWork after caller budget: '+waste+' ms\\n\\n'+(propagate.checked?'Expired work is bounded if cancellation is honored.':'A fresh timeout can authorize work after the result is useless.')};[deadlineMs,preworkMs,downstreamMs,propagate].forEach(e=>e.oninput=show);show();",
     "questions": [
-      ["A service spends 140 ms of a 500 ms deadline before a child call. What budget should the child receive?", ["500 ms", "360 ms", "640 ms"], 1, "Propagation deducts elapsed time from the original end-to-end budget."],
-      ["Why is cancellation-aware application code still necessary?", ["The transport cannot automatically stop every spawned computation", "Deadlines synchronize all clocks", "Cancellation guarantees a successful response"], 0, "The server must stop its own loops, child tasks, or database work after cancellation."],
-      ["Where does this lesson's model break?", ["Parallel fan-out and retries can spend the shared budget differently", "A deadline bounds waiting", "Elapsed time reduces remaining budget"], 0, "Real call graphs allocate and coordinate one budget across concurrent and repeated work." ]
+      [
+        "A service spends 140 ms of a 500 ms deadline before a child call. What budget should the child receive?",
+        [
+          "500 ms",
+          "360 ms",
+          "640 ms"
+        ],
+        1,
+        "Propagation deducts elapsed time from the original end-to-end budget."
+      ],
+      [
+        "Why is cancellation-aware application code still necessary?",
+        [
+          "The transport cannot automatically stop every spawned computation",
+          "Deadlines synchronize all clocks",
+          "Cancellation guarantees a successful response"
+        ],
+        0,
+        "The server must stop its own loops, child tasks, or database work after cancellation."
+      ],
+      [
+        "Where does this lesson's model break?",
+        [
+          "Parallel fan-out and retries can spend the shared budget differently",
+          "A deadline bounds waiting",
+          "Elapsed time reduces remaining budget"
+        ],
+        0,
+        "Real call graphs allocate and coordinate one budget across concurrent and repeated work."
+      ]
     ],
     "sources": [
-      ["gRPC guide: Deadlines", "https://grpc.io/docs/guides/deadlines/", "Last modified 2025-07-07"],
-      ["gRPC guide: Cancellation", "https://grpc.io/docs/guides/cancellation/", "Last modified 2024-02-29"]
-    ]
+      [
+        "gRPC guide: Deadlines",
+        "https://grpc.io/docs/guides/deadlines/",
+        "Last modified 2025-07-07"
+      ],
+      [
+        "gRPC guide: Cancellation",
+        "https://grpc.io/docs/guides/cancellation/",
+        "Last modified 2024-02-29"
+      ]
+    ],
+    "advanced_detail": "<p>A per-hop timeout answers “how long may I wait here?” An end-to-end deadline answers the user-facing question: “after what instant is this result no longer useful?” If every hop starts a fresh 500 ms timeout, a three-hop request can consume far more than the caller's 500 ms budget.</p><p>Deadline propagation carries the remaining budget downstream. gRPC implementations can convert an incoming absolute deadline into a timeout with elapsed time deducted, avoiding dependence on synchronized clocks. When the deadline expires, cancellation must propagate—but application code is still responsible for stopping spawned work.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A lineage UI gives an impact query 500 ms. The API spends 140 ms on authentication and graph planning, then calls a scoring service that needs 420 ms.</p><pre>remaining budget = 500 − 140 = 360 ms\npropagated call: cancel at 360 ms; total ≈ 500 ms\nfresh 500 ms hop: finish at 560 ms; caller already left</pre><p>Propagation does not make the downstream faster. It prevents 60 ms of work that cannot reach the caller, releases a connection sooner, and preserves capacity for requests that can still succeed. The server must observe cancellation inside long CPU loops, database work, and child tasks; otherwise the deadline is only a client-side illusion.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "int totalBudgetMs = 500;",
+          "note": "The caller sets the end-to-end budget."
+        },
+        {
+          "code": "int spentMs = 140;",
+          "note": "Authentication and planning consume part of it."
+        },
+        {
+          "code": "int remainingMs = Math.max(0, totalBudgetMs - spentMs);",
+          "note": "Only 360 ms remain."
+        },
+        {
+          "code": "int downstreamNeedMs = 420;",
+          "note": "The downstream work needs longer than that."
+        },
+        {
+          "code": "int totalWithDeadline = spentMs + Math.min(remainingMs, downstreamNeedMs);",
+          "note": "Observed cancellation caps the modeled total at 500 ms."
+        },
+        {
+          "code": "int totalWithFreshTimeout = spentMs + downstreamNeedMs;",
+          "note": "A fresh-hop timeout allows 560 ms of work."
+        }
+      ],
+      "limit": "This uses known durations, not real network calls. Deadlines only reduce server work when cancellation reaches the running operations. Clock handling, queues, and cleanup also matter.",
+      "expect": {
+        "remainingMs": "360",
+        "totalWithDeadline": "500",
+        "totalWithFreshTimeout": "560"
+      },
+      "language": "java",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "totalBudgetMs": "500"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "totalBudgetMs": "500",
+            "spentMs": "140"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "totalBudgetMs": "500",
+            "spentMs": "140",
+            "remainingMs": "360"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "totalBudgetMs": "500",
+            "spentMs": "140",
+            "remainingMs": "360",
+            "downstreamNeedMs": "420"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "totalBudgetMs": "500",
+            "spentMs": "140",
+            "remainingMs": "360",
+            "downstreamNeedMs": "420",
+            "totalWithDeadline": "500"
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "totalBudgetMs": "500",
+            "spentMs": "140",
+            "remainingMs": "360",
+            "downstreamNeedMs": "420",
+            "totalWithDeadline": "500",
+            "totalWithFreshTimeout": "560"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-27"
   },
   {
     "slug": "distinguished-engineer",
     "track": "Distinguished Engineer",
     "title": "Load shedding: protect useful work past the breaking point",
     "tag": "Reliability judgment · AWS and Google SRE",
-    "goal": "Choose an admission policy that preserves critical throughput when demand exceeds safe capacity instead of maximizing accepted requests.",
-    "concept": "<p>Once demand exceeds safe capacity, the system cannot fully serve every request. Letting all work enter a deep queue converts overload into high latency, timeouts, retries, and sometimes a collapse in useful throughput. Load shedding makes the loss explicit: reject some work early and cheaply so the service continues completing the work it admits.</p><p>The Distinguished Engineer decision is which work to protect. Cost and value both matter. Health checks, authentication, interactive reads, bulk refreshes, and speculative retries should not automatically compete as equals. Google SRE recommends testing beyond the breaking point; AWS describes load shedding as an overload control. The policy needs product ownership because it encodes whose work survives scarcity.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A lineage service has 100 compute units/s. Interactive incident queries demand 60 units; background graph refresh demands 80. Accepting all 140 units creates a queue and risks timeout retries. A priority-aware admission policy accepts all 60 critical units and 40 background units, rejecting the other 40 before expensive graph traversal.</p><pre>safe capacity = 100 units/s\ndemand = 60 critical + 80 background\npriority admission = 60 critical + 40 background + 40 rejected</pre><p>Do not hard-code “critical wins” without fairness and abuse controls. Validate the overload signal, reserve capacity for recovery/control-plane work, return retry guidance where appropriate, and measure accepted useful work—not merely rejection rate. Load-test gradual and impulse traffic because caches and autoscaling respond differently.</p>",
+    "goal": "A service can do 100 units of work each second, but 140 arrive.",
+    "concept": "<p>A service can do 100 units of work each second, but 140 arrive. Accepting everything builds a queue and can make even urgent requests miss their deadlines.</p><p>Load shedding means refusing some work before spending expensive resources on it. A clear priority rule can protect useful work under overload. The decision must also account for fairness, abuse, recovery capacity, and what rejected callers do next.</p>",
+    "example": "<p>The toy service accepts 60 critical units first. Forty units remain for 80 background units, so 40 background units are rejected. This keeps accepted work within capacity without claiming the rejected demand disappears.</p>",
     "practice": "Raise optional demand past capacity with priority off, then turn it on. Explain who benefits, who is rejected, and which governance review should own that tradeoff.",
     "boundary": "A one-second, unit-cost admission model with two traffic classes and fixed safe capacity. It omits variable request cost, queues, autoscaling, cache effects, fairness within a class, retries, admission latency, distributed limiters, regional failover, tenant quotas, abuse, and errors in the overload signal.",
     "sim": "<label>Safe capacity (units/s) <input id=\"capacity\" type=\"range\" min=\"50\" max=\"200\" step=\"10\" value=\"100\"></label><label>Critical demand (units/s) <input id=\"critical\" type=\"range\" min=\"0\" max=\"150\" step=\"10\" value=\"60\"></label><label>Background demand (units/s) <input id=\"background\" type=\"range\" min=\"0\" max=\"200\" step=\"10\" value=\"80\"></label><label><input id=\"priority\" type=\"checkbox\" checked> Admit critical work first</label><pre id=\"world\" aria-live=\"polite\"></pre>",
     "js": "const show=()=>{const cap=+capacity.value,c=+critical.value,b=+background.value,total=c+b;let ac,ab;if(total<=cap){ac=c;ab=b}else if(priority.checked){ac=Math.min(c,cap);ab=Math.min(b,Math.max(0,cap-ac))}else{const share=cap/total;ac=Math.floor(c*share);ab=Math.floor(b*share)}const rejected=total-ac-ab;world.textContent='Demand: '+total+' units/s | safe capacity: '+cap+'\\nAdmitted critical: '+ac+'/'+c+'\\nAdmitted background: '+ab+'/'+b+'\\nRejected early: '+rejected+'\\nPolicy: '+(priority.checked?'protect critical work first':'proportional sharing')+'\\nOutcome: '+(total<=cap?'No shedding needed.':ac+ab<=cap?'Capacity remains bounded; the loss is explicit.':'Unsafe admission.')};[capacity,critical,background,priority].forEach(e=>e.oninput=show);show();",
     "questions": [
-      ["Demand is 140 units/s and safe capacity is 100. What must a stable admission policy do?", ["Accept all and hide the queue", "Reject or degrade at least 40 units of work", "Retry every rejected request immediately"], 1, "The system cannot create capacity by accepting work; scarcity must become explicit."],
-      ["Why should traffic priority be a product and governance decision?", ["It determines whose outcomes survive overload", "It removes the need for load testing", "It makes every request equal"], 0, "Technical admission rules encode business value, fairness, and customer impact."],
-      ["Which observation would invalidate the toy policy?", ["Background requests cost ten times more than critical requests", "Demand can exceed capacity", "Early rejection is observable"], 0, "The model assumes equal unit cost; variable cost requires cost-aware admission." ]
+      [
+        "Demand is 140 units/s and safe capacity is 100. What must a stable admission policy do?",
+        [
+          "Accept all and hide the queue",
+          "Reject or degrade at least 40 units of work",
+          "Retry every rejected request immediately"
+        ],
+        1,
+        "The system cannot create capacity by accepting work; scarcity must become explicit."
+      ],
+      [
+        "Why should traffic priority be a product and governance decision?",
+        [
+          "It determines whose outcomes survive overload",
+          "It removes the need for load testing",
+          "It makes every request equal"
+        ],
+        0,
+        "Technical admission rules encode business value, fairness, and customer impact."
+      ],
+      [
+        "Which observation would invalidate the toy policy?",
+        [
+          "Background requests cost ten times more than critical requests",
+          "Demand can exceed capacity",
+          "Early rejection is observable"
+        ],
+        0,
+        "The model assumes equal unit cost; variable cost requires cost-aware admission."
+      ]
     ],
     "sources": [
-      ["AWS Builders' Library: Using load shedding to avoid overload", "https://builder.aws.com/content/3Eun1EEyX6p2e3VYNyRLSJzLuMV/using-load-shedding-to-avoid-overload", "Updated 2026-06-12"],
-      ["Google SRE Book, Chapter 22: Addressing Cascading Failures", "https://sre.google/sre-book/addressing-cascading-failures/", "Foundational living edition; original book published 2016"]
-    ]
+      [
+        "AWS Builders' Library: Using load shedding to avoid overload",
+        "https://builder.aws.com/content/3Eun1EEyX6p2e3VYNyRLSJzLuMV/using-load-shedding-to-avoid-overload",
+        "Updated 2026-06-12"
+      ],
+      [
+        "Google SRE Book, Chapter 22: Addressing Cascading Failures",
+        "https://sre.google/sre-book/addressing-cascading-failures/",
+        "Foundational living edition; original book published 2016"
+      ]
+    ],
+    "advanced_detail": "<p>Once demand exceeds safe capacity, the system cannot fully serve every request. Letting all work enter a deep queue converts overload into high latency, timeouts, retries, and sometimes a collapse in useful throughput. Load shedding makes the loss explicit: reject some work early and cheaply so the service continues completing the work it admits.</p><p>The Distinguished Engineer decision is which work to protect. Cost and value both matter. Health checks, authentication, interactive reads, bulk refreshes, and speculative retries should not automatically compete as equals. Google SRE recommends testing beyond the breaking point; AWS describes load shedding as an overload control. The policy needs product ownership because it encodes whose work survives scarcity.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A lineage service has 100 compute units/s. Interactive incident queries demand 60 units; background graph refresh demands 80. Accepting all 140 units creates a queue and risks timeout retries. A priority-aware admission policy accepts all 60 critical units and 40 background units, rejecting the other 40 before expensive graph traversal.</p><pre>safe capacity = 100 units/s\ndemand = 60 critical + 80 background\npriority admission = 60 critical + 40 background + 40 rejected</pre><p>Do not hard-code “critical wins” without fairness and abuse controls. Validate the overload signal, reserve capacity for recovery/control-plane work, return retry guidance where appropriate, and measure accepted useful work—not merely rejection rate. Load-test gradual and impulse traffic because caches and autoscaling respond differently.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "capacity = 100; critical = 60; background = 80",
+          "note": "Demand exceeds the safe processing budget."
+        },
+        {
+          "code": "accepted_critical = min(critical, capacity)",
+          "note": "Serve critical demand within capacity."
+        },
+        {
+          "code": "remaining = capacity - accepted_critical",
+          "note": "Forty units remain."
+        },
+        {
+          "code": "accepted_background = min(background, remaining)",
+          "note": "Only forty background units fit."
+        },
+        {
+          "code": "rejected = background - accepted_background",
+          "note": "Reject the other forty before expensive processing."
+        }
+      ],
+      "limit": "This is a fixed priority allocation model, not a production scheduler. Retried rejected work can recreate overload, and critical demand itself can exceed capacity.",
+      "expect": {
+        "accepted_critical": 60,
+        "accepted_background": 40,
+        "rejected": 40
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "capacity": 100,
+            "critical": 60,
+            "background": 80
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "capacity": 100,
+            "critical": 60,
+            "background": 80,
+            "accepted_critical": 60
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "capacity": 100,
+            "critical": 60,
+            "background": 80,
+            "accepted_critical": 60,
+            "remaining": 40
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "capacity": 100,
+            "critical": 60,
+            "background": 80,
+            "accepted_critical": 60,
+            "remaining": 40,
+            "accepted_background": 40
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "capacity": 100,
+            "critical": 60,
+            "background": 80,
+            "accepted_critical": 60,
+            "remaining": 40,
+            "accepted_background": 40,
+            "rejected": 40
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-27"
   },
   {
     "slug": "genai-engineering",
     "track": "GenAI engineering",
     "title": "Agent termination: done, stalled, or out of budget",
     "tag": "Harness engineering · current Anthropic guidance",
-    "goal": "Turn an open-ended tool loop into an observable contract with evidence-based completion, progress detection, and hard resource bounds.",
-    "concept": "<p>An agent saying “done” is a model output, not a completion proof. A harness needs separate loop control: a measurable end state, a check that produces evidence, constraints that must remain true, and a hard turn/time/cost bound. It should distinguish success from impossible, stalled, interrupted, and budget-exhausted outcomes.</p><p>Anthropic's current <code>/goal</code> documentation describes a separate evaluator that checks a condition after each turn, recommends measurable evidence and an explicit turn/time clause, and stops repeated no-tool non-progress. At the API layer, <code>stop_reason</code> describes why one model response ended: <code>tool_use</code> means execute a tool, while <code>end_turn</code> means natural response completion—not necessarily that the external task is satisfied.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A migration agent begins with eight failing contract tests. The contract is: “all eight pass, no unrelated schema file changes, or stop after five turns.” A fresh evaluator reads test evidence after every turn.</p><pre>turn outcome → tool result → verifier verdict\nMET: all required checks pass\nSTALLED: no measurable progress for two turns\nBUDGET_EXHAUSTED: hard bound reached with work remaining</pre><p>At two repaired tests per turn, the agent proves completion on turn four. At one per turn, it stops after turn five with three failures remaining; the harness records unfinished state instead of converting resource exhaustion into success. Preserve the event trail and last verified state so a later session can resume deliberately.</p>",
+    "goal": "An agent reaches its turn limit with tests still failing.",
+    "concept": "<p>An agent reaches its turn limit with tests still failing. “Stopped” should not be recorded as “finished.”</p><p>A harness needs separate end states: the task is verified, progress has stalled, or the resource budget is exhausted. Determine completion from observed task evidence. Preserve the last checked state so another session can resume deliberately.</p>",
+    "example": "<p>Eight tests initially fail. Fixing one each turn leaves three after five turns, so the result is budget exhausted. Fixing two per turn would reach zero on turn four. The model below executes the slower case.</p>",
     "practice": "Predict the outcome at two fixes per turn, then lower progress to one and zero. Disable the evaluator and explain why a fluent first-turn answer is weaker evidence than a test exit code.",
     "boundary": "A deterministic counter of failing checks with a synthetic token charge per turn. It does not call a model or tool, judge semantic correctness, inspect files, enforce unchanged constraints, model flaky tests, recover from context overflow, price real tokens, or reproduce Claude Code's evaluator implementation.",
     "sim": "<label>Failing checks at start <input id=\"failures\" type=\"range\" min=\"1\" max=\"12\" step=\"1\" value=\"8\"></label><label>Checks repaired per turn <input id=\"fixRate\" type=\"range\" min=\"0\" max=\"4\" step=\"1\" value=\"2\"></label><label>Maximum turns <input id=\"maxTurns\" type=\"range\" min=\"1\" max=\"10\" step=\"1\" value=\"5\"></label><label><input id=\"evaluator\" type=\"checkbox\" checked> Independent evidence evaluator</label><button id=\"runLoop\">Run loop</button><pre id=\"world\" aria-live=\"polite\"></pre>",
     "js": "const run=()=>{let left=+failures.value,turns=0,status='BUDGET_EXHAUSTED',trace=[];if(!evaluator.checked){world.textContent='Turn 1: model reports done.\\nOutcome: UNVERIFIED SELF-REPORT\\nNo external condition was checked.';return}while(turns<+maxTurns.value){turns++;const before=left;left=Math.max(0,left-+fixRate.value);trace.push('Turn '+turns+': '+before+' → '+left+' failing checks');if(left===0){status='MET';break}if(+fixRate.value===0&&turns===2){status='STALLED';break}}world.textContent=trace.join('\\n')+'\\nOutcome: '+status+'\\nRemaining failures: '+left+'\\nSynthetic token spend: '+(turns*1200).toLocaleString()+'\\n\\nend_turn would describe one response; this verdict describes the task contract.'};runLoop.onclick=run;[failures,fixRate,maxTurns,evaluator].forEach(e=>e.oninput=run);run();",
     "questions": [
-      ["The API returns stop_reason=tool_use. What should the harness infer?", ["The whole task is complete", "A tool call must be executed and its result returned", "The goal is impossible"], 1, "A response-level stop reason drives the next protocol step; it is not a task verdict."],
-      ["Why use an evaluator separate from the working agent?", ["To check surfaced evidence against the completion condition instead of trusting self-report", "To guarantee the tests are well designed", "To remove resource bounds"], 0, "Independent checking reduces the incentive and ambiguity of self-declared completion."],
-      ["What boundary remains even after every named test passes?", ["The test suite may omit an important requirement", "The harness cannot record a pass", "A hard turn budget becomes infinite"], 0, "Evidence is only as complete as the checks and constraints in the contract." ]
+      [
+        "The API returns stop_reason=tool_use. What should the harness infer?",
+        [
+          "The whole task is complete",
+          "A tool call must be executed and its result returned",
+          "The goal is impossible"
+        ],
+        1,
+        "A response-level stop reason drives the next protocol step; it is not a task verdict."
+      ],
+      [
+        "Why use an evaluator separate from the working agent?",
+        [
+          "To check surfaced evidence against the completion condition instead of trusting self-report",
+          "To guarantee the tests are well designed",
+          "To remove resource bounds"
+        ],
+        0,
+        "Independent checking reduces the incentive and ambiguity of self-declared completion."
+      ],
+      [
+        "What boundary remains even after every named test passes?",
+        [
+          "The test suite may omit an important requirement",
+          "The harness cannot record a pass",
+          "A hard turn budget becomes infinite"
+        ],
+        0,
+        "Evidence is only as complete as the checks and constraints in the contract."
+      ]
     ],
     "sources": [
-      ["Claude Code Docs: Keep Claude working toward a goal", "https://code.claude.com/docs/en/goal", "Living product documentation; publication date not stated"],
-      ["Claude Platform Docs: Stop reasons and fallback", "https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons", "Living API documentation; publication date not stated"]
-    ]
+      [
+        "Claude Code Docs: Keep Claude working toward a goal",
+        "https://code.claude.com/docs/en/goal",
+        "Living product documentation; publication date not stated"
+      ],
+      [
+        "Claude Platform Docs: Stop reasons and fallback",
+        "https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons",
+        "Living API documentation; publication date not stated"
+      ]
+    ],
+    "advanced_detail": "<p>An agent saying “done” is a model output, not a completion proof. A harness needs separate loop control: a measurable end state, a check that produces evidence, constraints that must remain true, and a hard turn/time/cost bound. It should distinguish success from impossible, stalled, interrupted, and budget-exhausted outcomes.</p><p>Anthropic's current <code>/goal</code> documentation describes a separate evaluator that checks a condition after each turn, recommends measurable evidence and an explicit turn/time clause, and stops repeated no-tool non-progress. At the API layer, <code>stop_reason</code> describes why one model response ended: <code>tool_use</code> means execute a tool, while <code>end_turn</code> means natural response completion—not necessarily that the external task is satisfied.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A migration agent begins with eight failing contract tests. The contract is: “all eight pass, no unrelated schema file changes, or stop after five turns.” A fresh evaluator reads test evidence after every turn.</p><pre>turn outcome → tool result → verifier verdict\nMET: all required checks pass\nSTALLED: no measurable progress for two turns\nBUDGET_EXHAUSTED: hard bound reached with work remaining</pre><p>At two repaired tests per turn, the agent proves completion on turn four. At one per turn, it stops after turn five with three failures remaining; the harness records unfinished state instead of converting resource exhaustion into success. Preserve the event trail and last verified state so a later session can resume deliberately.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "remaining_failures = 8; turn = 0; max_turns = 5",
+          "note": "Set the task state and resource bound."
+        },
+        {
+          "code": "remaining_failures -= 1; turn += 1",
+          "note": "One failure is repaired on turn one."
+        },
+        {
+          "code": "remaining_failures -= 1; turn += 1",
+          "note": "Turn two leaves six failures."
+        },
+        {
+          "code": "remaining_failures -= 1; turn += 1",
+          "note": "Turn three leaves five."
+        },
+        {
+          "code": "remaining_failures -= 1; turn += 1",
+          "note": "Turn four leaves four."
+        },
+        {
+          "code": "remaining_failures -= 1; turn += 1",
+          "note": "Turn five leaves three."
+        },
+        {
+          "code": "status = \"MET\" if remaining_failures == 0 else \"BUDGET_EXHAUSTED\" if turn >= max_turns else \"CONTINUE\"",
+          "note": "The harness reports unfinished work honestly."
+        }
+      ],
+      "limit": "This assumes supplied test counts are trustworthy and each turn repairs exactly one. A real verifier must also check unrelated changes, stale results, and progress criteria.",
+      "expect": {
+        "remaining_failures": 3,
+        "status": "BUDGET_EXHAUSTED"
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "remaining_failures": 8,
+            "turn": 0,
+            "max_turns": 5
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "remaining_failures": 7,
+            "turn": 1,
+            "max_turns": 5
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "remaining_failures": 6,
+            "turn": 2,
+            "max_turns": 5
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "remaining_failures": 5,
+            "turn": 3,
+            "max_turns": 5
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "remaining_failures": 4,
+            "turn": 4,
+            "max_turns": 5
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "remaining_failures": 3,
+            "turn": 5,
+            "max_turns": 5
+          }
+        },
+        {
+          "step": 6,
+          "state": {
+            "remaining_failures": 3,
+            "turn": 5,
+            "max_turns": 5,
+            "status": "BUDGET_EXHAUSTED"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-27"
   },
   {
     "slug": "technology-breakthroughs",
     "track": "Technology breakthroughs",
     "title": "The arm qubit: separate memory from communication",
     "tag": "Research spotlight · Physical Review Applied, September 2 2026",
-    "goal": "Understand why one superconducting mode stores information while another couples outward, and separate simulated performance from fabricated evidence.",
-    "concept": "<p>A superconducting qubit faces a systems tradeoff. Strongly connecting the information-bearing element makes gates and readout faster, but those same connections can open paths for noise and decoherence. The “arm qubit” architecture co-designs two strongly coupled modes: a data mode optimized for storage and an arm mode optimized for interaction.</p><p>The researchers use a quarton coupler to provide strong nonlinear coupling while suppressing unwanted linear mixing. Their peer-reviewed paper reports simulations—not a fabricated device—of a 17 ns microwave-only controlled-Z gate with infidelity <code>8.7 × 10⁻⁵</code>, plus fast readout and low idle interaction. MIT's September 3 coverage says fabrication and experimental validation are the next steps.</p>",
-    "example": "<p><strong>Evidence-aware worked example:</strong> Suppose, only for teaching, that independent gate failures occur at the paper's simulated CZ infidelity. For 1,000 identical gates, the probability of zero modeled gate failures is:</p><pre>(1 − 0.000087)^1000 ≈ 91.7%\ntime = 1000 × 17 ns = 17 μs</pre><p>This is not a prediction for an algorithm or future device. Real fault-tolerant behavior depends on single-qubit gates, readout, idling, correlated noise, calibration, fabrication variation, error-correcting codes, and syndrome cycles. The calculation exposes the scale lesson: a striking component metric still has to compose across a system.</p>",
+    "goal": "A quantum component can be designed to store information well or interact quickly.",
+    "concept": "<p>A quantum component can be designed to store information well or interact quickly. Doing both in one mode creates a difficult tradeoff.</p><p>The arm-qubit research separates a storage-oriented mode from an interaction-oriented mode. The original lesson reports simulation results, not a fabricated device. A fast, accurate simulated gate is promising, but many gates must work together in a useful system.</p>",
+    "example": "<p>Using the paper’s simulated infidelity only as an input, the toy assumes independent failures across 1,000 gates. It calculates about 91.7% probability of no modeled gate failure and 17 microseconds of gate time. Those are not algorithm-success predictions.</p>",
     "practice": "Predict how 100, 1,000, and 10,000 gates change time and the toy no-failure probability. Then double the infidelity and explain why experimental noise structure matters more than this independent-error curve.",
     "boundary": "An independent, identical per-gate failure calculation using a user-adjustable value whose default matches one simulated CZ point in the paper. It does not represent a fabricated arm qubit, quantum state evolution, error correction, logical gates, correlated or coherent errors, readout, idling, leakage, calibration, yield, or algorithm success.",
     "sim": "<label>Entangling gates <input id=\"gateCount\" type=\"range\" min=\"100\" max=\"10000\" step=\"100\" value=\"1000\"></label><label>Gate time (ns) <input id=\"gateNs\" type=\"range\" min=\"10\" max=\"100\" step=\"1\" value=\"17\"></label><label>Infidelity per gate (×10⁻⁵) <input id=\"infidelity\" type=\"range\" min=\"1\" max=\"50\" step=\"0.1\" value=\"8.7\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
     "js": "const show=()=>{const n=+gateCount.value,t=+gateNs.value,p=+infidelity.value/100000,zero=100*Math.pow(1-p,n),expected=n*p;world.textContent='Toy sequence: '+n.toLocaleString()+' identical entangling gates\\nTotal gate time: '+(n*t/1000).toFixed(1)+' μs\\nExpected failures (independent toy): '+expected.toFixed(3)+'\\nProbability of zero modeled failures: '+zero.toFixed(1)+'%\\n\\nDefault gate time and infidelity are paper simulations, not measurements of fabricated hardware.'};[gateCount,gateNs,infidelity].forEach(e=>e.oninput=show);show();",
     "questions": [
-      ["What architectural job does the arm mode perform?", ["Long-term data storage only", "Strong interaction and readout while the data mode stores information", "Classical error correction"], 1, "The design separates the storage and coupling roles into two connected modes."],
-      ["Why is the September result not yet hardware proof?", ["The reported performance is from simulations and fabrication is a next step", "Physical Review Applied does not publish quantum work", "Controlled-Z gates are classical"], 0, "The authors explicitly identify fabrication and experimental study as future work."],
-      ["Why can the toy no-failure probability mislead?", ["Quantum errors can be correlated, coherent, corrected, and distributed across many operation types", "Multiplication cannot be used with probabilities", "Gate time never matters"], 0, "Independent identical failures omit the structure that governs real logical performance." ]
+      [
+        "What architectural job does the arm mode perform?",
+        [
+          "Long-term data storage only",
+          "Strong interaction and readout while the data mode stores information",
+          "Classical error correction"
+        ],
+        1,
+        "The design separates the storage and coupling roles into two connected modes."
+      ],
+      [
+        "Why is the September result not yet hardware proof?",
+        [
+          "The reported performance is from simulations and fabrication is a next step",
+          "Physical Review Applied does not publish quantum work",
+          "Controlled-Z gates are classical"
+        ],
+        0,
+        "The authors explicitly identify fabrication and experimental study as future work."
+      ],
+      [
+        "Why can the toy no-failure probability mislead?",
+        [
+          "Quantum errors can be correlated, coherent, corrected, and distributed across many operation types",
+          "Multiplication cannot be used with probabilities",
+          "Gate time never matters"
+        ],
+        0,
+        "Independent identical failures omit the structure that governs real logical performance."
+      ]
     ],
     "sources": [
-      ["Physical Review Applied: The arm qubit—A superconducting qubit co-designed for coherence and coupling", "https://journals.aps.org/prapplied/abstract/10.1103/3l3b-7jsm", "Published 2026-09-02"],
-      ["MIT News: New qubit architecture enables faster, more accurate operations", "https://news.mit.edu/2026/new-qubit-architecture-enables-faster-more-accurate-operations-0903", "Published 2026-09-03"]
-    ]
+      [
+        "Physical Review Applied: The arm qubit—A superconducting qubit co-designed for coherence and coupling",
+        "https://journals.aps.org/prapplied/abstract/10.1103/3l3b-7jsm",
+        "Published 2026-09-02"
+      ],
+      [
+        "MIT News: New qubit architecture enables faster, more accurate operations",
+        "https://news.mit.edu/2026/new-qubit-architecture-enables-faster-more-accurate-operations-0903",
+        "Published 2026-09-03"
+      ]
+    ],
+    "advanced_detail": "<p>A superconducting qubit faces a systems tradeoff. Strongly connecting the information-bearing element makes gates and readout faster, but those same connections can open paths for noise and decoherence. The “arm qubit” architecture co-designs two strongly coupled modes: a data mode optimized for storage and an arm mode optimized for interaction.</p><p>The researchers use a quarton coupler to provide strong nonlinear coupling while suppressing unwanted linear mixing. Their peer-reviewed paper reports simulations—not a fabricated device—of a 17 ns microwave-only controlled-Z gate with infidelity <code>8.7 × 10⁻⁵</code>, plus fast readout and low idle interaction. MIT's September 3 coverage says fabrication and experimental validation are the next steps.</p><h3>Original detailed example</h3><p><strong>Evidence-aware worked example:</strong> Suppose, only for teaching, that independent gate failures occur at the paper's simulated CZ infidelity. For 1,000 identical gates, the probability of zero modeled gate failures is:</p><pre>(1 − 0.000087)^1000 ≈ 91.7%\ntime = 1000 × 17 ns = 17 μs</pre><p>This is not a prediction for an algorithm or future device. Real fault-tolerant behavior depends on single-qubit gates, readout, idling, correlated noise, calibration, fabrication variation, error-correcting codes, and syndrome cycles. The calculation exposes the scale lesson: a striking component metric still has to compose across a system.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "failure_per_gate = 0.000087; gate_count = 1000",
+          "note": "Use the lesson’s reported simulation input."
+        },
+        {
+          "code": "success_per_gate = 1 - failure_per_gate",
+          "note": "Convert failure probability to success probability."
+        },
+        {
+          "code": "all_success = success_per_gate ** gate_count",
+          "note": "Independence lets the probabilities multiply in this toy."
+        },
+        {
+          "code": "time_ns = gate_count * 17",
+          "note": "Add the simulated per-gate duration."
+        },
+        {
+          "code": "time_us = time_ns / 1000",
+          "note": "Convert 17,000 nanoseconds to 17 microseconds."
+        }
+      ],
+      "limit": "The independence assumption omits correlated noise, readout, calibration, error correction, and fabrication. This arithmetic cannot validate the device or a complete quantum algorithm.",
+      "expect": {
+        "time_us": 17
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "failure_per_gate": 8.7e-05,
+            "gate_count": 1000
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "failure_per_gate": 8.7e-05,
+            "gate_count": 1000,
+            "success_per_gate": 0.999913
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "failure_per_gate": 8.7e-05,
+            "gate_count": 1000,
+            "success_per_gate": 0.999913,
+            "all_success": 0.9166736262740719
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "failure_per_gate": 8.7e-05,
+            "gate_count": 1000,
+            "success_per_gate": 0.999913,
+            "all_success": 0.9166736262740719,
+            "time_ns": 17000
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "failure_per_gate": 8.7e-05,
+            "gate_count": 1000,
+            "success_per_gate": 0.999913,
+            "all_success": 0.9166736262740719,
+            "time_ns": 17000,
+            "time_us": 17.0
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-27"
   }
 ]

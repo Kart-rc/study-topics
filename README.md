@@ -1,18 +1,18 @@
 # Engineering field notes
 
-Five 15-minute lessons per day for an experienced data/platform engineering leader: data engineering, software engineering, Distinguished Engineer judgment, GenAI engineering, and technology breakthroughs.
+From Day11: seven 15-minute lessons per day for an experienced data/platform engineering leader: data engineering, software engineering, Distinguished Engineer judgment, GenAI engineering, technology breakthroughs, CI/CD & GitHub Actions, and APIs & Microservices. Days 1–10 contain the original five tracks.
 
 ## Read
 
 Download or clone this repository and open `index.html` in a browser. Choose a Day folder, then a lesson. GitHub's file view displays HTML source; download the repository ZIP from **Code → Download ZIP** to use the interactions locally. No build, API key, account, or external JavaScript is needed to read a lesson.
 
-Each lesson includes 2 minutes of recall, 4 minutes of explanation and worked example, 5 minutes of interactive exploration, and 4 minutes of assessment. Total daily study time is 75 minutes. Sources have dates and a checked date. Established foundations are labeled separately from new research.
+Each lesson includes 2 minutes of recall, 4 minutes of explanation and worked example, 5 minutes of interactive exploration, and 4 minutes of assessment. Total daily study time is 105 minutes from Day11; Days 1–10 remain 75 minutes. Sources have dates and a checked date. Established foundations are labeled separately from new research.
 
 ## Daily generation
 
 A ChatGPT automation runs at **6:50 PM America/New_York**, including daylight-saving changes. It researches and commits the next complete `DayN` bundle. The schedule starts generation; browsing and validation take additional time. This repository does not run an LLM or contain API credentials. `study-state.json` records the automation ID and generated bundles. `DAILY_TASK.md` contains the execution contract.
 
-Day numbers count generated bundles, not completed study sessions. There is at most one new bundle per New York calendar date. Retries repair or reuse that day's bundle. Missing dates do not create empty folders or a multi-day catch-up backlog. Commit the five lessons and updated state together.
+Day numbers count generated bundles, not completed study sessions. There is at most one new bundle per New York calendar date. Retries repair or reuse that day's bundle. Missing dates do not create empty folders or a multi-day catch-up backlog. Commit the complete day-specific lesson set and updated state together.
 
 ## Recall and feedback
 
@@ -26,19 +26,24 @@ This is a public repository. Keep personal assessment answers and confidential w
 
 The [Browser smoke workflow](.github/workflows/browser-smoke.yml) runs on pull
 requests, pushes to `main`, and manual dispatch. It selects the highest numeric
-`DayN` directory, checks that its five lessons are complete, and runs its existing
+`DayN` directory, checks its lessons against the effective `study-state.json.track_changes` policy
+(five tracks through Day10, seven from Day11), including Markdown companions, and runs its existing
 `verify.cjs` when present. A partial newest bundle fails instead of silently
 testing an older day.
 
 Playwright then opens every HTML page in that bundle and tests root-to-day
 navigation in headless Chromium at desktop (1280×800) and mobile (390×844)
 viewports. It checks JavaScript/console errors, failed local resources, local
-links and fragments, horizontal overflow, disclosures, model controls, quiz
+links and fragments, horizontal overflow, disclosures, model controls (including select menus), code replay steps/back/reset, quiz
 gating and scoring, persistence after reload, and real JSON downloads including
-attempt history. Day7 also has explicit browser assertions for its model
+attempt history. Day7 and Day14 also have explicit browser assertions for their model
 boundaries; future bundles retain generic interaction tests and their own
 `verify.cjs` checks. New model-specific browser assertions belong in
 `tests/browser/smoke.spec.cjs`, not in lesson content.
+
+Dependency-free regression tests cover the Day10/Day11 policy transition and reject
+missing tracks, duplicate slugs, absent Markdown, invalid keys, and inconsistent
+manifests. They run before the selected day's model checks.
 
 Run locally with Node.js 22+ and Python 3:
 
@@ -82,3 +87,24 @@ what was observed when written and are not rewritten by CI.
 To rebuild a reviewed bundle: `python3 scripts/render.py Day1`. New content requires researched lesson data; the renderer is not a content generator. Model simplifications appear inside each lesson.
 
 The lesson approach draws on the [Geoffrey Litt skillpack](https://github.com/Kart-rc/nlah-agent-repo/tree/main/harness/skillpacks/geoffreylitt): intuition before code, small executable worlds, and comprehension checks. The user explicitly requested retaining these learning artifacts. Quiz completion does not block the approved daily generation schedule.
+
+## Follow the code (Days 1–10)
+
+Each lesson now has a short code walkthrough with **Run next step**, **Previous step**, and **Start again**. The highlighted statement and changed values show what happened. Python and Java examples were executed to capture these records; the browser replays them. The separate interactive lab still lets you change inputs. Day10’s outbox example also executes a real SQLite transaction locally during trace generation.
+
+Core study time remains 15 minutes per lesson. Original technical detail is available in optional expanded sections. All original topics, scored quizzes, source links, and study/review history remain intact.
+
+- `DayN/examples/`: full runnable Python or Java teaching examples. Python uses only its standard library; Java examples use Java 17 here and require a source-launch-capable JDK to run.
+- Regenerate execution records: `python3 scripts/walkthrough.py` (Python plus Java required; set `STUDY_JAVA` only if Java is not on PATH).
+- Re-render a day: `python3 scripts/render.py Day10` (no Java or browser needed to render stored traces).
+- Verify all replay controls and common lesson behavior: `node scripts/verify-walkthroughs.cjs`.
+- Run the existing day-specific checks with `node DayN/verify.cjs` for Days 2–10. Day1 model checks are included in the shared verification script.
+
+See [TEACHING_UPDATE.md](TEACHING_UPDATE.md) for the revision scope and actual validation limits.
+
+## New tracks from Day11
+
+- **CI/CD & GitHub Actions:** one focused daily lesson on building, testing, securing, releasing, or operating delivery pipelines.
+- **APIs & Microservices:** one focused daily lesson on REST/OpenAPI, API evolution, GraphQL, gRPC, service architecture, security, resilience, testing, or observability.
+
+Both use the same plain explanations, visuals, code walkthroughs, and quizzes. Seven lessons × 15 minutes = 105 minutes. The daily generation time remains 6:50 PM America/New_York. Spaced review for each new track begins with its first delivered lesson.

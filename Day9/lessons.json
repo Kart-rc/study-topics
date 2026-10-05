@@ -1,0 +1,770 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Kafka's consumer protocol: reassign incrementally, not behind a global barrier",
+    "tag": "Current development · KIP-848 GA in Apache Kafka 4.0",
+    "goal": "One consumer restarts.",
+    "concept": "<p>One consumer restarts. Should every partition stop while ownership is reorganized, or can the unaffected partitions keep moving?</p><p>Kafka’s newer consumer protocol moves group coordination toward broker-managed incremental assignment. The important idea is smaller disruption: transfer the ownership that must change while other work continues. This does not mean no pauses or that every older assignor always stops everything.</p>",
+    "example": "<p>Our deliberately contrasting models use 24 partitions and a two-second pause. Stopping all partitions costs 48 partition-seconds. Moving only one consumer’s four partitions costs eight. These are exposure comparisons, not Kafka latency predictions.</p>",
+    "practice": "Choose group size, partitions per member, affected members, and warm-up time. Predict the partition-seconds exposed under a group-wide barrier and an incremental handoff, then explain which remaining bottleneck the protocol cannot remove.",
+    "boundary": "A disruption-area calculator, not a Kafka simulator. It assumes evenly assigned partitions, a single fixed warm-up interval, and no overlapping failures. It omits assignor details, cooperative ownership transfer, heartbeats, poll timeouts, static membership, rack awareness, broker failover, state stores, skew, and client-version constraints. Lower modeled exposure does not guarantee a lag-free migration.",
+    "sim": "<label>Consumers <input id=\"members\" type=\"range\" min=\"2\" max=\"20\" step=\"1\" value=\"6\"></label><label>Partitions per consumer <input id=\"perMember\" type=\"range\" min=\"1\" max=\"12\" step=\"1\" value=\"4\"></label><label>Affected consumers <input id=\"affected\" type=\"range\" min=\"1\" max=\"6\" step=\"1\" value=\"1\"></label><label>Revoke + warm-up time (s) <input id=\"warmup\" type=\"range\" min=\"1\" max=\"30\" step=\"1\" value=\"2\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const m=+members.value,p=+perMember.value,a=Math.min(+affected.value,m),w=+warmup.value,total=m*p,moved=a*p;affected.max=m;if(+affected.value>m)affected.value=m;const barrier=total*w,incremental=moved*w;world.textContent='Group: '+m+' consumers / '+total+' partitions\\nAffected ownership: '+moved+' partitions\\n\\nGroup-wide barrier exposure: '+barrier+' partition-seconds\\nIncremental handoff exposure: '+incremental+' partition-seconds\\nToy reduction: '+((1-incremental/barrier)*100).toFixed(0)+'%\\n\\nUnaffected partitions keep working only if clients, broker, assignment, and workload behave as expected.'};[members,perMember,affected,warmup].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "One member changes in a large group. What is the core advantage of incremental reconciliation?",
+        [
+          "Every partition is revoked faster",
+          "Partitions whose ownership is unchanged can continue processing",
+          "Heartbeats are no longer required"
+        ],
+        1,
+        "The protocol narrows disruption to ownership that must move instead of imposing a group-wide synchronization barrier."
+      ],
+      [
+        "What changes when a client selects group.protocol=consumer?",
+        [
+          "The broker controls heartbeat/session timing and supported assignment behavior",
+          "Kafka becomes exactly-once for every sink",
+          "Consumer lag can no longer occur"
+        ],
+        0,
+        "KIP-848 moves key coordination policy server-side; it does not change end-to-end delivery semantics."
+      ],
+      [
+        "Which measurement best tests the model's boundary during rollout?",
+        [
+          "Only average records per second",
+          "Per-partition processing pauses and convergence time across client versions",
+          "Only the number of topics"
+        ],
+        1,
+        "An average can hide long pauses on the small subset of partitions that actually move."
+      ]
+    ],
+    "sources": [
+      [
+        "Apache Kafka 4.1 documentation: Consumer Rebalance Protocol",
+        "https://kafka.apache.org/41/operations/consumer-rebalance-protocol/",
+        "Living versioned documentation; page last modified 2025-12-19"
+      ],
+      [
+        "Apache Kafka 4.0.0 release announcement",
+        "https://kafka.apache.org/blog/2025/03/18/apache-kafka-4.0.0-release-announcement/",
+        "Published 2025-03-18"
+      ],
+      [
+        "KIP-848: The Next Generation of the Consumer Rebalance Protocol",
+        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol",
+        "Accepted Apache Kafka improvement proposal; living design page"
+      ]
+    ],
+    "advanced_detail": "<p>The classic Kafka consumer group protocol coordinates membership and assignment through a client leader. A membership change can force a synchronized rebalance: consumers revoke partitions, assignment is recomputed, and useful work pauses while the group converges. KIP-848 moves coordination and assignment into the broker and makes reconciliation incremental. Each member can continue processing partitions that are not moving while only the affected ownership changes.</p><p>The new <code>consumer</code> protocol is generally available from Kafka 4.0 and is enabled client-side with <code>group.protocol=consumer</code>. The broker now controls heartbeat and session timing, and the server chooses supported assignors. Several familiar client settings no longer apply. That is an operational contract change, not just a faster implementation.</p><p><strong>Leadership implication:</strong> model the unit of disruption. Global barriers couple one slow or restarting member to the entire group; incremental reconciliation narrows the blast radius. But warm caches, state transfer, revoked partitions, broker capacity, client compatibility, and bad deployment waves can still create lag. Measure per-partition pause and convergence, not only average group throughput.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> A 24-partition group has six consumers, four partitions each. One member restarts. Suppose revoking and warming each moved partition costs 2 seconds. A barrier-style toy pauses all 24 partitions for the 2-second convergence window: 48 partition-seconds of unavailable processing. An incremental toy moves only the restarting member's four partitions: 8 partition-seconds.</p><pre>barrier exposure = 24 partitions × 2 s = 48 partition-seconds\nincremental exposure = 4 partitions × 2 s = 8 partition-seconds</pre><p>This is not a Kafka latency formula. It isolates the coordination effect. In a real group, assignment strategy, cooperative handoff, state restoration, poll behavior, heartbeats, static membership, and broker load determine what users see.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "partitions = 24; moved = 4; pause_seconds = 2",
+          "note": "Define the two contrasting coordination scopes."
+        },
+        {
+          "code": "barrier_exposure = partitions * pause_seconds",
+          "note": "A full-group barrier costs 48 partition-seconds."
+        },
+        {
+          "code": "incremental_exposure = moved * pause_seconds",
+          "note": "The affected subset costs eight partition-seconds."
+        },
+        {
+          "code": "unaffected = partitions - moved",
+          "note": "Twenty partitions can keep processing in the toy."
+        },
+        {
+          "code": "reduction_percent = 100 * (barrier_exposure - incremental_exposure) / barrier_exposure",
+          "note": "The arithmetic isolates scope, not actual speed."
+        }
+      ],
+      "limit": "The barrier comparison is not a claim about every classic Kafka group or cooperative assignor. Real migration requires checking client/broker settings, supported assignors, warm-up, and per-partition behavior.",
+      "expect": {
+        "barrier_exposure": 48,
+        "incremental_exposure": 8
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "partitions": 24,
+            "moved": 4,
+            "pause_seconds": 2
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "partitions": 24,
+            "moved": 4,
+            "pause_seconds": 2,
+            "barrier_exposure": 48
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "partitions": 24,
+            "moved": 4,
+            "pause_seconds": 2,
+            "barrier_exposure": 48,
+            "incremental_exposure": 8
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "partitions": 24,
+            "moved": 4,
+            "pause_seconds": 2,
+            "barrier_exposure": 48,
+            "incremental_exposure": 8,
+            "unaffected": 20
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "partitions": 24,
+            "moved": 4,
+            "pause_seconds": 2,
+            "barrier_exposure": 48,
+            "incremental_exposure": 8,
+            "unaffected": 20,
+            "reduction_percent": 83.33333333333333
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-29"
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Merkle trees: localize replica drift before repairing it",
+    "tag": "Distributed-systems foundation · Amazon Dynamo paper (2007)",
+    "goal": "Two replicas should hold the same data.",
+    "concept": "<p>Two replicas should hold the same data. Reading and comparing every value is expensive when only a small part differs.</p><p>A Merkle tree combines data fingerprints into larger fingerprints. Compare the roots first. If they differ, compare child fingerprints and follow the branches that differ. Matching fingerprints let you skip unchanged ranges, under the hash and encoding assumptions.</p>",
+    "example": "<p>The left half contains A and B in both replicas. The right half contains C and D in one, C and X in the other. The root differs, the left child matches, and the right child identifies where to investigate. Finding the difference is separate from deciding how to repair it.</p>",
+    "practice": "Vary the number of leaf buckets and divergent buckets. Predict when hierarchical comparison is dramatically cheaper and when it approaches a full tree walk. Then name the separate rule that decides which version wins.",
+    "boundary": "A balanced binary-tree upper-bound model with evenly distributed, non-overlapping divergent paths. Real Merkle implementations share internal paths, choose branching factors and range boundaries differently, cache hashes, and pay serialization and disk costs. Hash equality is probabilistic and depends on canonical input. The model does not resolve conflicts, preserve tombstones, move partitions, or schedule repair traffic.",
+    "sim": "<label>Leaf buckets (power of two) <select id=\"leaves\"><option>16</option><option>64</option><option selected>1024</option><option>4096</option></select></label><label>Divergent leaf buckets <input id=\"divergent\" type=\"range\" min=\"1\" max=\"64\" step=\"1\" value=\"1\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const n=+leaves.value,k=Math.min(+divergent.value,n),depth=Math.log2(n),tree=2*n-1,upper=Math.min(tree,1+2*k*depth);divergent.max=Math.min(n,64);if(+divergent.value>n)divergent.value=n;world.textContent='Balanced tree depth: '+depth+'\\nFull value-bucket comparison: '+n+' buckets\\nWhole tree size: '+tree+' hash nodes\\nToy hierarchical upper bound: '+upper+' hash nodes\\nReduction versus value buckets: '+Math.max(0,(1-upper/n)*100).toFixed(1)+'%\\n\\nHash comparison locates candidate ranges; version semantics decide repair.'};[leaves,divergent].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Two replicas have equal Merkle roots built from the same canonical range. What is the useful inference?",
+        [
+          "Their summarized contents match with the assurance of the hash",
+          "Every historical write arrived in the same order",
+          "No future repair is ever needed"
+        ],
+        0,
+        "The root summarizes current canonical contents; it says nothing about history or future drift."
+      ],
+      [
+        "Why does a Merkle tree help most when divergence is sparse?",
+        [
+          "Comparison descends only through branches whose hashes differ",
+          "It eliminates disk I/O in every implementation",
+          "It makes network partitions impossible"
+        ],
+        0,
+        "Shared equal subtrees are pruned from the comparison."
+      ],
+      [
+        "What critical decision is outside the tree?",
+        [
+          "Whether two ranges appear different",
+          "Which conflicting version or tombstone should win during repair",
+          "How many levels a balanced tree has"
+        ],
+        1,
+        "Hashes localize differences; application and storage semantics govern reconciliation."
+      ]
+    ],
+    "sources": [
+      [
+        "Amazon Science: Dynamo—Amazon's Highly Available Key-value Store",
+        "https://www.amazon.science/publications/dynamo-amazons-highly-available-key-value-store",
+        "Published at ACM SOSP 2007"
+      ],
+      [
+        "ACM Digital Library: Dynamo—Amazon's Highly Available Key-value Store",
+        "https://dl.acm.org/doi/10.1145/1294261.1294281",
+        "Published 2007-10-14"
+      ],
+      [
+        "RFC 9162: Certificate Transparency Version 2, Merkle Tree Hash",
+        "https://www.rfc-editor.org/rfc/rfc9162.html#name-merkle-tree-hash",
+        "Published 2021-12; formal tree-hash construction"
+      ]
+    ],
+    "advanced_detail": "<p>Anti-entropy asks a deceptively expensive question: which parts of two replicas differ? Comparing every key and value proves the answer, but it consumes I/O and network even when almost everything matches. A Merkle tree summarizes buckets of data at the leaves, then hashes pairs of child hashes upward to one root. Equal roots mean the summarized contents match under the chosen hash and canonical encoding. Unequal roots tell you to descend only into different branches.</p><p>Dynamo used separate Merkle trees for key ranges so replicas could exchange roots, isolate out-of-sync ranges, and transfer only the affected keys. The leverage comes from sparsity: one divergent bucket in 1,024 leaves needs comparison along roughly one logarithmic path rather than inspection of all 1,024 value buckets.</p><p>The tree is evidence, not reconciliation. You still need canonical serialization, a stable range map, collision-resistant hashing, version/conflict semantics, tombstone retention, and a repair rate that does not overload production. If partition ownership changes, trees may need rebuilding because their leaf boundaries changed.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> Two replicas each summarize 1,024 leaf buckets in a balanced binary tree. Exactly one leaf differs. Compare the root, then the two child hashes at each of ten levels. A simple upper bound is about 21 hash comparisons instead of reading 1,024 value buckets.</p><pre>depth = log2(1024) = 10\none divergent path ≈ 1 + 2 × 10 = 21 hash nodes</pre><p>With many scattered differences, paths overlap at the top but fan out below. Eventually the comparison can approach the whole tree. At that point a full-range scan or rebuild may be cheaper, so production anti-entropy needs a policy threshold rather than assuming the tree always wins.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "String leftA = hash(\"A|B\");",
+          "note": "Fingerprint the first replica’s left half."
+        },
+        {
+          "code": "String leftB = hash(\"A|B\");",
+          "note": "The second replica has the same left data."
+        },
+        {
+          "code": "String rightA = hash(\"C|D\");",
+          "note": "The first replica has D in its right half."
+        },
+        {
+          "code": "String rightB = hash(\"C|X\");",
+          "note": "The second replica differs at X."
+        },
+        {
+          "code": "boolean rootsMatch = hash(leftA + rightA).equals(hash(leftB + rightB));",
+          "note": "The overall fingerprints differ."
+        },
+        {
+          "code": "boolean skipLeft = leftA.equals(leftB);",
+          "note": "The matching left branch can be skipped."
+        },
+        {
+          "code": "String inspectNext = rightA.equals(rightB) ? \"none\" : \"right branch\";",
+          "note": "The mismatch points to the right branch."
+        }
+      ],
+      "limit": "The full example file defines hash with SHA-256. Fixed synthetic strings use a simple encoding; real trees need unambiguous serialization, stable ranges, and deletion/version semantics. Hash agreement is not a conflict-resolution policy.",
+      "expect": {
+        "rootsMatch": "false",
+        "skipLeft": "true",
+        "inspectNext": "right branch"
+      },
+      "language": "java",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "leftA": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "leftA": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "leftB": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "leftA": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "leftB": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "rightA": "f5512816b9398385b9b39fee4135e23373d773efd1b519947bcc831af6738ac2"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "leftA": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "leftB": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "rightA": "f5512816b9398385b9b39fee4135e23373d773efd1b519947bcc831af6738ac2",
+            "rightB": "405cf0c42090c009c2e27598633cec8cd1542eeefa840692a63ecc3e4bb6e9cc"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "leftA": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "leftB": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "rightA": "f5512816b9398385b9b39fee4135e23373d773efd1b519947bcc831af6738ac2",
+            "rightB": "405cf0c42090c009c2e27598633cec8cd1542eeefa840692a63ecc3e4bb6e9cc",
+            "rootsMatch": "false"
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "leftA": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "leftB": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "rightA": "f5512816b9398385b9b39fee4135e23373d773efd1b519947bcc831af6738ac2",
+            "rightB": "405cf0c42090c009c2e27598633cec8cd1542eeefa840692a63ecc3e4bb6e9cc",
+            "rootsMatch": "false",
+            "skipLeft": "true"
+          }
+        },
+        {
+          "step": 6,
+          "state": {
+            "leftA": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "leftB": "cfb6e8834699f9737eb031728d563a451274f04eab5efd8b7d1bdd2a6b82ba00",
+            "rightA": "f5512816b9398385b9b39fee4135e23373d773efd1b519947bcc831af6738ac2",
+            "rightB": "405cf0c42090c009c2e27598633cec8cd1542eeefa840692a63ecc3e4bb6e9cc",
+            "rootsMatch": "false",
+            "skipLeft": "true",
+            "inspectNext": "right branch"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-29"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Rollback safety: old code must survive new state",
+    "tag": "Operational architecture · AWS Builders' Library",
+    "goal": "A deployment tool restores yesterday’s code.",
+    "concept": "<p>A deployment tool restores yesterday’s code. The service still fails because today’s records no longer contain the field yesterday’s code expects.</p><p>Rollback changes code; it does not automatically reverse stored data. Expand compatibility first, move writers carefully, and remove old representations only when they are no longer needed. Test old readers against new records before calling rollback safe.</p>",
+    "example": "<p>Version 1 reads full_name. Version 2 adds given_name and family_name. Keeping full_name lets V1 still read the record. Removing it makes the same rollback fail even though the old binary starts successfully.</p>",
+    "practice": "Move through migration phases, change the fraction of records touched by new writers, and toggle dual-write and backfill. Predict old-reader success after rollback and identify the first irreversible contract step.",
+    "boundary": "A synthetic record-compatibility model. It assumes 1,000 independent records, a single old required field, and complete success for dual-write or backfill. Real systems have partial failures, replicas, caches, transactions, event history, schema registries, mixed binaries, long-lived clients, and side effects. A 100% toy read rate does not prove semantic equivalence or safe operational rollback.",
+    "sim": "<label>Records touched by new writers (%) <input id=\"newPct\" type=\"range\" min=\"0\" max=\"100\" step=\"5\" value=\"40\"></label><label><input id=\"dualWrite\" type=\"checkbox\" checked> New writers preserve full_name</label><label><input id=\"backfilled\" type=\"checkbox\"> Backfill restored full_name on new-form records</label><label><input id=\"oldReaderTolerant\" type=\"checkbox\"> Old reader tolerates split-name form</label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const p=+newPct.value;const safe=dualWrite.checked||backfilled.checked||oldReaderTolerant.checked;const readable=safe?100:100-p;world.textContent='Synthetic records: 1,000\\nTouched by new writers: '+(p*10)+'\\nOld-reader success after rollback: '+readable.toFixed(0)+'%\\nRollback verdict: '+(readable===100?'STATE-COMPATIBLE IN THIS TOY':'UNSAFE — '+(p*10)+' records use only the new form')+'\\n\\nExpand readers first; contract the old form only after rollback targets no longer depend on it.'};[newPct,dualWrite,backfilled,oldReaderTolerant].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Why can a successful binary rollback still fail?",
+        [
+          "New code may already have written durable state the old code cannot read",
+          "Rollback always deletes monitoring",
+          "Old binaries cannot start twice"
+        ],
+        0,
+        "Deployment state and durable data evolve on different timelines."
+      ],
+      [
+        "What is the safe forward order for a format change?",
+        [
+          "Contract old fields, then update readers",
+          "Deploy compatible readers, then writers, migrate, and contract last",
+          "Deploy writers and readers in one untested wave"
+        ],
+        1,
+        "Readers must understand a form before writers can safely produce it."
+      ],
+      [
+        "When should leaders consider a forward fix instead of rollback?",
+        [
+          "Whenever a dashboard is green",
+          "After an incompatible or destructive state transition makes the old version unsafe",
+          "Only when source control is unavailable"
+        ],
+        1,
+        "Past the compatibility boundary, restoring old binaries can compound failure."
+      ]
+    ],
+    "sources": [
+      [
+        "AWS Builders' Library: Ensuring rollback safety during deployments",
+        "https://builder.aws.com/content/3F04j2yRAAMBuPSPs50xwXZqg01/ensuring-rollback-safety-during-deployments",
+        "AWS Builders' Library article; publication date not stated on page"
+      ],
+      [
+        "AWS Builders' Library PDF: Ensuring rollback safety during deployments",
+        "https://d1.awsstatic.com/builderslibrary/pdfs/ensuring-rollback-safety-during-deployments.pdf",
+        "AWS primary-source PDF; retrieved 2026-09-29"
+      ],
+      [
+        "AWS Well-Architected Reliability Pillar: automated change management",
+        "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_tracking_change_management_automated_changemgmt.html",
+        "Living AWS documentation; publication date not stated"
+      ]
+    ],
+    "advanced_detail": "<p>A deployment rollback replaces new code with old code; it does not rewind databases, messages, object formats, caches, or external side effects. If new writers emit a field, enum, schema, or protocol that old readers cannot understand, the rollback can deepen the outage. The real invariant is bidirectional compatibility across the overlap window.</p><p>The robust sequence is expand, migrate, contract. First deploy readers that tolerate both old and new forms. Next introduce writers that preserve the old representation or dual-write while migration runs. Observe and backfill. Only after every rollback target can consume the remaining state do you remove the old representation. AWS describes the complementary ordering as readers before writers on the way forward and writers before readers when rolling back.</p><p>At Distinguished Engineer scope, rollback readiness is an architectural property: define the supported version matrix, preserve rollback artifacts, test upgrade-downgrade paths with production-shaped data, and decide when a forward fix is safer because a destructive contract step has crossed the point of no return.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> Version 1 reads <code>full_name</code>. Version 2 introduces <code>given_name</code> and <code>family_name</code>. During expansion, V2 readers accept both and V2 writers dual-write all three fields. If 40% of records are written by V2 and you roll back, V1 still reads 100% because <code>full_name</code> remains. If V2 stops writing <code>full_name</code> before backfill and contract readiness, those new records become unreadable to V1.</p><pre>safe rollback = old reader still understands every durable form\nunsafe rollback = binary restored, state compatibility lost</pre><p>The same pattern applies to Kafka event schemas, protobuf enums, checkpoint formats, feature flags, and IAM policy shape. “The deploy tool can roll back” is not evidence that the system can.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "record = {\"full_name\": \"Maya Rao\"}",
+          "note": "The old reader has the field it expects."
+        },
+        {
+          "code": "record.update({\"given_name\": \"Maya\", \"family_name\": \"Rao\"})",
+          "note": "The expanded record keeps both representations."
+        },
+        {
+          "code": "old_read = record.get(\"full_name\", \"ERROR\")",
+          "note": "Rollback can still read this record."
+        },
+        {
+          "code": "record.pop(\"full_name\")",
+          "note": "The contract step removes the old representation."
+        },
+        {
+          "code": "old_read_after_contract = record.get(\"full_name\", \"ERROR\")",
+          "note": "The old reader now fails despite a code rollback."
+        }
+      ],
+      "limit": "This one-record example omits partial migrations, concurrent writers, and semantic differences between formats. A production rollback plan needs a compatibility matrix and a recovery path after destructive changes.",
+      "expect": {
+        "old_read": "Maya Rao",
+        "old_read_after_contract": "ERROR"
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "record": {
+              "full_name": "Maya Rao"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "record": {
+              "full_name": "Maya Rao",
+              "given_name": "Maya",
+              "family_name": "Rao"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "record": {
+              "full_name": "Maya Rao",
+              "given_name": "Maya",
+              "family_name": "Rao"
+            },
+            "old_read": "Maya Rao"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "record": {
+              "given_name": "Maya",
+              "family_name": "Rao"
+            },
+            "old_read": "Maya Rao"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "record": {
+              "given_name": "Maya",
+              "family_name": "Rao"
+            },
+            "old_read": "Maya Rao",
+            "old_read_after_contract": "ERROR"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-29"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Eval leakage: keep a set the prompt never studied",
+    "tag": "Harness engineering · eval-driven development",
+    "goal": "A prompt improves on every example the team has studied.",
+    "concept": "<p>A prompt improves on every example the team has studied. That does not prove it improved on new requests.</p><p>A development set is for finding and fixing problems. A holdout is a separate set kept out of that tuning loop until a decision point. Once its failures shape the design, it is no longer untouched evidence. You still need production monitoring for new kinds of failure.</p>",
+    "example": "<p>The toy starts with 35 passes out of 50 development cases. Ten iterations fix two remembered cases each, reaching 50. If none of those fixes generalize, a separate 200-case holdout still has 140 passes, or 70%.</p>",
+    "practice": "Change dev-set size, iterations, and targeted fixes per iteration. Predict the visible dev score and the untouched deployment score. Then turn on holdout peeking and explain why the displayed holdout can inflate without real generalization.",
+    "boundary": "A deterministic case-memorization model, not an LLM learning curve. It assumes targeted fixes never generalize and baseline performance is identical across representative sets. Real changes may generalize positively or regress other cases; sampling error, nondeterminism, grader error, correlated examples, and production drift matter. Holdout discipline does not replace safety tests for rare or adversarial behavior.",
+    "sim": "<label>Development cases <input id=\"devCases\" type=\"range\" min=\"20\" max=\"200\" step=\"10\" value=\"50\"></label><label>Prompt/tool iterations <input id=\"iterations\" type=\"range\" min=\"0\" max=\"20\" step=\"1\" value=\"10\"></label><label>Targeted dev fixes per iteration <input id=\"fixes\" type=\"range\" min=\"0\" max=\"5\" step=\"1\" value=\"2\"></label><label><input id=\"peekHoldout\" type=\"checkbox\"> Repeatedly inspect and tune to holdout failures</label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const n=+devCases.value,it=+iterations.value,f=+fixes.value,base=.7,basePass=Math.floor(n*base),devPass=Math.min(n,basePass+it*f),dev=100*devPass/n;const visibleHoldout=peekHoldout.checked?Math.min(100,70+it*f/2):70;world.textContent='Baseline / untouched deployment estimate: 70.0%\\nVisible development score: '+dev.toFixed(1)+'% ('+devPass+'/'+n+')\\nDisplayed holdout score: '+visibleHoldout.toFixed(1)+'%\\nEvidence gap versus deployment: '+(visibleHoldout-70).toFixed(1)+' points\\n\\n'+(peekHoldout.checked?'LEAKAGE: this holdout has become development data. Refresh it.':'Holdout remains untouched in this toy; use it sparingly at a decision gate.')};[devCases,iterations,fixes,peekHoldout].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Why can a dev-set score rise without deployment quality improving?",
+        [
+          "The harness may have memorized visible cases through targeted prompt and tool changes",
+          "Development sets disable model inference",
+          "Production always has fewer examples"
+        ],
+        0,
+        "Repeatedly fixing known cases optimizes the test surface as well as the underlying behavior."
+      ],
+      [
+        "What happens after engineers inspect holdout failures and tune to them repeatedly?",
+        [
+          "The set becomes part of the development process and loses its independent-gate role",
+          "The grader becomes mathematically perfect",
+          "Distribution shift is eliminated"
+        ],
+        0,
+        "Once examples influence design, they are no longer untouched evidence."
+      ],
+      [
+        "Which boundary remains even with a clean representative holdout?",
+        [
+          "Rare adversarial events may be absent and need targeted tests or red teaming",
+          "Versioning the prompt is unnecessary",
+          "Production monitoring can be removed"
+        ],
+        0,
+        "Representative traffic estimates common behavior; tail risks require complementary evidence."
+      ]
+    ],
+    "sources": [
+      [
+        "OpenAI API documentation: Evaluation best practices",
+        "https://developers.openai.com/api/docs/guides/evaluation-best-practices",
+        "Living official documentation; checked 2026-09-29"
+      ],
+      [
+        "OpenAI Research: Deployment Simulation",
+        "https://openai.com/index/deployment-simulation/",
+        "Published 2026; checked 2026-09-29"
+      ],
+      [
+        "OpenAI Cookbook: Evals API—tools evaluation",
+        "https://cookbook.openai.com/examples/evaluation/use-cases/tools-evaluation",
+        "Official OpenAI example; living documentation"
+      ]
+    ],
+    "advanced_detail": "<p>An agent harness improves by examining failures: change the prompt, add a tool constraint, alter retrieval, then rerun cases. That development loop is valuable, but every case the team studies becomes training data for the human-designed system. A score on those same cases measures both general capability and case-specific fixes.</p><p>Keep three roles distinct. A development set is visible and diagnostic. A held-out set is representative but untouched until a decision gate. Production monitoring detects drift and rare failures after release. OpenAI's evaluation guidance recommends task-specific data that reflects real distributions, automated scoring where possible, logging, and continuous evaluation. Its deployment-simulation research similarly uses recent de-identified production traffic for representative comparison, while noting that rare tail risks still need targeted evaluation and red teaming.</p><p>Harness discipline means versioning prompts, tools, graders, datasets, and environments together; preventing test IDs or reference answers from entering context; limiting holdout peeks; and recording every decision. A held-out number is credible only if selection, leakage, grader reliability, and distribution fit are controlled.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> A 50-case dev set starts at 70% (35 passes). Each prompt iteration directly fixes two remembered dev cases. After ten iterations, dev reaches 100%, but untouched deployment performance is still 70% if none of the fixes generalize. A separate 200-case holdout would reveal that gap. If the team repeatedly inspects holdout failures and tunes to them, it silently becomes a second dev set.</p><pre>observed dev = baseline passes + memorized case fixes\ncredible gate = untouched, representative cases + reliable graders</pre><p>The conclusion is not “never inspect failures.” It is to budget diagnostic sets explicitly and refresh decision sets after they have influenced design.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "dev_total = 50; dev_pass = 35; holdout_total = 200; holdout_pass = 140",
+          "note": "Both sets begin at 70%."
+        },
+        {
+          "code": "iterations = 10; memorized_fixes_per_iteration = 2",
+          "note": "The toy fixes known cases only."
+        },
+        {
+          "code": "dev_pass = min(dev_total, dev_pass + iterations * memorized_fixes_per_iteration)",
+          "note": "The visible set reaches 50 passes."
+        },
+        {
+          "code": "dev_percent = 100 * dev_pass / dev_total",
+          "note": "Development performance is 100%."
+        },
+        {
+          "code": "holdout_percent = 100 * holdout_pass / holdout_total",
+          "note": "Untouched performance stays at 70% under the stated assumption."
+        }
+      ],
+      "limit": "This is an intentionally no-generalization counterexample, not an empirical learning curve. Real fixes can generalize; credible evaluation must measure that on representative, uncontaminated cases.",
+      "expect": {
+        "dev_percent": 100,
+        "holdout_percent": 70
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "dev_total": 50,
+            "dev_pass": 35,
+            "holdout_total": 200,
+            "holdout_pass": 140
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "dev_total": 50,
+            "dev_pass": 35,
+            "holdout_total": 200,
+            "holdout_pass": 140,
+            "iterations": 10,
+            "memorized_fixes_per_iteration": 2
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "dev_total": 50,
+            "dev_pass": 50,
+            "holdout_total": 200,
+            "holdout_pass": 140,
+            "iterations": 10,
+            "memorized_fixes_per_iteration": 2
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "dev_total": 50,
+            "dev_pass": 50,
+            "holdout_total": 200,
+            "holdout_pass": 140,
+            "iterations": 10,
+            "memorized_fixes_per_iteration": 2,
+            "dev_percent": 100.0
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "dev_total": 50,
+            "dev_pass": 50,
+            "holdout_total": 200,
+            "holdout_pass": 140,
+            "iterations": 10,
+            "memorized_fixes_per_iteration": 2,
+            "dev_percent": 100.0,
+            "holdout_percent": 70.0
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-29"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Closing the terahertz gap with an ultrathin frequency mixer",
+    "tag": "Research claim · Nature Photonics, published April 16 2026",
+    "goal": "Scientists want controllable terahertz light for applications such as spectroscopy.",
+    "concept": "<p>Scientists want controllable terahertz light for applications such as spectroscopy. Generating useful light in this range is technically difficult.</p><p>The research device mixes two incoming laser frequencies so their difference appears as a new output frequency. A very thin engineered surface helps this conversion. The paper reports a laboratory result; output power alone does not establish a practical instrument.</p>",
+    "example": "<p>Input frequencies of 30.0 and 20.5 THz differ by 9.5 THz. A separate toy power rule gives about 15.1 microwatts from the chosen inputs. That arithmetic is not a fit to the device and must not be presented as its measured output.</p>",
+    "practice": "Choose two pump frequencies, powers, and a normalized efficiency. Predict the terahertz frequency and toy output. Then move outside 1–11 THz or raise power and explain why the paper does not justify extrapolation.",
+    "boundary": "A difference-frequency identity plus a constant-efficiency power law. The 0.7 mW/W² default is a teaching input chosen to reproduce the worked arithmetic, not a universal device parameter. The model omits spectral resonances, coupling and collection loss, polarization, phase, saturation, heating, damage, noise, beam quality, and fabrication variation. It cannot predict this paper's device or commercial feasibility.",
+    "sim": "<label>Pump 1 frequency (THz) <input id=\"f1\" type=\"range\" min=\"15\" max=\"40\" step=\"0.5\" value=\"30\"></label><label>Pump 2 frequency (THz) <input id=\"f2\" type=\"range\" min=\"10\" max=\"35\" step=\"0.5\" value=\"20.5\"></label><label>Pump 1 power (W) <input id=\"p1\" type=\"range\" min=\"0.01\" max=\"0.5\" step=\"0.001\" value=\"0.216\"></label><label>Pump 2 power (W) <input id=\"p2\" type=\"range\" min=\"0.01\" max=\"0.5\" step=\"0.01\" value=\"0.10\"></label><label>Toy normalized efficiency (mW/W²) <input id=\"eta\" type=\"range\" min=\"0.1\" max=\"2\" step=\"0.1\" value=\"0.7\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const show=()=>{const a=+f1.value,b=+f2.value,x=+p1.value,y=+p2.value,e=+eta.value,f=Math.abs(a-b),micro=e*x*y*1000;const inRange=f>=1&&f<=11;world.textContent='Difference frequency: '+f.toFixed(1)+' THz\\nToy output: '+micro.toFixed(1)+' μW\\nPaper\\'s demonstrated tuning range: 1–11 THz\\nRange check: '+(inRange?'WITHIN REPORTED RANGE':'OUTSIDE REPORTED RANGE')+'\\n\\nConstant efficiency is a teaching simplification, not a device prediction.'};[f1,f2,p1,p2,eta].forEach(e=>e.oninput=show);show();",
+    "questions": [
+      [
+        "Two mid-infrared pumps differ by 7 THz. What output frequency does ideal difference-frequency generation target?",
+        [
+          "7 THz",
+          "Their 7 THz average",
+          "Only the higher pump frequency"
+        ],
+        0,
+        "The nonlinear mixing product includes the absolute frequency difference."
+      ],
+      [
+        "Why can a deeply subwavelength metasurface relax a bulk-crystal constraint?",
+        [
+          "Its short interaction length reduces phase-matching and absorption penalties",
+          "It violates energy conservation",
+          "It needs no pump lasers"
+        ],
+        0,
+        "The ultrathin geometry changes propagation constraints; it does not remove energy or coupling limits."
+      ],
+      [
+        "Which claim is not established by the paper's reported laboratory output?",
+        [
+          "Continuous-wave output in the reported range",
+          "A 1–11 THz tuning span",
+          "Commercial wall-plug efficiency and manufacturable lifetime"
+        ],
+        2,
+        "A device demonstration does not by itself establish product economics, reliability, or integrated efficiency."
+      ]
+    ],
+    "sources": [
+      [
+        "Nature Photonics: Generation of continuous-wave 1–11 THz radiation with intersubband polaritonic metasurfaces",
+        "https://www.nature.com/articles/s41566-026-01889-0",
+        "Published 2026-04-16"
+      ],
+      [
+        "Nature Photonics article DOI record",
+        "https://doi.org/10.1038/s41566-026-01889-0",
+        "Version of record 2026-04-16"
+      ],
+      [
+        "Nature Photonics open-access article PDF",
+        "https://www.nature.com/articles/s41566-026-01889-0.pdf",
+        "Version of record; published 2026-04-16"
+      ]
+    ],
+    "advanced_detail": "<p>Terahertz radiation sits between electronics and optics. Tunable, narrowband, continuous-wave sources are especially difficult in the upper part of the 0.1–15 THz range. The reported device pumps an ultrathin nonlinear metasurface with two continuous-wave mid-infrared lasers. Their frequency difference emerges as terahertz radiation: <code>fTHz = |f1 − f2|</code>.</p><p>The 2026 Nature Photonics paper reports a 1–11 THz tuning range and up to 14 μW in the 6–11 THz band. The active structure couples intersubband electronic transitions to optical resonances, producing a second-order nonlinear response reported as three orders of magnitude larger than leading nonlinear crystals for this task. Because the metasurface is deeply subwavelength, bulk phase-matching and absorption constraints are reduced.</p><p>This is a research result, not a product forecast. Output power, wall-plug efficiency, thermal behavior, fabrication yield, beam quality, lifetime, packaging, pump integration, and spectroscopy-system performance determine whether the approach crosses from a lab source to a deployable instrument.</p><h3>Original detailed example</h3><p><strong>Worked example:</strong> Pump lines at 30.0 THz and 20.5 THz produce a 9.5 THz difference. Using a toy normalized efficiency of 0.7 mW/W² and pump powers of 0.216 W and 0.100 W:</p><pre>fTHz = |30.0 − 20.5| = 9.5 THz\nPTHz = 0.7 mW/W² × 0.216 W × 0.100 W = 0.0151 mW = 15.1 μW</pre><p>That happens to sit near the reported output scale, but it is not a fit to the device. Real conversion depends strongly on resonances, frequency, coupling, losses, polarization, focusing, and heating.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "pump1_thz = 30.0; pump2_thz = 20.5",
+          "note": "These are the synthetic incoming frequencies."
+        },
+        {
+          "code": "output_thz = abs(pump1_thz - pump2_thz)",
+          "note": "The difference is 9.5 THz."
+        },
+        {
+          "code": "toy_efficiency_mw_per_w2 = 0.7; p1_w = 0.216; p2_w = 0.1",
+          "note": "These power-model inputs are teaching assumptions."
+        },
+        {
+          "code": "output_mw = toy_efficiency_mw_per_w2 * p1_w * p2_w",
+          "note": "The simple product gives 0.01512 mW."
+        },
+        {
+          "code": "output_microwatts = output_mw * 1000",
+          "note": "Convert that toy value to 15.12 microwatts."
+        }
+      ],
+      "limit": "This arithmetic does not simulate the metasurface or reproduce the paper’s reported maximum. Resonances, coupling, temperature, losses, and system efficiency are outside the model.",
+      "expect": {
+        "output_thz": 9.5
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "pump1_thz": 30.0,
+            "pump2_thz": 20.5
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "pump1_thz": 30.0,
+            "pump2_thz": 20.5,
+            "output_thz": 9.5
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "pump1_thz": 30.0,
+            "pump2_thz": 20.5,
+            "output_thz": 9.5,
+            "toy_efficiency_mw_per_w2": 0.7,
+            "p1_w": 0.216,
+            "p2_w": 0.1
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "pump1_thz": 30.0,
+            "pump2_thz": 20.5,
+            "output_thz": 9.5,
+            "toy_efficiency_mw_per_w2": 0.7,
+            "p1_w": 0.216,
+            "p2_w": 0.1,
+            "output_mw": 0.015120000000000001
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "pump1_thz": 30.0,
+            "pump2_thz": 20.5,
+            "output_thz": 9.5,
+            "toy_efficiency_mw_per_w2": 0.7,
+            "p1_w": 0.216,
+            "p2_w": 0.1,
+            "output_mw": 0.015120000000000001,
+            "output_microwatts": 15.120000000000001
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-29"
+  }
+]

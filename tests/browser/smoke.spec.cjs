@@ -1,6 +1,6 @@
 const { test: base, expect } = require('@playwright/test');
 const fs = require('node:fs/promises');
-const { day, lessons, pages } = require('./bundle.cjs');
+const { day, lessons, pages } = require('./bundle.cjs').discoverBundle();
 const origin = 'http://127.0.0.1:4173';
 
 // Every test gets Playwright's new, non-persistent context. Never load a profile,
@@ -16,7 +16,9 @@ const test = base.extend({
       if (response.url().startsWith(origin + '/') && response.status() >= 400)
         errors.push(`HTTP ${response.status()}: ${response.url()}`);
     });
-    page.on('requestfailed', request => errors.push(`Request failed: ${request.url()}`));
+    page.on('requestfailed', request => {
+      if (new URL(request.url()).origin === origin) errors.push(`Request failed: ${request.url()}`);
+    });
     await context.route('**/*', route => {
       const url = new URL(route.request().url());
       if (url.origin === origin || ['blob:', 'data:'].includes(url.protocol))
@@ -35,7 +37,7 @@ async function assertLayout(page) {
     const width = document.documentElement.clientWidth;
     return {
       document: document.documentElement.scrollWidth - width,
-      controls: [...document.querySelectorAll('button, input, textarea, summary')]
+      controls: [...document.querySelectorAll('button, input, select, textarea, summary')]
         .filter(el => el.getClientRects().length)
         .filter(el => { const box = el.getBoundingClientRect(); return box.left < -1 || box.right > width + 1; })
         .map(el => el.id || el.tagName),
@@ -98,7 +100,7 @@ for (const file of pages) {
     await page.goto(`/${day}/${file}`);
     await assertLayout(page);
     await assertLocalLinks(page, request);
-    await page.screenshot({ path: testInfo.outputPath('page.png') });
+    await page.screenshot({ path: testInfo.outputPath('page.png'), fullPage: true });
     const lesson = lessons.find(item => `${item.slug}.html` === file);
     if (!lesson) return; // The hub/extra HTML still receives render/link/error checks.
 
@@ -114,17 +116,27 @@ for (const file of pages) {
       await expect(disclosure).not.toHaveAttribute('open', '');
     }
 
+    if (lesson.walkthrough) await checkWalkthrough(page, lesson.walkthrough);
+
     // Exercise actual controls with keyboard/click input, without invoking handlers.
     const world = page.locator('#world');
     await expect(world).not.toBeEmpty();
-    const controls = page.locator('.lab input[type="range"], .lab input[type="checkbox"], .lab button');
+    const controls = page.locator('.lab input[type="range"], .lab input[type="checkbox"], .lab select, .lab button');
     expect(await controls.count()).toBeGreaterThan(0);
     expect(await controls.count()).toBeLessThanOrEqual(20);
     let changed = false;
     for (const control of await controls.all()) {
       const before = await world.innerText();
       const type = await control.getAttribute('type');
-      if (type === 'range') {
+      const tag = await control.evaluate(el => el.tagName);
+      if (tag === 'SELECT') {
+        const options = await control.locator('option:not([disabled])').evaluateAll(items => items.map(item => item.value));
+        expect(options.length, 'Bound select interaction work').toBeLessThanOrEqual(20);
+        for (const value of options) {
+          await control.selectOption(value);
+          changed ||= before !== await world.innerText();
+        }
+      } else if (type === 'range') {
         await control.focus();
         await control.press('End');
         changed ||= before !== await world.innerText();
@@ -141,6 +153,8 @@ for (const file of pages) {
     await page.reload(); // Return model to defaults before the scored scenario checks.
 
     if (day === 'Day7') await checkDay7Model(page, lesson.slug);
+    if (day === 'Day14') await checkDay14Model(page, lesson.slug);
+    await assertLayout(page);
 
     // Empty AND partial quizzes must not disclose feedback or record attempts.
     for (const partiallyAnswered of [false, true]) {
@@ -188,6 +202,10 @@ for (const file of pages) {
     await assertLayout(page);
     await page.locator('nav a[href="index.html"]').first().click();
     await expect(page).toHaveURL(`${origin}/${day}/index.html`);
+    await page.goBack();
+    await expect(page.locator('#rationale')).toHaveValue(responses.rationale);
+    await page.goForward();
+    await expect(page).toHaveURL(`${origin}/${day}/index.html`);
   });
 }
 
@@ -224,5 +242,95 @@ async function checkDay7Model(page, slug) {
     await page.locator('#gateCount').press('End');
     await expect(world).not.toContainText('Total gate time: 17.0 μs');
     await expect(world).toContainText('paper simulations');
+  }
+}
+
+
+async function checkWalkthrough(page, walkthrough) {
+  const frames = walkthrough.frames;
+  expect(frames.length, 'Bound execution replay work').toBeGreaterThan(0);
+  expect(frames.length).toBeLessThanOrEqual(40);
+  await expect(page.locator('#tracePosition')).toContainText('Ready');
+  await expect(page.locator('#traceBack')).toBeDisabled();
+  for (let i = 0; i < frames.length; i++) {
+    await page.locator('#traceNext').click();
+    await expect(page.locator('#tracePosition')).toHaveText(`Step ${i + 1} of ${frames.length}`);
+    await expect(page.locator('#traceNote')).toHaveText(walkthrough.steps[i].note);
+    const state = await page.locator('#traceState .state-value').evaluateAll(rows => Object.fromEntries(
+      rows.map(row => [row.querySelector('strong').textContent, JSON.parse(row.querySelector('code').textContent)])));
+    expect(state).toEqual(frames[i].state);
+    await expect(page.locator(`#traceCode .active-line[data-step="${i}"]`).first()).toBeVisible();
+    await assertLayout(page);
+  }
+  await expect(page.locator('#traceNext')).toBeDisabled();
+  await page.locator('#traceBack').click();
+  await expect(page.locator('#tracePosition')).toHaveText(frames.length === 1 ? 'Ready · no statements executed' : `Step ${frames.length - 1} of ${frames.length}`);
+  const priorState = await page.locator('#traceState .state-value').evaluateAll(rows => Object.fromEntries(
+    rows.map(row => [row.querySelector('strong').textContent, JSON.parse(row.querySelector('code').textContent)])));
+  expect(priorState).toEqual(frames.length === 1 ? {} : frames[frames.length - 2].state);
+  await page.locator('#traceReset').click();
+  await page.locator('#traceReset').click(); // Repeated reset remains safe.
+  await expect(page.locator('#tracePosition')).toContainText('Ready');
+  await expect(page.locator('#traceBack')).toBeDisabled();
+  await expect(page.locator('#traceCode .active-line')).toHaveCount(0);
+  await expect(page.locator('#traceState .state-value')).toHaveCount(0);
+  await expect(page.locator('#traceState')).toHaveText('No values yet.');
+  await page.locator('#traceNext').click();
+  await expect(page.locator('#tracePosition')).toHaveText(`Step 1 of ${frames.length}`);
+}
+
+async function checkDay14Model(page, slug) {
+  const world = page.locator('#world');
+  if (slug === 'data-engineering') {
+    await expect(world).toContainText('"O42":"paid"');
+    await page.locator('#startAfter').selectOption('101');
+    await expect(world).toContainText('Missing live changes: 101');
+    await page.locator('#startAfter').selectOption('99');
+    await expect(world).toContainText('Repeated boundary changes: 100');
+  } else if (slug === 'software-engineering') {
+    await expect(world).toContainText('REDO available: true');
+    await expect(world).toContainText('Recovered stock: 4');
+    await page.locator('#crashPoint').selectOption('before');
+    await expect(world).toContainText('Recovered stock: 5');
+    await page.locator('#breakRule').check();
+    await expect(world).toContainText('UNSAFE ORDER');
+  } else if (slug === 'distinguished-engineer') {
+    await expect(world).toContainText('Healthy cells: 2 of 3');
+    await page.locator('#waveSize').focus();
+    await page.locator('#waveSize').press('ArrowRight');
+    await expect(world).toContainText('Healthy cells: 1 of 3');
+    await expect(world).toContainText('MISSED');
+  } else if (slug === 'genai-engineering') {
+    await expect(world).toContainText('PASS TO MODEL');
+    for (const [value, result] of [['error', 'tool execution error'], ['malformed', 'schema mismatch'], ['timeout', 'deadline exceeded']]) {
+      await page.locator('#toolCase').selectOption(value);
+      await expect(world).toContainText(result);
+    }
+  } else if (slug === 'technology-breakthroughs') {
+    await expect(world).toContainText('Digital parity target: 1');
+    await expect(world).toContainText('favored target');
+    await page.locator('#dnaBits').fill('00000000');
+    await page.locator('#dnaCandidate').selectOption('0');
+    await page.locator('#foldDna').click();
+    await expect(world).toContainText('Digital parity target: 0');
+    await expect(world).toContainText('favored target');
+  } else if (slug === 'ci-cd-github-actions') {
+    await expect(world).toContainText('Decision: ACCEPT');
+    await page.locator('#workflowInput').selectOption('true');
+    await expect(world).toContainText('Decision: REJECT');
+    await page.locator('#workflowInput').selectOption('staging');
+    await page.locator('#workflowSecret').selectOption('missing');
+    await expect(world).toContainText('Required secret present: false');
+    await expect(world).toContainText('Decision: REJECT');
+    await page.locator('#workflowSecret').selectOption('named');
+    await expect(world).toContainText('Decision: ACCEPT');
+  } else if (slug === 'apis-microservices') {
+    await expect(world).toContainText('Naive total: 4');
+    await expect(world).toContainText('Batched total: 2');
+    await page.locator('#post3').uncheck();
+    await expect(world).toContainText('Resolver loads: ["u1","u2"]');
+    await page.locator('#post1').uncheck();
+    await page.locator('#post2').uncheck();
+    await expect(world).toContainText('Posts selected: 0');
   }
 }

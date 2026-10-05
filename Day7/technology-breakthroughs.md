@@ -2,7 +2,7 @@
 
 Technology breakthroughs · Day7 · 15 minutes
 
-Understand why one superconducting mode stores information while another couples outward, and separate simulated performance from fabricated evidence.
+A quantum component can be designed to store information well or interact quickly.
 
 ## Recall (2 minutes)
 
@@ -10,22 +10,61 @@ Understand why one superconducting mode stores information while another couples
 
 ## Understand (4 minutes)
 
-A superconducting qubit faces a systems tradeoff. Strongly connecting the information-bearing element makes gates and readout faster, but those same connections can open paths for noise and decoherence. The “arm qubit” architecture co-designs two strongly coupled modes: a data mode optimized for storage and an arm mode optimized for interaction.
+A quantum component can be designed to store information well or interact quickly. Doing both in one mode creates a difficult tradeoff.
 
-The researchers use a quarton coupler to provide strong nonlinear coupling while suppressing unwanted linear mixing. Their peer-reviewed paper reports simulations—not a fabricated device—of a 17 ns microwave-only controlled-Z gate with infidelity 8.7 × 10⁻⁵, plus fast readout and low idle interaction. MIT's September 3 coverage says fabrication and experimental validation are the next steps.
-
-
-
-Evidence-aware worked example: Suppose, only for teaching, that independent gate failures occur at the paper's simulated CZ infidelity. For 1,000 identical gates, the probability of zero modeled gate failures is:
-
-(1 − 0.000087)^1000 ≈ 91.7%
-time = 1000 × 17 ns = 17 μs
-
-This is not a prediction for an algorithm or future device. Real fault-tolerant behavior depends on single-qubit gates, readout, idling, correlated noise, calibration, fabrication variation, error-correcting codes, and syndrome cycles. The calculation exposes the scale lesson: a striking component metric still has to compose across a system.
+The arm-qubit research separates a storage-oriented mode from an interaction-oriented mode. The original lesson reports simulation results, not a fabricated device. A fast, accurate simulated gate is promising, but many gates must work together in a useful system.
 
 
 
-## Explore (5 minutes)
+Using the paper’s simulated infidelity only as an input, the toy assumes independent failures across 1,000 gates. It calculates about 91.7% probability of no modeled gate failure and 17 microseconds of gate time. Those are not algorithm-success predictions.
+
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+failure_per_gate = 0.000087; gate_count = 1000
+success_per_gate = 1 - failure_per_gate
+all_success = success_per_gate ** gate_count
+time_ns = gate_count * 17
+time_us = time_ns / 1000
+```
+
+1. Use the lesson’s reported simulation input.
+
+   Changed values: `{"failure_per_gate": 8.7e-05, "gate_count": 1000}`
+
+2. Convert failure probability to success probability.
+
+   Changed values: `{"success_per_gate": 0.999913}`
+
+3. Independence lets the probabilities multiply in this toy.
+
+   Changed values: `{"all_success": 0.9166736262740719}`
+
+4. Add the simulated per-gate duration.
+
+   Changed values: `{"time_ns": 17000}`
+
+5. Convert 17,000 nanoseconds to 17 microseconds.
+
+   Changed values: `{"time_us": 17.0}`
+
+[Full runnable example](examples/technology-breakthroughs.py).
+
+Limits: The independence assumption omits correlated noise, readout, calibration, error correction, and fabrication. This arithmetic cannot validate the device or a complete quantum algorithm.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A superconducting qubit faces a systems tradeoff. Strongly connecting the information-bearing element makes gates and readout faster, but those same connections can open paths for noise and decoherence. The “arm qubit” architecture co-designs two strongly coupled modes: a data mode optimized for storage and an arm mode optimized for interaction.</p><p>The researchers use a quarton coupler to provide strong nonlinear coupling while suppressing unwanted linear mixing. Their peer-reviewed paper reports simulations—not a fabricated device—of a 17 ns microwave-only controlled-Z gate with infidelity <code>8.7 × 10⁻⁵</code>, plus fast readout and low idle interaction. MIT's September 3 coverage says fabrication and experimental validation are the next steps.</p><h3>Original detailed example</h3><p><strong>Evidence-aware worked example:</strong> Suppose, only for teaching, that independent gate failures occur at the paper's simulated CZ infidelity. For 1,000 identical gates, the probability of zero modeled gate failures is:</p><pre>(1 − 0.000087)^1000 ≈ 91.7%
+time = 1000 × 17 ns = 17 μs</pre><p>This is not a prediction for an algorithm or future device. Real fault-tolerant behavior depends on single-qubit gates, readout, idling, correlated noise, calibration, fabrication variation, error-correcting codes, and syndrome cycles. The calculation exposes the scale lesson: a striking component metric still has to compose across a system.</p>
+
+</details>
+
+## Explore (remaining exploration time)
 
 Predict how 100, 1,000, and 10,000 gates change time and the toy no-failure probability. Then double the infidelity and explain why experimental noise structure matters more than this independent-error curve.
 

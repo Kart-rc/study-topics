@@ -9,7 +9,9 @@
     "Software engineering",
     "Distinguished Engineer",
     "GenAI engineering",
-    "Technology breakthroughs"
+    "Technology breakthroughs",
+    "CI/CD & GitHub Actions",
+    "APIs & Microservices"
   ],
   "review_offsets_days": [
     1,
@@ -19,7 +21,7 @@
     30
   ],
   "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
-  "last_generated_day": 7,
+  "last_generated_day": 14,
   "days": [
     {
       "number": 1,
@@ -155,8 +157,189 @@
         "genai-engineering",
         "technology-breakthroughs"
       ]
+    },
+    {
+      "number": 8,
+      "folder": "Day8",
+      "validation": "Embedded models, quizzes, saving, exports, links and Day1/Day5 reviews checked; browser executable unavailable. See Day8/VALIDATION.md.",
+      "date": "2026-09-28",
+      "generation_key": "2026-09-28",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day1+7",
+        "Day5+3"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs"
+      ]
+    },
+    {
+      "number": 9,
+      "folder": "Day9",
+      "validation": "Embedded models, quizzes, saving, exports, links and Day2/Day7 reviews checked; browser executable unavailable. See Day9/VALIDATION.md.",
+      "date": "2026-09-29",
+      "generation_key": "2026-09-29",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day2+7",
+        "Day7+1"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs"
+      ]
+    },
+    {
+      "number": 10,
+      "folder": "Day10",
+      "date": "2026-09-30",
+      "generation_key": "2026-09-30",
+      "prepared_on": "2026-09-29",
+      "prepared_in_advance_at_user_request": true,
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day6+3",
+        "Day8+1"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs"
+      ],
+      "validation": "Embedded state models, quiz scoring, local-save serialization, exports, links and Day6/Day8 reviews passed simulated-DOM checks; real browser unavailable. See Day10/VALIDATION.md."
+    },
+    {
+      "number": 11,
+      "folder": "Day11",
+      "date": "2026-10-01",
+      "generation_key": "2026-10-01",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day3+7",
+        "Day7+3"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs",
+        "ci-cd-github-actions",
+        "apis-microservices"
+      ],
+      "validation": "Executed code traces, interactive models, quizzes, save/export, source and local links verified; real-browser layout and native behavior unverified. See Day11/VALIDATION.md."
+    },
+    {
+      "number": 12,
+      "folder": "Day12",
+      "date": "2026-10-02",
+      "generation_key": "2026-10-02",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day11+1",
+        "Day4+7",
+        "Day9+1"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs",
+        "ci-cd-github-actions",
+        "apis-microservices"
+      ],
+      "validation": "Executed code traces, interactive models, quizzes, save/export, source and local links verified; real-browser layout and native behavior unverified. See Day12/VALIDATION.md."
+    },
+    {
+      "number": 13,
+      "folder": "Day13",
+      "date": "2026-10-03",
+      "generation_key": "2026-10-03",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day10+1",
+        "Day12+1",
+        "Day8+3"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs",
+        "ci-cd-github-actions",
+        "apis-microservices"
+      ],
+      "validation": "Executed code traces, seven interactive mechanisms, quizzes, save/export, sources, local links and track-aware spaced reviews verified; real-browser layout and native behavior unverified. See Day13/VALIDATION.md."
+    },
+    {
+      "number": 14,
+      "folder": "Day14",
+      "date": "2026-10-04",
+      "generation_key": "2026-10-04",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day11+3",
+        "Day13+1",
+        "Day5+7",
+        "Day9+3"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs",
+        "ci-cd-github-actions",
+        "apis-microservices"
+      ],
+      "validation": "Executed code traces, seven interactive mechanisms, quizzes, save/export, sources, local links and track-aware spaced reviews verified; real-browser layout and native behavior unverified because the Chromium executable was unavailable. See Day14/VALIDATION.md."
     }
   ],
   "submitted_assessments": [],
-  "notes": "Generation and mastery are separate. Do not publish personal assessment answers to this public repository. Use explicit submitted answers privately to adapt reviews."
+  "notes": "Generation and mastery are separate. Do not publish personal assessment answers to this public repository. Use explicit submitted answers privately to adapt reviews.",
+  "track_changes": [
+    {
+      "effective_from_day": 1,
+      "tracks": [
+        "Data engineering",
+        "Software engineering",
+        "Distinguished Engineer",
+        "GenAI engineering",
+        "Technology breakthroughs"
+      ],
+      "total_minutes": 75
+    },
+    {
+      "effective_from_day": 11,
+      "tracks": [
+        "Data engineering",
+        "Software engineering",
+        "Distinguished Engineer",
+        "GenAI engineering",
+        "Technology breakthroughs",
+        "CI/CD & GitHub Actions",
+        "APIs & Microservices"
+      ],
+      "total_minutes": 105,
+      "approved_on": "2026-10-01"
+    }
+  ]
 }

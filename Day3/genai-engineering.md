@@ -2,7 +2,7 @@
 
 GenAI engineering · Day3 · 15 minutes
 
-Trace token audiences across an MCP tool call and prevent token passthrough from turning the server into a confused deputy.
+A token intended for a storage API arrives at a catalog tool server.
 
 ## Recall (2 minutes)
 
@@ -10,25 +10,62 @@ Trace token audiences across an MCP tool call and prevent token passthrough from
 
 ## Understand (4 minutes)
 
-An agent harness may make an MCP server feel like a local function, but its authorization boundary is still a network security boundary. The MCP authorization specification says clients must indicate the intended resource, servers must validate that an access token was issued for them, and MCP servers must not pass a client token through to an upstream API.
+A token intended for a storage API arrives at a catalog tool server. Even if the storage API would accept it, that does not make it a valid credential for the catalog.
 
-Audience validation answers “was this credential minted for this server?” Separate upstream credentials answer “what may this server do as itself?” If the server accepts any bearer token and forwards it, a credential intended for another service can be misused, logged, or broadened through the harness.
+The audience says which service a token is intended for. Each server must check that boundary and the requested permission. When the catalog calls storage, it should use an appropriately scoped upstream credential rather than blindly forwarding the client token.
 
 
 
-Original teaching case: An agent calls catalog.example/tools/read. The presented token says aud=storage.api, not aud=catalog.example. A naive server accepts it and forwards the same token to storage. The request may work, but the MCP boundary has neither validated its own audience nor constrained the downstream identity.
+The first token names storage.api and is rejected by catalog.example. The corrected token names catalog.example. The catalog’s separate upstream credential names storage.api and allows read access only.
 
-In strict mode the catalog rejects that token. With aud=catalog.example, it accepts the client request, authorizes the tool, and uses a separate, narrowly scoped aud=storage.api; scope=read credential for its upstream call.
 
-client token → aud=catalog.example
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+server = "catalog.example"; client_audience = "storage.api"
+accepted = client_audience == server
+client_audience = "catalog.example"
+accepted = client_audience == server
+upstream = {"aud": "storage.api", "scope": "read"}
+```
+
+1. The token is addressed to the wrong service.
+
+   Changed values: `{"server": "catalog.example", "client_audience": "storage.api"}`
+
+2. The catalog rejects this mismatch.
+
+   Changed values: `{"accepted": false}`
+
+3. A replacement token names the catalog.
+
+   Changed values: `{"client_audience": "catalog.example"}`
+
+4. The audience check now passes.
+
+   Changed values: `{"accepted": true}`
+
+5. A separate upstream credential has its own narrow purpose.
+
+   Changed values: `{"upstream": {"aud": "storage.api", "scope": "read"}}`
+
+[Full runnable example](examples/genai-engineering.py).
+
+Limits: This only illustrates audience matching. Real token verification also requires signature, issuer, expiry, scope, and authorization checks. It does not implement OAuth or prove a request is authorized.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>An agent harness may make an MCP server feel like a local function, but its authorization boundary is still a network security boundary. The MCP authorization specification says clients must indicate the intended resource, servers must validate that an access token was issued for them, and MCP servers must not pass a client token through to an upstream API.</p><p>Audience validation answers “was this credential minted for this server?” Separate upstream credentials answer “what may this server do as itself?” If the server accepts any bearer token and forwards it, a credential intended for another service can be misused, logged, or broadened through the harness.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> An agent calls <code>catalog.example/tools/read</code>. The presented token says <code>aud=storage.api</code>, not <code>aud=catalog.example</code>. A naive server accepts it and forwards the same token to storage. The request may work, but the MCP boundary has neither validated its own audience nor constrained the downstream identity.</p><p>In strict mode the catalog rejects that token. With <code>aud=catalog.example</code>, it accepts the client request, authorizes the tool, and uses a separate, narrowly scoped <code>aud=storage.api; scope=read</code> credential for its upstream call.</p><pre>client token → aud=catalog.example
 MCP server validates audience + tool authorization
-server credential → aud=storage.api, scope=read
+server credential → aud=storage.api, scope=read</pre><p>Harness engineering implication: represent the MCP server and every upstream service as distinct principals in traces and policy tests. A tool allowlist does not repair token confusion.</p>
 
-Harness engineering implication: represent the MCP server and every upstream service as distinct principals in traces and policy tests. A tool allowlist does not repair token confusion.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Choose storage.api in naive mode and predict whether the MCP server accepts and what it forwards. Turn on strict validation. Then choose catalog.example. Explain which identity should appear in the storage audit log.
 

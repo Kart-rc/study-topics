@@ -11,7 +11,7 @@ for(const L of lessons){
  for(const tag of html.matchAll(/<input ([^>]+)>/g)){const id=tag[1].match(/id="([^"]+)"/),val=tag[1].match(/value="([^"]+)"/);if(id){if(val)nodes[id[1]].value=val[1];if(/\bchecked\b/.test(tag[1]))nodes[id[1]].checked=true}}
  let downloaded=false,blob,storage={};
  const ctx={document:{getElementById:id=>nodes[id],querySelector:s=>{const q=s.match(/name="q(\d+)"/);return q?radios[q[1]]||null:null},createElement:()=>({click:()=>downloaded=true})},localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>storage[k]=v},Blob:class{constructor(data){blob=data.join('')}},URL:{createObjectURL:()=>'',revokeObjectURL:()=>{}},setTimeout:fn=>fn(),console};
- vm.createContext(ctx);vm.runInContext(script,ctx);const click=id=>nodes[id].onclick(),world=()=>nodes.world.textContent;
+ require('../scripts/trace-dom.cjs').extend(ctx,nodes,html); vm.createContext(ctx);vm.runInContext(script,ctx);const click=id=>nodes[id].onclick(),world=()=>nodes.world.textContent;
  assert(html.includes('Day3:')&&html.includes('Day5:')&&html.match(/Recall first, then reveal/g).length===2,'two due refreshers missing');
  click('grade');assert(nodes.score.textContent.includes('Answer all'),'incomplete quiz guard');
  L.questions.forEach((q,i)=>radios[i]={value:String(q[2])});click('grade');assert(nodes.score.textContent.startsWith('3/3'),'correct score');

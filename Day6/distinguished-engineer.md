@@ -2,7 +2,7 @@
 
 Distinguished Engineer · Day6 · 15 minutes
 
-Choose a decision mechanism from reversibility, blast radius, evidence cost, and rollback—not organizational rank.
+Two teams ask for a fast decision.
 
 ## Recall (2 minutes)
 
@@ -10,24 +10,61 @@ Choose a decision mechanism from reversibility, blast radius, evidence cost, and
 
 ## Understand (4 minutes)
 
-Decision quality and decision speed are both system properties. A one-size review process protects irreversible choices but taxes reversible experiments. Amazon's 2016 shareholder letter calls many reversible choices “two-way doors” and argues for lightweight process, course correction, and decisions before perfect information.
+Two teams ask for a fast decision. One changes a dashboard sort order. The other deletes a field used by external consumers. Both can roll back code, but their consequences are very different.
 
-The useful engineering move is classification, not a slogan. Ask what state changes, how far failure propagates, whether rollback restores prior semantics and data, how quickly evidence arrives, and who bears the risk. A change is not reversible merely because a deployment can be rolled back: an exposed contract, leaked data, irreversible migration, or customer promise may survive the rollback.
-
-
-
-Original teaching case: Team A wants to change an internal dashboard's default sort order behind a flag. Team B wants to replace an externally consumed Kafka event schema and delete the old field after one week. Both changes have code rollback buttons; only the first is cheaply reversible.
-
-The dashboard can use a named owner, a hypothesis, a one-week metric, and an automatic rollback threshold. The schema change needs compatibility analysis, consumer inventory, a migration period, explicit sign-off, and a durable rollback/data-repair plan.
-
-governance weight ≈ irreversibility + blast radius + uncertainty
-rollback quality = code + data + contract + time
-
-A Distinguished Engineer makes the decision path explicit and time-bounded. Heavy review without a decision date is avoidance; lightweight review without an observable rollback is wishful thinking.
+Match review effort to how hard the whole change is to reverse. Consider data, consumer contracts, scope, and uncertainty—not only the deployment button. Reversible experiments can move quickly with an owner and a clear stop rule.
 
 
 
-## Explore (5 minutes)
+The dashboard has a flag and unchanged stored data. The schema deletion lacks a safe old-reader path. The small decision rule below sends the second proposal to a compatibility review. It makes the assumptions visible; it is not an organizational policy engine.
+
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+dashboard = {"code_reversible": True, "data_compatible": True, "external_consumers": False}
+schema = {"code_reversible": True, "data_compatible": False, "external_consumers": True}
+dashboard_path = "bounded experiment" if dashboard["data_compatible"] else "compatibility review"
+schema_path = "bounded experiment" if schema["data_compatible"] else "compatibility review"
+missing_evidence = "consumer inventory and migration/repair plan"
+```
+
+1. This example has a narrow, reversible surface.
+
+   Changed values: `{"dashboard": {"code_reversible": true, "data_compatible": true, "external_consumers": false}}`
+
+2. The schema change has lasting external consequences.
+
+   Changed values: `{"schema": {"code_reversible": true, "data_compatible": false, "external_consumers": true}}`
+
+3. A small experiment is plausible for the dashboard.
+
+   Changed values: `{"dashboard_path": "bounded experiment"}`
+
+4. The schema proposal needs deeper work.
+
+   Changed values: `{"schema_path": "compatibility review"}`
+
+5. Name what would make the next decision possible.
+
+   Changed values: `{"missing_evidence": "consumer inventory and migration/repair plan"}`
+
+[Full runnable example](examples/distinguished-engineer.py).
+
+Limits: This rule illustrates reasoning, not a universal approval policy. Security, legal constraints, customer importance, and unknown dependencies can change the review path.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>Decision quality and decision speed are both system properties. A one-size review process protects irreversible choices but taxes reversible experiments. Amazon's 2016 shareholder letter calls many reversible choices “two-way doors” and argues for lightweight process, course correction, and decisions before perfect information.</p><p>The useful engineering move is classification, not a slogan. Ask what state changes, how far failure propagates, whether rollback restores prior semantics and data, how quickly evidence arrives, and who bears the risk. A change is not reversible merely because a deployment can be rolled back: an exposed contract, leaked data, irreversible migration, or customer promise may survive the rollback.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> Team A wants to change an internal dashboard's default sort order behind a flag. Team B wants to replace an externally consumed Kafka event schema and delete the old field after one week. Both changes have code rollback buttons; only the first is cheaply reversible.</p><p>The dashboard can use a named owner, a hypothesis, a one-week metric, and an automatic rollback threshold. The schema change needs compatibility analysis, consumer inventory, a migration period, explicit sign-off, and a durable rollback/data-repair plan.</p><pre>governance weight ≈ irreversibility + blast radius + uncertainty
+rollback quality = code + data + contract + time</pre><p>A Distinguished Engineer makes the decision path explicit and time-bounded. Heavy review without a decision date is avoidance; lightweight review without an observable rollback is wishful thinking.</p>
+
+</details>
+
+## Explore (remaining exploration time)
 
 Classify the default values, then make rollback weaker. Explain which evidence would justify upgrading a two-way-door experiment into a one-way-door review.
 

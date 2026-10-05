@@ -2,7 +2,7 @@
 
 Data engineering · Day6 · 15 minutes
 
-Separate replay retention from broker-local residency and size the hot tier without pretending remote storage is free.
+You need seven days of Kafka replay, but most readers use only the latest six hours.
 
 ## Recall (2 minutes)
 
@@ -10,24 +10,63 @@ Separate replay retention from broker-local residency and size the hot tier with
 
 ## Understand (4 minutes)
 
-A Kafka log can have two storage horizons. local.retention.ms controls how long eligible completed segments stay on broker disks; retention.ms controls how long the topic retains them overall. With tiered storage, an old offset may remain readable after its segment leaves local disk because Kafka can fetch the uploaded segment from the remote tier.
+You need seven days of Kafka replay, but most readers use only the latest six hours. Keeping all seven days on broker disks can be expensive.
 
-This changes the capacity equation, not the log abstraction. Local disk can be sized for a hot window while remote storage carries the longer replay window. But the tiers are not interchangeable: remote reads add latency, bandwidth, request cost, and a dependency on the configured RemoteStorageManager. Kafka 4.3 does not ship an out-of-the-box production implementation, and compacted topics remain a documented limitation.
+Tiered storage keeps recent data locally and older retained segments in remote storage. Retention says whether data still exists for replay. Local retention says whether broker disk holds it. A cold read can need a slower remote path even when the record is retained.
 
 
 
-Original teaching case: A fraud-events topic ingests 120 MiB/s. The platform needs seven days of replay but expects routine consumers to stay within six hours. Replication factor three applies to broker-local bytes; the toy remote estimate counts one uploaded copy.
+At 120 MiB per second, six hours with three local replicas is about 7.4 TiB. Seven days with one toy remote copy is about 69.2 TiB. A reader rewinding two days is within retention but outside the local hot window.
 
-local hot bytes = ingress × local hours × 3 replicas
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+mib_per_second = 120; replicas = 3
+local_tib = mib_per_second * 6 * 3600 * replicas / 1024**2
+remote_tib = mib_per_second * 168 * 3600 / 1024**2
+rewind_hours = 48
+read_path = "remote" if rewind_hours > 6 else "local"
+```
+
+1. Use MiB and binary TiB consistently.
+
+   Changed values: `{"mib_per_second": 120, "replicas": 3}`
+
+2. Compute the six-hour replicated local footprint.
+
+   Changed values: `{"local_tib": 7.415771484375}`
+
+3. Compute the seven-day single-copy remote estimate.
+
+   Changed values: `{"remote_tib": 69.2138671875}`
+
+4. The consumer asks for data two days old.
+
+   Changed values: `{"rewind_hours": 48}`
+
+5. The request needs the cold path in this simplified layout.
+
+   Changed values: `{"read_path": "remote"}`
+
+[Full runnable example](examples/data-engineering.py).
+
+Limits: The estimate omits indexes, compression, segment overlap, upload lag, and remote replication policy. It does not predict a cloud bill or remote-read latency.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A Kafka log can have two storage horizons. <code>local.retention.ms</code> controls how long eligible completed segments stay on broker disks; <code>retention.ms</code> controls how long the topic retains them overall. With tiered storage, an old offset may remain readable after its segment leaves local disk because Kafka can fetch the uploaded segment from the remote tier.</p><p>This changes the capacity equation, not the log abstraction. Local disk can be sized for a hot window while remote storage carries the longer replay window. But the tiers are not interchangeable: remote reads add latency, bandwidth, request cost, and a dependency on the configured <code>RemoteStorageManager</code>. Kafka 4.3 does not ship an out-of-the-box production implementation, and compacted topics remain a documented limitation.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A fraud-events topic ingests 120 MiB/s. The platform needs seven days of replay but expects routine consumers to stay within six hours. Replication factor three applies to broker-local bytes; the toy remote estimate counts one uploaded copy.</p><pre>local hot bytes = ingress × local hours × 3 replicas
 remote retained bytes = ingress × remote hours
 120 MiB/s × 6 h × 3 ≈ 7.4 TiB local
-120 MiB/s × 168 h ≈ 69.2 TiB remote
+120 MiB/s × 168 h ≈ 69.2 TiB remote</pre><p>If a consumer rewinds two days, the record is still logically retained but the old segments are cold: the remote path participates. That may be acceptable for recovery and unacceptable for a latency-sensitive serving consumer. Instrument local/remote fetch behavior and validate the storage plugin under throttling, object-store errors, metadata lag, broker replacement, and deletion.</p>
 
-If a consumer rewinds two days, the record is still logically retained but the old segments are cold: the remote path participates. That may be acceptable for recovery and unacceptable for a latency-sensitive serving consumer. Instrument local/remote fetch behavior and validate the storage plugin under throttling, object-store errors, metadata lag, broker replacement, and deletion.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Predict whether a 24-hour rewind is local with a six-hour hot window. Then raise local retention and explain the capacity/latency trade rather than calling one setting universally better.
 

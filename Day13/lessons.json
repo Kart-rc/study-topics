@@ -1,0 +1,1126 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Two copies before success: Kafka's ISR write gate",
+    "goal": "See when a Kafka producer gets success—and when Kafka refuses the write—using a three-replica partition.",
+    "tag": "Foundation · Apache Kafka 4.3 durability contract",
+    "concept": "<p>You hand a package to a courier. You do not want “delivered” to mean that one person briefly held it. You want a second trusted person to have a copy too.</p><p>A Kafka partition can use the same idea. Imagine three replicas: one leader and two followers. The <strong>in-sync replica set</strong>, or ISR, is the group currently caught up enough to take part in the write contract.</p><p>With <code>acks=all</code>, every replica currently in the ISR must acknowledge. With <code>min.insync.replicas=2</code>, Kafka also refuses a write when fewer than two replicas remain in the ISR.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile active\"><strong>Leader</strong><p>Has order O42</p></div><div class=\"tile active\"><strong>Follower A</strong><p>Copies O42</p></div><div class=\"tile\"><strong>Follower B</strong><p>Lagging; outside ISR</p></div></div><p class=\"arrow\">ISR size 2 · minimum 2 → producer receives success</p></div><p>The replication factor says how many copies the partition is configured to have. The ISR says which copies are currently caught up. They are not the same number during a failure.</p>",
+    "example": "<p>Orders has replication factor 3, <code>min.insync.replicas=2</code>, and the producer uses <code>acks=all</code>.</p><ol><li>All three replicas are in sync. All three acknowledge O42. Success.</li><li>Follower B falls behind. The ISR now contains the leader and Follower A. Both acknowledge O43. Success.</li><li>Follower A also falls behind. Only the leader remains in the ISR. Kafka rejects O44 instead of reporting a one-copy success.</li></ol><pre><code>accepted = acks != \"all\" or len(isr) &gt;= min_isr</code></pre><p>This protects the producer-success contract. It does not mean data can never be lost under every configuration. Leader-election policy, rack placement, storage failures, retries, and producer idempotence still matter.</p>",
+    "practice": "Predict the producer result. Move each follower into or out of the ISR, then compare acks=all with acks=1.",
+    "boundary": "This model checks only the producer acknowledgement gate for one partition. It does not simulate replication lag, the high watermark, ELR semantics, leader election, rack failure, retries, or producer idempotence. Kafka 4.3 documents an ELR-specific semantic change; this lesson models the ordinary ISR case.",
+    "sim": "<label><input id=\"followerA\" type=\"checkbox\" checked> Follower A is in ISR</label><label><input id=\"followerB\" type=\"checkbox\"> Follower B is in ISR</label><label>Producer acknowledgement <select id=\"acksMode\"><option value=\"all\">acks=all</option><option value=\"1\">acks=1</option></select></label><button id=\"sendRecord\">Send O42</button><div id=\"replicas\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const isr=['Leader'];if(followerA.checked)isr.push('Follower A');if(followerB.checked)isr.push('Follower B');const all=acksMode.value==='all';const accepted=!all||isr.length>=2;replicas.replaceChildren();['Leader','Follower A','Follower B'].forEach(name=>{const tile=document.createElement('div');tile.className='tile'+(isr.includes(name)?' active':'');tile.innerHTML='<strong>'+name+'</strong><p>'+(isr.includes(name)?'in ISR':'outside ISR')+'</p>';replicas.appendChild(tile)});world.textContent='ISR: '+isr.join(', ')+' ('+isr.length+')\\nmin.insync.replicas: 2\\n'+(all?'acks=all':'acks=1')+' producer result: '+(accepted?'SUCCESS':'REJECTED · not enough in-sync replicas')+'\\n'+(all?'All current ISR members must acknowledge.':'The min-ISR producer gate is not enforced for acks=1 in this model.');}sendRecord.onclick=paint;[followerA,followerB,acksMode].forEach(x=>x.onchange=paint);paint();",
+    "questions": [
+      [
+        "Only the leader remains in the ISR. With min.insync.replicas=2 and acks=all, what happens?",
+        [
+          "Kafka reports success",
+          "Kafka rejects the write",
+          "Kafka silently changes the replication factor"
+        ],
+        1,
+        "The current ISR has one member, below the required two, so an acks=all write is rejected."
+      ],
+      [
+        "Replication factor is 3, but the ISR has 2 members. Which number controls this write gate?",
+        [
+          "The ISR size compared with min.insync.replicas",
+          "Only the configured replication factor",
+          "The consumer group size"
+        ],
+        0,
+        "The configured copies and the currently in-sync copies are different facts. The gate uses the current ISR."
+      ],
+      [
+        "What does this small model not prove?",
+        [
+          "That two ISR members can satisfy a minimum of two",
+          "That a one-member ISR is below two",
+          "That data can never be lost under every Kafka failure and configuration"
+        ],
+        2,
+        "The gate is one durability control, not a proof covering election policy, correlated failure, retries, storage, or every Kafka feature."
+      ]
+    ],
+    "written_questions": [
+      "Explain why Kafka refuses O44 even though the leader is still alive.",
+      "Change the failure from one lagging follower to an Availability Zone loss. What additional evidence would you need?"
+    ],
+    "sources": [
+      [
+        "Apache Kafka 4.3 broker configuration: min.insync.replicas",
+        "https://kafka.apache.org/43/configuration/broker-configs/#min.insync.replicas",
+        "Living 4.3 documentation; version page last modified 2026-05-22"
+      ],
+      [
+        "Apache Kafka 4.3 producer configuration: acks",
+        "https://kafka.apache.org/43/configuration/producer-configs/#acks",
+        "Living 4.3 documentation"
+      ]
+    ],
+    "source_checked_on": "2026-10-03",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "replication_factor = 3\nmin_isr = 2\nacks = \"all\"",
+          "note": "Configure three replicas, require two in sync, and ask every current ISR member to acknowledge."
+        },
+        {
+          "code": "isr = [\"leader\", \"follower-a\"]",
+          "note": "Follower B is lagging, so two replicas remain in the ISR."
+        },
+        {
+          "code": "first_accepted = acks != \"all\" or len(isr) >= min_isr\nfirst_ack_count = len(isr) if first_accepted else 0",
+          "note": "Two meets the minimum. Both current ISR members acknowledge, so O43 succeeds."
+        },
+        {
+          "code": "isr = [\"leader\"]\nsecond_accepted = acks != \"all\" or len(isr) >= min_isr",
+          "note": "Now one is below the minimum. Kafka must reject O44 for this configuration."
+        }
+      ],
+      "expect": {
+        "first_accepted": true,
+        "first_ack_count": 2,
+        "second_accepted": false
+      },
+      "limit": "Executes the boolean producer gate over a Python list. It does not run a Kafka broker or reproduce replication and high-watermark timing.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "replication_factor": 3,
+            "min_isr": 2,
+            "acks": "all"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "replication_factor": 3,
+            "min_isr": 2,
+            "acks": "all",
+            "isr": [
+              "leader",
+              "follower-a"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "replication_factor": 3,
+            "min_isr": 2,
+            "acks": "all",
+            "isr": [
+              "leader",
+              "follower-a"
+            ],
+            "first_accepted": true,
+            "first_ack_count": 2
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "replication_factor": 3,
+            "min_isr": 2,
+            "acks": "all",
+            "isr": [
+              "leader"
+            ],
+            "first_accepted": true,
+            "first_ack_count": 2,
+            "second_accepted": false
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "advanced_detail": "<p><strong>Leadership question:</strong> alarm on under-replicated partitions and low ISR counts before producers start failing. Keep rack or AZ placement aligned with the failure you intend to survive. The setting creates backpressure by rejecting unsafe success; teams must decide how producers surface and retry that failure.</p>"
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Read two, write two: why quorums overlap",
+    "goal": "Use three replicas to see why R + W > N creates an overlap—and why overlap alone is not serializability.",
+    "tag": "Foundation · Dynamo paper (2007)",
+    "concept": "<p>Three teammates each keep a copy of a shopping cart. A write updates two teammates. A later read asks two teammates. Can the read completely miss the write?</p><p>If there are <strong>N=3</strong> replicas, a successful write waits for <strong>W=2</strong>, and a read waits for <strong>R=2</strong>, the read set and write set must share at least one replica. Four seats cannot fit into three chairs without overlap.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile active\"><strong>A</strong><p>Write ✓</p></div><div class=\"tile active\"><strong>B</strong><p>Write ✓ · Read ✓</p></div><div class=\"tile\"><strong>C</strong><p>Read ✓</p></div></div><p class=\"arrow\">Write {A,B} ∩ Read {B,C} = {B}</p></div><p>The rule is <code>R + W &gt; N</code>. It guarantees set intersection for strict quorums over the same replica set. The read still needs version comparison and reconciliation to choose the right value.</p>",
+    "example": "<p>O42's cart changes from one mug to two. The write reaches A and B. A read asks B and C. B has the new version, C has the old version. The coordinator can see both and choose or reconcile them using version metadata.</p><pre><code>overlap = set(write_replicas) &amp; set(read_replicas)\nlatest_is_reachable = bool(overlap)</code></pre><p>If R=1 and the read asks only C, it may see the old cart. If replicas accept concurrent writes, overlap does not erase the conflict. Dynamo used vector clocks and returned causally unrelated versions for reconciliation.</p>",
+    "practice": "Choose R and W. The lab places the write at the left and the read at the right to test the worst separation.",
+    "boundary": "A strict three-node set model. It omits latency, failed nodes, sloppy quorums, hinted handoff, concurrent versions, read repair, anti-entropy, and consistency levels of specific databases. R + W > N gives intersection, not automatic linearizability or conflict resolution.",
+    "sim": "<label>Write acknowledgements W <input id=\"writeCount\" type=\"range\" min=\"1\" max=\"3\" value=\"2\"></label><label>Read responses R <input id=\"readCount\" type=\"range\" min=\"1\" max=\"3\" value=\"2\"></label><button id=\"testQuorum\">Test worst-separated sets</button><div id=\"nodes\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const names=['A','B','C'],w=Number(writeCount.value),r=Number(readCount.value),writes=names.slice(0,w),reads=names.slice(3-r),overlap=writes.filter(x=>reads.includes(x));nodes.replaceChildren();names.forEach(name=>{const tile=document.createElement('div');tile.className='tile'+(overlap.includes(name)?' active':'');tile.innerHTML='<strong>'+name+'</strong><p>'+(writes.includes(name)?'write ':'')+(reads.includes(name)?'read ':'')+(overlap.includes(name)?'· overlap':'')+'</p>';nodes.appendChild(tile)});world.textContent='N=3 · W='+w+' · R='+r+'\\nR + W = '+(r+w)+' '+(r+w>3?'>':'≤')+' 3\\nWorst-separated overlap: '+(overlap.length?overlap.join(', '):'none')+'\\n'+(r+w>3?'Intersection is guaranteed for strict quorums.':'A read can be disjoint from the successful write.');}testQuorum.onclick=paint;[writeCount,readCount].forEach(x=>x.oninput=paint);paint();",
+    "questions": [
+      [
+        "With N=3, W=2, and R=2, what is guaranteed for strict quorums?",
+        [
+          "Every read has zero latency",
+          "The read and write responder sets intersect",
+          "Concurrent writes cannot happen"
+        ],
+        1,
+        "Because 2 + 2 > 3, the two sets cannot be disjoint."
+      ],
+      [
+        "With W=2, a read uses only C (R=1). What can happen?",
+        [
+          "It may miss the latest write to A and B",
+          "It must see the new value",
+          "It changes N to 2"
+        ],
+        0,
+        "R + W equals N, so a worst-placed one-replica read can be disjoint from the write."
+      ],
+      [
+        "Why is quorum overlap not the same as linearizability?",
+        [
+          "Intersection provides a candidate copy, but version ordering and concurrent-write reconciliation still matter",
+          "Quorums never use replicas",
+          "R and W control only network encryption"
+        ],
+        0,
+        "A shared replica is evidence, not a complete rule for ordering every concurrent operation."
+      ]
+    ],
+    "written_questions": [
+      "Explain R + W > N using the three chairs in the visual.",
+      "How does sloppy quorum membership weaken the simple same-set argument?"
+    ],
+    "sources": [
+      [
+        "Dynamo: Amazon's Highly Available Key-value Store",
+        "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf",
+        "SOSP 2007; 2007-10-14 to 2007-10-17"
+      ]
+    ],
+    "source_checked_on": "2026-10-03",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "replicas = [\"A\", \"B\", \"C\"]\nN, W, R = 3, 2, 2",
+          "note": "Use the common three-replica, read-two, write-two example."
+        },
+        {
+          "code": "write_responders = [\"A\", \"B\"]\nread_responders = [\"B\", \"C\"]",
+          "note": "The write and read each use two replicas."
+        },
+        {
+          "code": "overlap = sorted(set(write_responders) & set(read_responders))\nlatest_is_reachable = len(overlap) > 0",
+          "note": "B is in both sets, so at least one write participant is reachable to the read."
+        },
+        {
+          "code": "unsafe_read = [\"C\"]\nunsafe_overlap = sorted(set(write_responders) & set(unsafe_read))",
+          "note": "A one-replica read can land entirely outside the successful write set."
+        }
+      ],
+      "expect": {
+        "overlap": [
+          "B"
+        ],
+        "latest_is_reachable": true,
+        "unsafe_overlap": []
+      },
+      "limit": "Executes set intersection. It does not implement Dynamo vector clocks, reconciliation, sloppy quorum membership, or distributed timing.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "replicas": [
+              "A",
+              "B",
+              "C"
+            ],
+            "N": 3,
+            "W": 2,
+            "R": 2
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "replicas": [
+              "A",
+              "B",
+              "C"
+            ],
+            "N": 3,
+            "W": 2,
+            "R": 2,
+            "write_responders": [
+              "A",
+              "B"
+            ],
+            "read_responders": [
+              "B",
+              "C"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "replicas": [
+              "A",
+              "B",
+              "C"
+            ],
+            "N": 3,
+            "W": 2,
+            "R": 2,
+            "write_responders": [
+              "A",
+              "B"
+            ],
+            "read_responders": [
+              "B",
+              "C"
+            ],
+            "overlap": [
+              "B"
+            ],
+            "latest_is_reachable": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "replicas": [
+              "A",
+              "B",
+              "C"
+            ],
+            "N": 3,
+            "W": 2,
+            "R": 2,
+            "write_responders": [
+              "A",
+              "B"
+            ],
+            "read_responders": [
+              "B",
+              "C"
+            ],
+            "overlap": [
+              "B"
+            ],
+            "latest_is_reachable": true,
+            "unsafe_read": [
+              "C"
+            ],
+            "unsafe_overlap": []
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.py"
+    },
+    "advanced_detail": "<p>Dynamo's original paper notes that R and W also determine latency: a coordinator waits for the slowest required responder. The common (3,2,2) choice is a tradeoff, not a universal default.</p>"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Deal each tenant a hand: shuffle-shard the fleet",
+    "goal": "Limit a noisy tenant to a small worker subset while preserving a healthy path for tenants whose hands only partly overlap.",
+    "tag": "Foundation · AWS fault-isolation pattern",
+    "concept": "<p>Imagine eight checkout workers. If every tenant can use all eight, one poisonous request can move from worker to worker and damage the whole fleet.</p><p>Instead, deal each tenant a small <strong>hand</strong> of workers. Tenant Rainbow gets workers 1 and 4. Tenant Rose gets 1 and 8. Their hands overlap at worker 1, but not at every worker. This is <strong>shuffle sharding</strong>.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile active\"><strong>Rainbow</strong><p>W1 · W4</p></div><div class=\"tile\"><strong>Rose</strong><p>W1 · W8</p></div><div class=\"tile\"><strong>Sunflower</strong><p>W3 · W6</p></div></div><p class=\"arrow\">Rainbow overloads W1 and W4 → Rose can still try W8</p></div><p>The architectural goal is not zero overlap. It is to avoid <em>complete</em> overlap, so one tenant's failure does not become everybody's failure.</p>",
+    "example": "<p>Rainbow sends a poisonous request that disables W1 and W4. Rainbow has no healthy worker left. Rose shares W1, but W8 remains healthy. A carefully bounded retry can use W8. Sunflower shares neither failed worker.</p><pre><code>healthy = [worker for worker in tenant_hand\n           if worker not in failed_workers]</code></pre><p>The Distinguished Engineer decision is larger than the assignment algorithm. You need deterministic placement, enough spare capacity inside each hand, Availability Zone diversity, retry limits, overload signals, and an escape plan for truly toxic tenants.</p>",
+    "practice": "Choose a failed-worker set and see which tenants lose their whole hand versus only one path.",
+    "boundary": "A fixed three-tenant illustration. It does not generate production hash assignments, model queue depth or capacity, enforce AZ diversity, or protect shared databases and control planes. Retries help only when the alternate worker is healthy and has spare capacity.",
+    "sim": "<label>Failure <select id=\"failureSet\"><option value=\"rainbow\">W1 and W4 fail</option><option value=\"one\">Only W1 fails</option><option value=\"other\">W3 and W6 fail</option></select></label><button id=\"dealHands\">Evaluate impact</button><div id=\"tenantViews\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const hands={Rainbow:['W1','W4'],Rose:['W1','W8'],Sunflower:['W3','W6']};function paint(){const failed=failureSet.value==='rainbow'?['W1','W4']:failureSet.value==='one'?['W1']:['W3','W6'];tenantViews.replaceChildren();const lines=[];Object.entries(hands).forEach(([tenant,hand])=>{const healthy=hand.filter(x=>!failed.includes(x));const tile=document.createElement('div');tile.className='tile'+(healthy.length?'':' active');tile.innerHTML='<strong>'+tenant+'</strong><p>hand: '+hand.join(', ')+'<br>healthy: '+(healthy.join(', ')||'none')+'</p>';tenantViews.appendChild(tile);lines.push(tenant+': '+(healthy.length?'service path remains':'fully impacted'))});world.textContent='Failed: '+failed.join(', ')+'\\n'+lines.join('\\n');}dealHands.onclick=paint;failureSet.onchange=paint;paint();",
+    "questions": [
+      [
+        "Rainbow uses W1/W4 and Rose uses W1/W8. W1 and W4 fail. Why can Rose continue?",
+        [
+          "Rose has a non-overlapping healthy worker, W8",
+          "Shuffle sharding repairs W1",
+          "All tenants secretly use every worker"
+        ],
+        0,
+        "Rose overlaps at W1 but not completely; W8 remains a path if capacity and retry behavior are sound."
+      ],
+      [
+        "What does shuffle sharding optimize?",
+        [
+          "It eliminates every shared dependency",
+          "It reduces complete overlap and therefore shared fate",
+          "It guarantees zero failures"
+        ],
+        1,
+        "The pattern narrows the group that shares all affected resources; it does not remove every dependency."
+      ],
+      [
+        "Which design can still defeat the isolation?",
+        [
+          "A shared database that every hand can overload",
+          "Different worker hands",
+          "A stable tenant-to-hand mapping"
+        ],
+        0,
+        "A common downstream bottleneck can restore a fleet-wide blast radius even when workers are well isolated."
+      ]
+    ],
+    "written_questions": [
+      "Explain why partial overlap is acceptable but complete overlap is dangerous.",
+      "Name the metrics and failure drill you would require before adopting shuffle sharding for a multi-tenant data plane."
+    ],
+    "sources": [
+      [
+        "AWS Builders' Library: Workload isolation using shuffle-sharding",
+        "https://builder.aws.com/content/3F06NpJ8YeoIGP8VHTw4n81pFn8/workload-isolation-using-shuffle-sharding",
+        "Published 2019"
+      ],
+      [
+        "AWS Architecture Blog: Shuffle Sharding—Massive and Magical Fault Isolation",
+        "https://aws.amazon.com/blogs/architecture/shuffle-sharding-massive-and-magical-fault-isolation/",
+        "2014-04-14"
+      ]
+    ],
+    "source_checked_on": "2026-10-03",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "hands = {\n    \"Rainbow\": [\"W1\", \"W4\"],\n    \"Rose\": [\"W1\", \"W8\"],\n    \"Sunflower\": [\"W3\", \"W6\"],\n}",
+          "note": "Deal each tenant a two-worker hand."
+        },
+        {
+          "code": "failed = [\"W1\", \"W4\"]",
+          "note": "Rainbow's two workers fail under its toxic workload."
+        },
+        {
+          "code": "healthy = {tenant: [w for w in hand if w not in failed]\n           for tenant, hand in hands.items()}",
+          "note": "Check the surviving path inside each tenant's own hand."
+        },
+        {
+          "code": "fully_impacted = sorted(tenant for tenant, workers in healthy.items() if not workers)",
+          "note": "Only Rainbow has complete overlap with the failed set."
+        }
+      ],
+      "expect": {
+        "healthy": {
+          "Rainbow": [],
+          "Rose": [
+            "W8"
+          ],
+          "Sunflower": [
+            "W3",
+            "W6"
+          ]
+        },
+        "fully_impacted": [
+          "Rainbow"
+        ]
+      },
+      "limit": "Executes membership filtering for fixed hands. It does not generate or capacity-test real assignments.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "hands": {
+              "Rainbow": [
+                "W1",
+                "W4"
+              ],
+              "Rose": [
+                "W1",
+                "W8"
+              ],
+              "Sunflower": [
+                "W3",
+                "W6"
+              ]
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "hands": {
+              "Rainbow": [
+                "W1",
+                "W4"
+              ],
+              "Rose": [
+                "W1",
+                "W8"
+              ],
+              "Sunflower": [
+                "W3",
+                "W6"
+              ]
+            },
+            "failed": [
+              "W1",
+              "W4"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "hands": {
+              "Rainbow": [
+                "W1",
+                "W4"
+              ],
+              "Rose": [
+                "W1",
+                "W8"
+              ],
+              "Sunflower": [
+                "W3",
+                "W6"
+              ]
+            },
+            "failed": [
+              "W1",
+              "W4"
+            ],
+            "healthy": {
+              "Rainbow": [],
+              "Rose": [
+                "W8"
+              ],
+              "Sunflower": [
+                "W3",
+                "W6"
+              ]
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "hands": {
+              "Rainbow": [
+                "W1",
+                "W4"
+              ],
+              "Rose": [
+                "W1",
+                "W8"
+              ],
+              "Sunflower": [
+                "W3",
+                "W6"
+              ]
+            },
+            "failed": [
+              "W1",
+              "W4"
+            ],
+            "healthy": {
+              "Rainbow": [],
+              "Rose": [
+                "W8"
+              ],
+              "Sunflower": [
+                "W3",
+                "W6"
+              ]
+            },
+            "fully_impacted": [
+              "Rainbow"
+            ]
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "advanced_detail": "<p>For eight workers, there are 28 unordered two-worker combinations. The combinatorial space can give many tenants different hands without building dedicated fleets. Validate the actual overlap distribution and capacity; a pretty combination count is not an SLO.</p>"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Same logic, new surface: metamorphic tests for an LLM",
+    "goal": "Catch brittle reasoning by transforming a case without changing its logic, then checking whether the model's judgment stays the same.",
+    "tag": "New peer-reviewed research · harness engineering",
+    "concept": "<p>A calculator should still return 4 if you rename a local variable from <code>x</code> to <code>total</code>. An LLM reasoning system should also survive a change that preserves meaning.</p><p>Start with: “Every gold order needs review. O42 is gold. Therefore O42 needs review.” Now rename O42 to O77 everywhere. The wording changes, but the logic does not. The expected judgment should remain <strong>ENTAILS</strong>.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Source case</strong><p>Gold(O42) → Review(O42)</p></div><div class=\"tile active\"><strong>Safe transform</strong><p>Rename O42 → O77 everywhere</p></div><div class=\"tile\"><strong>Required relation</strong><p>same judgment</p></div></div></div><p>This is a <strong>metamorphic test</strong>. Instead of needing a fresh answer label for every generated case, the harness checks a relation between outputs.</p>",
+    "example": "<p>The source receives ENTAILS. The renamed case receives CONTRADICTS. The harness raises a violation because the outputs should match.</p><pre><code>violation = outputs[\"source\"] != outputs[\"renamed\"]</code></pre><p>The important work is proving the transform preserves meaning. Replacing “gold” with “valuable” may sound similar but is not a formal equivalence. A failure after a drifting transform is a bad test, not evidence of a bad model.</p><p>The 2026 LGMT paper derives transformations from first-order-logic equivalences and reports experiments across six LLMs. Treat its measured findings as research claims from that evaluation, not universal production rates.</p>",
+    "practice": "Choose a semantics-preserving transformation and decide whether the synthetic candidate stays consistent. This lab does not call a model.",
+    "boundary": "A deterministic harness over recorded labels, not live LLM inference and not an implementation of LGMT. It demonstrates output-relation checking. Production use needs validated transformations, repeated sampling where applicable, model/version capture, and human review of suspected semantic drift.",
+    "sim": "<label>Transformation <select id=\"transformKind\"><option value=\"rename\">Rename O42 to O77 everywhere</option><option value=\"reorder\">Swap the two premises</option></select></label><label><input id=\"consistentModel\" type=\"checkbox\"> Synthetic candidate keeps the same label</label><button id=\"runRelation\">Run relation check</button><div id=\"caseViews\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const renamed=transformKind.value==='rename';const follow=renamed?'Every gold order needs review. O77 is gold. Therefore O77 needs review.':'O42 is gold. Every gold order needs review. Therefore O42 needs review.';const sourceLabel='ENTAILS',followLabel=consistentModel.checked?'ENTAILS':'CONTRADICTS';caseViews.innerHTML='<div class=\"tile\"><strong>Source</strong><p>O42 · '+sourceLabel+'</p></div><div class=\"tile active\"><strong>Follow-up</strong><p>'+follow+'<br>'+followLabel+'</p></div>';world.textContent='Expected relation: same label\\nObserved: '+sourceLabel+' → '+followLabel+'\\nResult: '+(sourceLabel===followLabel?'PASS · invariant preserved':'VIOLATION · investigate model or transform');}runRelation.onclick=paint;[transformKind,consistentModel].forEach(x=>x.onchange=paint);paint();",
+    "questions": [
+      [
+        "The identifier is renamed consistently everywhere. What should happen to the entailment label?",
+        [
+          "It should stay the same",
+          "It must flip",
+          "The case must be deleted"
+        ],
+        0,
+        "A consistent symbol rename preserves the logical structure, so the relation requires the same judgment."
+      ],
+      [
+        "Why can a metamorphic test work without a new answer key for every follow-up?",
+        [
+          "It checks a required relation between outputs",
+          "It assumes every model answer is correct",
+          "It disables evaluation"
+        ],
+        0,
+        "The oracle is the relation—such as equality—not a separately labeled answer for every generated case."
+      ],
+      [
+        "What is the largest testing risk in this toy?",
+        [
+          "The transform may accidentally change the meaning",
+          "The output strings are too short",
+          "The source uses an order ID"
+        ],
+        0,
+        "If semantics drift, an output change may be correct. Transform validation is part of the harness contract."
+      ]
+    ],
+    "written_questions": [
+      "Design one meaning-preserving transform for a production agent task and state the expected output relation.",
+      "How would you distinguish a model defect from a transform that changed task semantics?"
+    ],
+    "sources": [
+      [
+        "LGMT: Logic-Grounded Metamorphic Testing for evaluating the reasoning reliability of LLMs",
+        "https://www.sciencedirect.com/science/article/pii/S0950705126010506",
+        "Knowledge-Based Systems 348, article 116324; 2026-08-03"
+      ],
+      [
+        "LGMT preprint",
+        "https://arxiv.org/abs/2605.23965",
+        "Submitted 2026-05-12"
+      ]
+    ],
+    "source_checked_on": "2026-10-03",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "source = \"Gold(O42); Gold(x) -> Review(x); query Review(O42)\"\nsource_label = \"ENTAILS\"",
+          "note": "Record one source case and its candidate judgment."
+        },
+        {
+          "code": "renamed = source.replace(\"O42\", \"O77\")\nexpected_relation = \"same label\"",
+          "note": "Rename the symbol everywhere; the logical structure stays the same."
+        },
+        {
+          "code": "candidate_outputs = {\"source\": source_label, \"renamed\": \"CONTRADICTS\"}",
+          "note": "Use synthetic candidate outputs so the lesson can demonstrate a failure without calling an LLM."
+        },
+        {
+          "code": "violation = candidate_outputs[\"source\"] != candidate_outputs[\"renamed\"]",
+          "note": "The labels differ, so the harness reports an invariant violation."
+        }
+      ],
+      "expect": {
+        "expected_relation": "same label",
+        "candidate_outputs": {
+          "source": "ENTAILS",
+          "renamed": "CONTRADICTS"
+        },
+        "violation": true
+      },
+      "limit": "Executes string replacement and compares synthetic recorded labels. It does not run an LLM or prove that arbitrary natural-language rewrites preserve semantics.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "source": "Gold(O42); Gold(x) -> Review(x); query Review(O42)",
+            "source_label": "ENTAILS"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "source": "Gold(O42); Gold(x) -> Review(x); query Review(O42)",
+            "source_label": "ENTAILS",
+            "renamed": "Gold(O77); Gold(x) -> Review(x); query Review(O77)",
+            "expected_relation": "same label"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "source": "Gold(O42); Gold(x) -> Review(x); query Review(O42)",
+            "source_label": "ENTAILS",
+            "renamed": "Gold(O77); Gold(x) -> Review(x); query Review(O77)",
+            "expected_relation": "same label",
+            "candidate_outputs": {
+              "source": "ENTAILS",
+              "renamed": "CONTRADICTS"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "source": "Gold(O42); Gold(x) -> Review(x); query Review(O42)",
+            "source_label": "ENTAILS",
+            "renamed": "Gold(O77); Gold(x) -> Review(x); query Review(O77)",
+            "expected_relation": "same label",
+            "candidate_outputs": {
+              "source": "ENTAILS",
+              "renamed": "CONTRADICTS"
+            },
+            "violation": true
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "advanced_detail": "<p>The useful unit in an agent harness is <em>source case + transformation + expected relation + evidence</em>. Version all four. Relations can require equality, monotonicity, or bounded change, but each needs a task-specific reason.</p>"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Look from two directions: orbital maps at one atomic column",
+    "goal": "Build intuition for electron linear dichroism by comparing two directional signals at the same atomic column.",
+    "tag": "New coverage 2026-09-29 · original research 2026-05-12",
+    "concept": "<p>Polarized sunglasses reveal that light can behave differently by direction. In a crystal, electron orbitals can also prefer one direction. That directional imbalance is electronic anisotropy.</p><p>The reported method uses an atomic-sized electron probe and electron energy-loss spectroscopy. It selects momentum transfer along two orthogonal directions. Comparing those signals produces <strong>electron linear dichroism</strong> at individual atomic columns.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Direction H</strong><p>signal 62</p></div><div class=\"tile\"><strong>Same Mn column</strong><p>atomic-sized probe</p></div><div class=\"tile active\"><strong>Direction V</strong><p>signal 38</p></div></div><p class=\"arrow\">directional difference: 62 − 38 = +24</p></div><p>The difference is not “an image of an orbital” by itself. Geometry, scattering calculations, calibration, and the material model connect the measured signal to orbital occupation.</p>",
+    "example": "<p>In the original Nature Materials study, the researchers used strained La<sub>0.7</sub>Sr<sub>0.3</sub>MnO<sub>3</sub> films. They report resolving Mn 3d e<sub>g</sub> orbital polarization with sub-ångström precision: compressive strain favored 3z²−r² occupation, while tensile strain favored x²−y².</p><pre><code>dichroism = horizontal_signal - vertical_signal</code></pre><p>Our numbers +24 and −18 only teach the sign flip. They do not reproduce the experiment. A News &amp; Views article published on September 29 highlighted the May 12 research; the research date and the later coverage date are different.</p>",
+    "practice": "Move the two directional signals. Predict the sign before the display updates, then explain what additional physics is needed to infer an orbital.",
+    "boundary": "A two-number subtraction, not microscopy, EELS processing, dynamical diffraction, orbital reconstruction, or the authors' extraction protocols. Signal sign alone cannot be mapped to an orbital without experimental geometry, calibration, material context, and theory.",
+    "sim": "<label>Horizontal signal <input id=\"horizontalSignal\" type=\"range\" min=\"0\" max=\"100\" value=\"62\"></label><label>Vertical signal <input id=\"verticalSignal\" type=\"range\" min=\"0\" max=\"100\" value=\"38\"></label><button id=\"compareSignals\">Compare directions</button><div class=\"meter\"><div id=\"signalMeter\"></div></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const h=Number(horizontalSignal.value),v=Number(verticalSignal.value),d=h-v;signalMeter.style.width=Math.min(100,Math.abs(d))+'%';world.textContent='H='+h+' · V='+v+'\\nH − V = '+(d>0?'+':'')+d+'\\nToy interpretation: '+(d===0?'no directional difference':d>0?'H-weighted signal':'V-weighted signal')+'\\nAn orbital claim needs geometry, calibration, and theory.';}compareSignals.onclick=paint;[horizontalSignal,verticalSignal].forEach(x=>x.oninput=paint);paint();",
+    "questions": [
+      [
+        "Why measure the same atomic column along two orthogonal momentum-transfer directions?",
+        [
+          "To expose directional differences in the electronic signal",
+          "To double the atom count",
+          "To remove the need for calibration"
+        ],
+        0,
+        "Linear dichroism comes from comparing direction-dependent signals at the same location."
+      ],
+      [
+        "What did the May 2026 paper report for strained LSMO?",
+        [
+          "Compressive and tensile strain favored different Mn e_g occupations",
+          "All directions produced identical occupation",
+          "The method used only visible light"
+        ],
+        0,
+        "The reported sign and occupation preference changed with compressive versus tensile strain."
+      ],
+      [
+        "What can H − V = +24 prove in this lesson's toy?",
+        [
+          "Only that the two toy inputs differ by +24",
+          "The exact orbital in any material",
+          "That experimental noise is zero"
+        ],
+        0,
+        "The arithmetic is real, but interpreting an orbital requires the full experimental and theoretical pipeline."
+      ]
+    ],
+    "written_questions": [
+      "Explain the sunglasses analogy, then state where it stops being accurate.",
+      "Which validation evidence would you demand before using an atomic-column orbital map to guide materials design?"
+    ],
+    "sources": [
+      [
+        "Detecting linear dichroism with atomic resolution",
+        "https://www.nature.com/articles/s41563-026-02606-6",
+        "Nature Materials; published 2026-05-12"
+      ],
+      [
+        "Probing orbital occupation at atomic resolution",
+        "https://www.nature.com/articles/s41563-026-02760-x",
+        "News & Views; published 2026-09-29"
+      ],
+      [
+        "Original research preprint",
+        "https://arxiv.org/abs/2511.18796",
+        "Submitted 2025-11-24; journal version 2026-05-12"
+      ]
+    ],
+    "source_checked_on": "2026-10-03",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "signals = {\n    \"compressed\": {\"H\": 62, \"V\": 38},\n    \"tensile\": {\"H\": 41, \"V\": 59},\n}",
+          "note": "Use two synthetic directional signals for each strained sample."
+        },
+        {
+          "code": "dichroism = {sample: pair[\"H\"] - pair[\"V\"]\n              for sample, pair in signals.items()}",
+          "note": "Subtract the orthogonal signals at each sample."
+        },
+        {
+          "code": "sign = {sample: \"positive\" if value > 0 else \"negative\" if value < 0 else \"zero\"\n        for sample, value in dichroism.items()}",
+          "note": "The toy signals have opposite signs."
+        },
+        {
+          "code": "sign_flip = sign[\"compressed\"] != sign[\"tensile\"]",
+          "note": "Record the visible sign flip without pretending the toy performs orbital reconstruction."
+        }
+      ],
+      "expect": {
+        "dichroism": {
+          "compressed": 24,
+          "tensile": -18
+        },
+        "sign": {
+          "compressed": "positive",
+          "tensile": "negative"
+        },
+        "sign_flip": true
+      },
+      "limit": "Executes subtraction on synthetic intensities. It does not model electron scattering or reproduce the paper's data analysis.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "signals": {
+              "compressed": {
+                "H": 62,
+                "V": 38
+              },
+              "tensile": {
+                "H": 41,
+                "V": 59
+              }
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "signals": {
+              "compressed": {
+                "H": 62,
+                "V": 38
+              },
+              "tensile": {
+                "H": 41,
+                "V": 59
+              }
+            },
+            "dichroism": {
+              "compressed": 24,
+              "tensile": -18
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "signals": {
+              "compressed": {
+                "H": 62,
+                "V": 38
+              },
+              "tensile": {
+                "H": 41,
+                "V": 59
+              }
+            },
+            "dichroism": {
+              "compressed": 24,
+              "tensile": -18
+            },
+            "sign": {
+              "compressed": "positive",
+              "tensile": "negative"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "signals": {
+              "compressed": {
+                "H": 62,
+                "V": 38
+              },
+              "tensile": {
+                "H": 41,
+                "V": 59
+              }
+            },
+            "dichroism": {
+              "compressed": 24,
+              "tensile": -18
+            },
+            "sign": {
+              "compressed": "positive",
+              "tensile": "negative"
+            },
+            "sign_flip": true
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "advanced_detail": "<p>The paper reports two optimized signal-extraction protocols and validation against established X-ray measurements. Those steps matter because spatial resolution alone does not guarantee a trustworthy electronic-structure interpretation.</p>"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "One job, then gone: ephemeral self-hosted runners",
+    "goal": "See how destroying a self-hosted runner after one job reduces cross-job residue without making the current job trusted.",
+    "tag": "Current official guidance · GitHub Actions runners",
+    "concept": "<p>A hotel cleans and resets a room between guests. If the same workspace is reused without a reset, the next guest may find files or processes left by the previous one.</p><p>A persistent self-hosted runner can execute many jobs. A compromised or careless job may leave credentials, files, or background processes. An <strong>ephemeral runner</strong> is registered for one job, then GitHub de-registers it. Your automation destroys the machine or container and creates a clean one for the next job.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Provision</strong><p>clean image</p></div><div class=\"tile active\"><strong>Run one job</strong><p>workspace changes</p></div><div class=\"tile\"><strong>Destroy</strong><p>no next job on this runner</p></div></div><p class=\"arrow\">new job → new runner</p></div><p>GitHub recommends ephemeral self-hosted runners for autoscaling. The one-job lifecycle limits exposure from <em>previous</em> jobs. It does not protect a secret deliberately given to the current job.</p>",
+    "example": "<p>An untrusted build writes <code>leftover_token.txt</code>. On a persistent runner, the next deployment job can see it unless cleanup was perfect. On an ephemeral runner, the runner is de-registered after the build and the backing environment is wiped before another job starts.</p><pre><code>./config.sh --url https://github.com/acme   --token \"$REGISTRATION_TOKEN\" --ephemeral</code></pre><p>Runner lifecycle changes operational duties. Forward runner logs to external storage before destruction. Keep the base image patched, scope network and IAM permissions, and assume repository code executed in the job may be hostile.</p>",
+    "practice": "Run an untrusted job, then a trusted job. Switch between persistent and ephemeral runners and inspect the residue.",
+    "boundary": "A dictionary standing in for runner disk. It does not provision GitHub runners, ARC, VMs, containers, networks, IAM, or log forwarding. Ephemeral lifecycle reduces cross-job persistence; it does not secure secrets and permissions available during the same job.",
+    "sim": "<label>Runner lifecycle <select id=\"runnerMode\"><option value=\"ephemeral\">ephemeral · one job</option><option value=\"persistent\">persistent · reused</option></select></label><button id=\"runUntrusted\">1. Run untrusted build</button><button id=\"runTrusted\">2. Run trusted deploy</button><button id=\"resetRunner\">Reset</button><div id=\"runnerView\" class=\"tile\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "let disk={},history=[];function paint(note){runnerView.innerHTML='<strong>Runner disk</strong><p>'+(Object.keys(disk).join(', ')||'clean')+'</p>';world.textContent=(note||'Ready.')+'\\n'+history.join('\\n');}runUntrusted.onclick=()=>{disk['leftover_token.txt']='synthetic';history.push('Untrusted build wrote leftover_token.txt.');if(runnerMode.value==='ephemeral'){disk={};history.push('Runner de-registered and backing environment destroyed.')}paint('Build complete.');};runTrusted.onclick=()=>{const exposed=Object.hasOwn(disk,'leftover_token.txt');history.push('Trusted deploy sees residue: '+(exposed?'YES · unsafe carryover':'NO · clean start'));if(runnerMode.value==='ephemeral'){disk={};history.push('Deploy runner destroyed after its one job.')}paint('Deploy check complete.');};function reset(){disk={};history=[];paint('Fresh runner pool.');}resetRunner.onclick=reset;runnerMode.onchange=reset;reset();",
+    "questions": [
+      [
+        "What happens after an ephemeral self-hosted runner processes one job?",
+        [
+          "GitHub automatically de-registers it",
+          "It becomes a permanent cache",
+          "It receives every queued job"
+        ],
+        0,
+        "GitHub documents one-job assignment and automatic de-registration; your infrastructure should then wipe or destroy it."
+      ],
+      [
+        "Which risk does the one-job lifecycle directly reduce?",
+        [
+          "Residue from a previous job reaching a later job",
+          "A current job reading every secret granted to it",
+          "A vulnerable base image"
+        ],
+        0,
+        "A new environment limits cross-job carryover. Same-job permissions and image security remain separate controls."
+      ],
+      [
+        "Why must logs be sent elsewhere?",
+        [
+          "The ephemeral environment is destroyed, so local diagnostic logs would disappear",
+          "GitHub Actions cannot create logs",
+          "External logs make all jobs trustworthy"
+        ],
+        0,
+        "GitHub explicitly warns that ephemeral runner logs need external preservation for troubleshooting."
+      ]
+    ],
+    "written_questions": [
+      "Explain the hotel-room analogy and name two threats it does not solve.",
+      "Design a minimum runner identity, network, image, and logging boundary for an EKS-based runner pool."
+    ],
+    "sources": [
+      [
+        "GitHub Docs: Self-hosted runners reference—ephemeral runners for autoscaling",
+        "https://docs.github.com/en/actions/reference/runners/self-hosted-runners#ephemeral-runners-for-autoscaling",
+        "Living official documentation"
+      ]
+    ],
+    "source_checked_on": "2026-10-03",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "persistent_disk = {}",
+          "note": "Start a reusable runner with an empty workspace."
+        },
+        {
+          "code": "persistent_disk[\"leftover_token.txt\"] = \"synthetic\"",
+          "note": "The untrusted build leaves a file behind."
+        },
+        {
+          "code": "next_persistent_job_sees_residue = \"leftover_token.txt\" in persistent_disk",
+          "note": "A later job on the same runner sees the residue."
+        },
+        {
+          "code": "ephemeral_disk = {\"leftover_token.txt\": \"synthetic\"}\nephemeral_disk = {}  # destroy after one job\nnext_ephemeral_job_sees_residue = \"leftover_token.txt\" in ephemeral_disk",
+          "note": "Destroying the one-job environment removes cross-job disk state."
+        }
+      ],
+      "expect": {
+        "next_persistent_job_sees_residue": true,
+        "next_ephemeral_job_sees_residue": false
+      },
+      "limit": "Executes dictionary mutations. It does not provision or attack a runner and says nothing about secrets granted inside one job.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "persistent_disk": {}
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "persistent_disk": {
+              "leftover_token.txt": "synthetic"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "persistent_disk": {
+              "leftover_token.txt": "synthetic"
+            },
+            "next_persistent_job_sees_residue": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "persistent_disk": {
+              "leftover_token.txt": "synthetic"
+            },
+            "next_persistent_job_sees_residue": true,
+            "ephemeral_disk": {},
+            "next_ephemeral_job_sees_residue": false
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "advanced_detail": "<p>GitHub's reference also notes that a job with no matching online runner may stay queued until the 24-hour timeout. Autoscaling correctness therefore includes capacity, routing labels, registration, cleanup, external logs, and upgrade discipline.</p>"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Add, migrate, remove: evolve an API field safely",
+    "goal": "Rename a response field without breaking an old client by separating expansion, migration, and contraction.",
+    "tag": "Foundation · API compatibility and versioning",
+    "concept": "<p>A store has shipped <code>{\"name\":\"Mug\"}</code> for years. The team now prefers <code>display_name</code>. Replacing the field overnight is like changing every apartment number without forwarding mail: old clients still ask for <code>name</code>.</p><p>Use three stages:</p><ol><li><strong>Expand:</strong> add <code>display_name</code>, but keep populating <code>name</code>.</li><li><strong>Migrate:</strong> update clients and measure old-field use.</li><li><strong>Contract:</strong> remove <code>name</code> only behind a compatible version transition and deprecation plan.</li></ol><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>v1</strong><p>name</p></div><div class=\"tile active\"><strong>bridge</strong><p>name + display_name</p></div><div class=\"tile\"><strong>new major</strong><p>display_name</p></div></div><p class=\"arrow\">old client works → clients migrate → old contract retires</p></div>",
+    "example": "<p>During expansion the server returns both fields:</p><pre><code>{\n  \"name\": \"Mug\",\n  \"display_name\": \"Coffee Mug\"\n}</code></pre><p>An old client reads <code>name</code>. A new client prefers <code>display_name</code> and can temporarily fall back to <code>name</code>. If the server simply renames the field in v1, that is remove-plus-add and breaks the old client.</p><p>Google's AIP-180 distinguishes source, wire, and semantic compatibility. Adding a component is generally compatible only when previous clients keep their old behavior. New required request fields, changed defaults, or changed meanings can still break them.</p>",
+    "practice": "Choose a server phase and a client generation. Predict whether the read succeeds and which field it uses.",
+    "boundary": "A JSON response lookup. It does not cover generated client source compatibility, protobuf field numbers, unknown-enum handling, request validation, default serialization, pagination, or a real deprecation policy. Additive is not automatically safe when behavior or requirements change.",
+    "sim": "<label>Server phase <select id=\"serverPhase\"><option value=\"expand\">expand · both fields</option><option value=\"old\">old · name only</option><option value=\"break\">break in place · display_name only</option></select></label><label>Client <select id=\"clientGeneration\"><option value=\"old\">old client · reads name</option><option value=\"new\">new client · prefers display_name</option></select></label><button id=\"callApi\">Call synthetic API</button><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const phase=serverPhase.value;const response=phase==='expand'?{name:'Mug',display_name:'Coffee Mug'}:phase==='old'?{name:'Mug'}:{display_name:'Coffee Mug'};let value,field;if(clientGeneration.value==='old'){field='name';value=response.name;}else{field=response.display_name?'display_name':'name';value=response.display_name||response.name;}world.textContent='Response: '+JSON.stringify(response)+'\\nClient reads: '+field+'\\nResult: '+(value||'ERROR · expected field is missing')+'\\n'+(phase==='break'&&clientGeneration.value==='old'?'Breaking rename inside the old contract.':'Compatibility path is visible above.');}callApi.onclick=paint;[serverPhase,clientGeneration].forEach(x=>x.onchange=paint);paint();",
+    "questions": [
+      [
+        "Why does replacing name with display_name break an old v1 client?",
+        [
+          "The client still reads name, which disappeared",
+          "JSON forbids two fields",
+          "Major versions cannot exist"
+        ],
+        0,
+        "A rename is remove-plus-add. The old client's expected field is gone."
+      ],
+      [
+        "What is the safe bridge?",
+        [
+          "Return both fields while clients migrate",
+          "Change name's meaning silently",
+          "Add a new required request field"
+        ],
+        0,
+        "Keeping the old field populated preserves existing behavior while the new field becomes available."
+      ],
+      [
+        "When can an apparently additive change still be risky?",
+        [
+          "When it changes defaults, adds a required input, or introduces a response enum clients cannot handle",
+          "Only when the JSON is indented",
+          "Never; additive always means safe"
+        ],
+        0,
+        "Compatibility includes source, wire, and semantics. The shape alone is not the whole contract."
+      ]
+    ],
+    "written_questions": [
+      "Write the expand, migrate, and contract plan for renaming one field used by ten client teams.",
+      "Which telemetry and deprecation evidence would justify removing the old field in a new major version?"
+    ],
+    "sources": [
+      [
+        "AIP-180: Backwards compatibility",
+        "https://google.aip.dev/180",
+        "Approved 2019-07-23; changelog updated through 2025-10-21"
+      ],
+      [
+        "AIP-185: API Versioning",
+        "https://google.aip.dev/185",
+        "Approved 2024-10-22"
+      ]
+    ],
+    "source_checked_on": "2026-10-03",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "server_v1 = {\"name\": \"Mug\"}",
+          "note": "Start with the response old clients already use."
+        },
+        {
+          "code": "server_expand = {\"name\": \"Mug\", \"display_name\": \"Coffee Mug\"}\nold_client_value = server_expand[\"name\"]",
+          "note": "Add the new field and keep the old one populated; the old client still works."
+        },
+        {
+          "code": "new_client_value = server_expand.get(\"display_name\", server_expand[\"name\"])",
+          "note": "The new client prefers the new field and can bridge older servers."
+        },
+        {
+          "code": "server_break = {\"display_name\": \"Coffee Mug\"}\nold_client_error = \"missing name\" if \"name\" not in server_break else \"ok\"",
+          "note": "Removing name inside the old contract breaks the old client."
+        }
+      ],
+      "expect": {
+        "old_client_value": "Mug",
+        "new_client_value": "Coffee Mug",
+        "old_client_error": "missing name"
+      },
+      "limit": "Executes Python dictionary lookups. It does not test an OpenAPI schema, generated SDK, deployed gateway, or real consumers.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "server_v1": {
+              "name": "Mug"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "server_v1": {
+              "name": "Mug"
+            },
+            "server_expand": {
+              "name": "Mug",
+              "display_name": "Coffee Mug"
+            },
+            "old_client_value": "Mug"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "server_v1": {
+              "name": "Mug"
+            },
+            "server_expand": {
+              "name": "Mug",
+              "display_name": "Coffee Mug"
+            },
+            "old_client_value": "Mug",
+            "new_client_value": "Coffee Mug"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "server_v1": {
+              "name": "Mug"
+            },
+            "server_expand": {
+              "name": "Mug",
+              "display_name": "Coffee Mug"
+            },
+            "old_client_value": "Mug",
+            "new_client_value": "Coffee Mug",
+            "server_break": {
+              "display_name": "Coffee Mug"
+            },
+            "old_client_error": "missing name"
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "advanced_detail": "<p>AIP-185 uses major versions for incompatible changes and requires a reasonable overlap and deprecation period. Your organization may use a different versioning scheme, but the consumer evidence and migration discipline remain necessary.</p>"
+  }
+]

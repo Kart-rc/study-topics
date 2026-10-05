@@ -3,10 +3,10 @@
     "slug": "data-engineering",
     "track": "Data engineering",
     "title": "The commit is the boundary",
-    "tag": "Foundation \u00b7 current documentation",
-    "goal": "Predict what readers see when two Iceberg writers race, and explain why retrying a commit is different from rewriting all data.",
-    "concept": "<p>A table in object storage is more than a folder. A reader needs a consistent membership list: which files belong to this version? Iceberg records that membership in snapshot metadata. Writers prepare new files and metadata, then publish the update through an atomic metadata-pointer change. A reader using an older snapshot can continue with its original view.</p><p>Concurrent writers use optimistic concurrency. They prepare work independently, then attempt the commit. If another writer has changed the base, the losing writer must refresh and validate its assumptions before trying again. A compatible append can often reuse its prepared files; a conflicting rewrite may be invalid. <a href=\"https://iceberg.apache.org/docs/latest/reliability/\">Iceberg reliability documentation</a>.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A reconciliation table starts with files A and B. Writer Blue prepares C, while writer Amber prepares D. Both began from version 0. Blue publishes version 1: A, B, C. Amber must not overwrite that state with A, B, D, losing C.</p><p>Amber instead refreshes its base, validates that this independent append remains compatible, and proposes A, B, C, D. If the atomic check succeeds, version 2 contains both contributions. The operation that publishes membership is tiny compared with producing a terabyte of new files. This is why commit retry and data recomputation are separate costs.</p><p>Now change the operation: Amber intended to compact A and B. If Blue had removed A, Amber's original plan would no longer have the required inputs. Blindly retrying the old plan would be incorrect. The invariant is more useful than a blanket instruction to retry.</p>",
+    "tag": "Foundation · current documentation",
+    "goal": "Two people edit the same table.",
+    "concept": "<p>Two people edit the same table. Blue adds file C. Amber adds file D. If Amber saves an old file list after Blue, C can disappear from the table even though the file still exists.</p><p>An Iceberg snapshot is the list of files a reader should use. Publishing a new list must check that the starting version is still current. If it changed, refresh the list and check whether your change still makes sense. This is optimistic concurrency: prepare work first, then reject a stale save.</p>",
+    "example": "<p>Start with A and B at version 0. Blue publishes A, B, C at version 1. Amber’s version-0 save fails. Amber reads version 1 and adds D to that list, producing A, B, C, D. This retry is safe for the independent append in our example; it is not a rule to retry every rewrite.</p>",
     "practice": "Before clicking, write the expected file list after Blue commits, after Amber fails, and after Amber refreshes and commits. Then explain what a reader pinned to version 0 should see. Spend two minutes describing how you would distinguish a catalog conflict from executor failure in an incident.",
     "boundary": "This executable model demonstrates compare-and-swap for independent appends only. It does not implement Iceberg manifests, catalog protocols, delete files, isolation options, garbage collection, or real Spark execution. It cannot establish compatibility for a production rewrite.",
     "sim": "<button id=\"blue\">Commit Blue (+C)</button><button id=\"amber\">Commit Amber (+D)</button><button id=\"refresh\">Refresh Amber</button><button id=\"reset\">Reset</button><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -49,16 +49,161 @@
         "https://iceberg.apache.org/docs/latest/reliability/",
         "Undated living documentation"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>A table in object storage is more than a folder. A reader needs a consistent membership list: which files belong to this version? Iceberg records that membership in snapshot metadata. Writers prepare new files and metadata, then publish the update through an atomic metadata-pointer change. A reader using an older snapshot can continue with its original view.</p><p>Concurrent writers use optimistic concurrency. They prepare work independently, then attempt the commit. If another writer has changed the base, the losing writer must refresh and validate its assumptions before trying again. A compatible append can often reuse its prepared files; a conflicting rewrite may be invalid. <a href=\"https://iceberg.apache.org/docs/latest/reliability/\">Iceberg reliability documentation</a>.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A reconciliation table starts with files A and B. Writer Blue prepares C, while writer Amber prepares D. Both began from version 0. Blue publishes version 1: A, B, C. Amber must not overwrite that state with A, B, D, losing C.</p><p>Amber instead refreshes its base, validates that this independent append remains compatible, and proposes A, B, C, D. If the atomic check succeeds, version 2 contains both contributions. The operation that publishes membership is tiny compared with producing a terabyte of new files. This is why commit retry and data recomputation are separate costs.</p><p>Now change the operation: Amber intended to compact A and B. If Blue had removed A, Amber's original plan would no longer have the required inputs. Blindly retrying the old plan would be incorrect. The invariant is more useful than a blanket instruction to retry.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "files = [\"A\", \"B\"]; version = 0",
+          "note": "The current snapshot contains two files."
+        },
+        {
+          "code": "amber_base = version; amber_plan = files + [\"D\"]",
+          "note": "Amber prepares a list from version 0; nothing is published yet."
+        },
+        {
+          "code": "files = files + [\"C\"]; version += 1",
+          "note": "Blue publishes C. The shared version changes to 1."
+        },
+        {
+          "code": "amber_can_commit = amber_base == version",
+          "note": "The stale-version check returns False. Amber must not overwrite Blue."
+        },
+        {
+          "code": "amber_plan = files + [\"D\"]; amber_base = version",
+          "note": "Amber refreshes and rebuilds this independent append."
+        },
+        {
+          "code": "files = amber_plan; version += 1",
+          "note": "The toy accepts the refreshed proposal; both additions remain."
+        }
+      ],
+      "limit": "This list-and-version example is not the Iceberg commit implementation. Its compare and publish steps stand for an atomic catalog operation. Concurrent execution, file validation, and rewrite conflicts need the real table protocol.",
+      "expect": {
+        "files": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "amber_can_commit": false
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "files": [
+              "A",
+              "B"
+            ],
+            "version": 0
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "files": [
+              "A",
+              "B"
+            ],
+            "version": 0,
+            "amber_base": 0,
+            "amber_plan": [
+              "A",
+              "B",
+              "D"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "files": [
+              "A",
+              "B",
+              "C"
+            ],
+            "version": 1,
+            "amber_base": 0,
+            "amber_plan": [
+              "A",
+              "B",
+              "D"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "files": [
+              "A",
+              "B",
+              "C"
+            ],
+            "version": 1,
+            "amber_base": 0,
+            "amber_plan": [
+              "A",
+              "B",
+              "D"
+            ],
+            "amber_can_commit": false
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "files": [
+              "A",
+              "B",
+              "C"
+            ],
+            "version": 1,
+            "amber_base": 1,
+            "amber_plan": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ],
+            "amber_can_commit": false
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "files": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ],
+            "version": 2,
+            "amber_base": 1,
+            "amber_plan": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ],
+            "amber_can_commit": false
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-21"
   },
   {
     "slug": "software-engineering",
     "track": "Software engineering",
     "title": "When retries multiply an outage",
-    "tag": "Foundation \u00b7 distributed systems",
-    "goal": "Calculate worst-case retry amplification and choose where a retry budget belongs.",
-    "concept": "<p>A retry asks the same dependency to do more work. It helps when a transient failure clears; during overload it can make recovery harder. If several nested services independently retry, the deepest dependency can receive a multiplied number of attempts. Backoff spaces those attempts out; jitter spreads synchronized clients across time. Neither alone limits the total retry count. <a href=\"https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/\">AWS on retry behavior</a>.</p><p>There is a second question: is replay safe? A timeout means the caller did not receive success; it does not prove the remote operation did nothing. For operations with side effects, an idempotency contract can distinguish a repeated request from new intent. <a href=\"https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/\">AWS on idempotent APIs</a>.</p>",
-    "example": "<p><strong>Original teaching case:</strong> An API calls a service, which calls a metadata adapter, which calls a throttled catalog. With three retrying layers and three total attempts at each layer, one user request can trigger 3 \u00d7 3 \u00d7 3 = 27 catalog attempts in the modeled worst case. At 100 original requests, that is 2,700 attempts.</p><p>Suppose the catalog can recover if load falls below 500 requests per second. Adding retries everywhere moves the system in the opposite direction. A chosen retry owner, bounded attempts, deadlines, admission control, and a retry budget are candidate controls. The right owner needs enough context to recognize transient errors and enough time left to complete useful work.</p><p>For an onboarding API that creates a dataset, also consider a lost response after successful creation. Retrying with a new identity may create a second dataset. A request token must remain stable for the same intended operation; parameter mismatch should be rejected rather than silently interpreted as a duplicate.</p>",
+    "tag": "Foundation · distributed systems",
+    "goal": "A failed request can trigger a second request.",
+    "concept": "<p>A failed request can trigger a second request. If every service in a call chain retries, one user action can create many calls at the bottom of the chain.</p><p>Count total attempts, including the first call. Three layers allowing three attempts each can produce 3 × 3 × 3 = 27 attempts at the deepest service. Waiting between attempts helps timing; it does not reduce this worst-case count. Choose a retry owner and a total budget.</p>",
+    "example": "<p>For 100 user requests, the nested policy can produce 2,700 catalog calls. If only one layer retries three times and the others try once, the same worst-case calculation gives 300. Both are upper bounds, not predictions of everyday traffic.</p>",
     "practice": "Set layers to 3 and attempts to 3. Predict the result, then compare with a single retry owner. Explain why adding jitter changes timing but not this worst-case count. Write one error you would retry and one you would fail immediately; justify both using the operation contract.",
     "boundary": "This computes a worst-case count when every downstream attempt fails and each parent repeats its full child work. It omits time, successes, circuit breakers, queueing, cancellation propagation, and correlated failures. Counts are not a latency forecast.",
     "sim": "<label>Retrying layers <input id=\"layers\" type=\"range\" min=\"1\" max=\"5\" value=\"3\"></label><label>Total attempts per layer (including first) <input id=\"attempts\" type=\"range\" min=\"1\" max=\"5\" value=\"3\"></label><label><input id=\"single\" type=\"checkbox\"> Only one layer retries</label><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -72,7 +217,7 @@
           "6"
         ],
         1,
-        "The nested multiplication is 2\u2074 = 16."
+        "The nested multiplication is 2⁴ = 16."
       ],
       [
         "A create request times out. What is established?",
@@ -82,7 +227,7 @@
           "Caller lacks confirmation"
         ],
         2,
-        "The remote side effect may already have happened. Query status or retry using the operation\u2019s idempotency contract."
+        "The remote side effect may already have happened. Query status or retry using the operation’s idempotency contract."
       ],
       [
         "Jitter is enabled. What still needs a bound?",
@@ -106,16 +251,107 @@
         "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/",
         "Undated living article"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>A retry asks the same dependency to do more work. It helps when a transient failure clears; during overload it can make recovery harder. If several nested services independently retry, the deepest dependency can receive a multiplied number of attempts. Backoff spaces those attempts out; jitter spreads synchronized clients across time. Neither alone limits the total retry count. <a href=\"https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/\">AWS on retry behavior</a>.</p><p>There is a second question: is replay safe? A timeout means the caller did not receive success; it does not prove the remote operation did nothing. For operations with side effects, an idempotency contract can distinguish a repeated request from new intent. <a href=\"https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/\">AWS on idempotent APIs</a>.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> An API calls a service, which calls a metadata adapter, which calls a throttled catalog. With three retrying layers and three total attempts at each layer, one user request can trigger 3 × 3 × 3 = 27 catalog attempts in the modeled worst case. At 100 original requests, that is 2,700 attempts.</p><p>Suppose the catalog can recover if load falls below 500 requests per second. Adding retries everywhere moves the system in the opposite direction. A chosen retry owner, bounded attempts, deadlines, admission control, and a retry budget are candidate controls. The right owner needs enough context to recognize transient errors and enough time left to complete useful work.</p><p>For an onboarding API that creates a dataset, also consider a lost response after successful creation. Retrying with a new identity may create a second dataset. A request token must remain stable for the same intended operation; parameter mismatch should be rejected rather than silently interpreted as a duplicate.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "int userRequests = 100;",
+          "note": "Start with 100 original requests."
+        },
+        {
+          "code": "int apiAttempts = 3;",
+          "note": "The API permits three total attempts."
+        },
+        {
+          "code": "int serviceAttempts = 3;",
+          "note": "The next layer also retries."
+        },
+        {
+          "code": "int adapterAttempts = 3;",
+          "note": "The final layer also retries."
+        },
+        {
+          "code": "int catalogCalls = userRequests * apiAttempts * serviceAttempts * adapterAttempts;",
+          "note": "The nested upper bound is 2,700 calls."
+        },
+        {
+          "code": "int oneOwnerCalls = userRequests * 3;",
+          "note": "One retry owner reduces this upper bound to 300."
+        }
+      ],
+      "limit": "This Java arithmetic assumes every nested call exhausts all attempts. It does not implement backoff, deadlines, or side effects. Retrying a write also requires a stable request identity and duplicate protection.",
+      "expect": {
+        "catalogCalls": "2700",
+        "oneOwnerCalls": "300"
+      },
+      "language": "java",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "userRequests": "100"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "userRequests": "100",
+            "apiAttempts": "3"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "userRequests": "100",
+            "apiAttempts": "3",
+            "serviceAttempts": "3"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "userRequests": "100",
+            "apiAttempts": "3",
+            "serviceAttempts": "3",
+            "adapterAttempts": "3"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "userRequests": "100",
+            "apiAttempts": "3",
+            "serviceAttempts": "3",
+            "adapterAttempts": "3",
+            "catalogCalls": "2700"
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "userRequests": "100",
+            "apiAttempts": "3",
+            "serviceAttempts": "3",
+            "adapterAttempts": "3",
+            "catalogCalls": "2700",
+            "oneOwnerCalls": "300"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-21"
   },
   {
     "slug": "distinguished-engineer",
     "track": "Distinguished Engineer",
     "title": "Turn an SLO into a decision",
-    "tag": "Foundation \u00b7 technical influence",
-    "goal": "Connect a measurable user outcome to an error budget and a cross-team decision without turning a dashboard into a scorecard contest.",
-    "concept": "<p>A service-level indicator measures an aspect of user experience; a service-level objective specifies the desired level over a defined window. The error budget is the permitted amount of failure implied by that objective. Its practical value comes from the decisions teams agree to make when reliability deteriorates. Stakeholders need to agree on the definition, measurement, and policy. <a href=\"https://sre.google/workbook/implementing-slos/\">Google SRE on implementing SLOs</a>.</p><p>A Distinguished Engineer needs to examine where a metric can mislead. An internal job-success rate may look excellent while consumers receive late or incorrect data. Begin with the consumer promise and trace it to the signals and owners required to act.</p>",
-    "example": "<p><strong>Original teaching case:</strong> A platform serves 10,000 scheduled dataset deliveries in a measurement window. A delivery is good only when it arrives by its consumer deadline and passes the agreed contract checks. At 99.5%, the window permits 50 bad deliveries. Thirty have failed so far: 60% of the budget is consumed and 20 remain.</p><p>The denominator matters. Counting every retry as a fresh successful delivery would inflate apparent reliability. Count each scheduled delivery once and define treatment of cancellation, missing telemetry, and upstream exclusions before the incident. Do not blend business-critical feeds with bulk noncritical loads if that hides consumer pain.</p><p>Your role is to make the next decision explicit. Imagine proposing that rapid budget burn triggers a joint reliability review, with the platform lead accountable for remediation and consumer representatives validating impact. This is an illustrative policy to negotiate, not a universal release freeze. A narrow remediation rollout might reduce risk even while the budget is exhausted.</p><p>A useful executive explanation is: \u201cThirty failed deliveries consumed 60% of our allowance. The common dependency is the catalog. We propose prioritizing its overload fix, with a named owner and a measured recovery condition.\u201d</p>",
+    "tag": "Foundation · technical influence",
+    "goal": "A dashboard says “99.5% reliable.” What should the team do with that number? Start by saying what customers were promised and how a missed promise is counted..",
+    "concept": "<p>A dashboard says “99.5% reliable.” What should the team do with that number? Start by saying what customers were promised and how a missed promise is counted.</p><p>A service-level objective, or SLO, is a target over a stated time window. The error budget is how many failures that target permits. It helps leaders agree when reliability work should take priority. Counting successful retries as extra deliveries would hide the original misses.</p>",
+    "example": "<p>Of 10,000 scheduled deliveries, 99.5% must arrive on time and pass checks. That allows 50 bad deliveries. Thirty have failed, so 20 remain. Use the rate of new failures and their cause to decide the next action; this arithmetic alone does not mandate a release freeze.</p>",
     "practice": "Change the SLO from 99.5% to 99.9% while keeping 30 bad deliveries. Predict the new budget before moving the control. Draft a three-sentence recommendation: affected user promise, decision and accountable owner, evidence that would allow normal delivery priorities to resume.",
     "boundary": "The calculator uses a fixed count-based measurement window and synthetic counts. It does not model burn rate across multiple windows, traffic weighting, latency percentiles, partial failures, or financial loss. The policy example is a practice proposal.",
     "sim": "<label>SLO percent <input id=\"slo\" type=\"number\" min=\"90\" max=\"99.99\" step=\"0.01\" value=\"99.5\"></label><label>Bad deliveries out of 10,000 <input id=\"bad\" type=\"range\" min=\"0\" max=\"150\" value=\"30\"></label><pre id=\"world\" aria-live=\"polite\"></pre>",
@@ -158,18 +394,99 @@
         "https://sre.google/workbook/implementing-slos/",
         "SRE Workbook, 2018"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>A service-level indicator measures an aspect of user experience; a service-level objective specifies the desired level over a defined window. The error budget is the permitted amount of failure implied by that objective. Its practical value comes from the decisions teams agree to make when reliability deteriorates. Stakeholders need to agree on the definition, measurement, and policy. <a href=\"https://sre.google/workbook/implementing-slos/\">Google SRE on implementing SLOs</a>.</p><p>A Distinguished Engineer needs to examine where a metric can mislead. An internal job-success rate may look excellent while consumers receive late or incorrect data. Begin with the consumer promise and trace it to the signals and owners required to act.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A platform serves 10,000 scheduled dataset deliveries in a measurement window. A delivery is good only when it arrives by its consumer deadline and passes the agreed contract checks. At 99.5%, the window permits 50 bad deliveries. Thirty have failed so far: 60% of the budget is consumed and 20 remain.</p><p>The denominator matters. Counting every retry as a fresh successful delivery would inflate apparent reliability. Count each scheduled delivery once and define treatment of cancellation, missing telemetry, and upstream exclusions before the incident. Do not blend business-critical feeds with bulk noncritical loads if that hides consumer pain.</p><p>Your role is to make the next decision explicit. Imagine proposing that rapid budget burn triggers a joint reliability review, with the platform lead accountable for remediation and consumer representatives validating impact. This is an illustrative policy to negotiate, not a universal release freeze. A narrow remediation rollout might reduce risk even while the budget is exhausted.</p><p>A useful executive explanation is: “Thirty failed deliveries consumed 60% of our allowance. The common dependency is the catalog. We propose prioritizing its overload fix, with a named owner and a measured recovery condition.”</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "scheduled = 10000; allowed_bad_fraction = 0.005",
+          "note": "Define the denominator and allowed failure fraction."
+        },
+        {
+          "code": "budget = round(scheduled * allowed_bad_fraction)",
+          "note": "The window permits 50 bad deliveries."
+        },
+        {
+          "code": "bad = 30",
+          "note": "Count distinct missed deliveries, not attempts."
+        },
+        {
+          "code": "remaining = budget - bad",
+          "note": "Twenty failures remain within the agreed allowance."
+        },
+        {
+          "code": "used_percent = 100 * bad / budget",
+          "note": "Sixty percent of the allowance is consumed."
+        }
+      ],
+      "limit": "This is a decision-support calculation, not an automatic release policy. Window selection, missing telemetry, criticality, and budget burn rate still require agreement.",
+      "expect": {
+        "remaining": 20,
+        "used_percent": 60
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "scheduled": 10000,
+            "allowed_bad_fraction": 0.005
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "scheduled": 10000,
+            "allowed_bad_fraction": 0.005,
+            "budget": 50
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "scheduled": 10000,
+            "allowed_bad_fraction": 0.005,
+            "budget": 50,
+            "bad": 30
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "scheduled": 10000,
+            "allowed_bad_fraction": 0.005,
+            "budget": 50,
+            "bad": 30,
+            "remaining": 20
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "scheduled": 10000,
+            "allowed_bad_fraction": 0.005,
+            "budget": 50,
+            "bad": 30,
+            "remaining": 20,
+            "used_percent": 60.0
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-21"
   },
   {
     "slug": "genai-engineering",
     "track": "GenAI engineering",
     "title": "An agent handoff that survives a reset",
-    "tag": "Foundation \u00b7 harness engineering",
-    "goal": "Design a durable handoff that separates an agent\u2019s claim of completion from evidence that the work actually passed.",
-    "concept": "<p>A language model\u2019s active context is temporary. A harness is the surrounding execution system: it provides tools, selects work, records state, and decides how to continue. Anthropic describes an initial setup phase followed by sessions that make bounded progress, inspect previous artifacts, and leave a clean handoff. Its experiment highlights premature completion and insufficient end-to-end checking as recurring failure modes. <a href=\"https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents\">Read the original engineering report</a>.</p><p>For your own design, treat the handoff as a small operational record. It should let another session determine what is verified, what is uncertain, and which action is safe next. A confident paragraph is weaker than a result tied to an exact artifact and check.</p>",
-    "example": "<p><strong>Original teaching case:</strong> An agent is generating these study pages. It writes five HTML files, then loses its context before checking the buttons. A note saying \u201cDay complete\u201d creates a false starting point for the next session. A useful record instead says \u201cfiles written; browser validation pending; generation number 1; repository head X.\u201d</p><p>Use an explicit progression: planned \u2192 written \u2192 verified. The transition to verified requires observed checks. Commit the lesson files and their manifest together, so readers do not see a manifest referring to absent pages. Before a retry, inspect the repository for the same date and day number; reuse or repair it rather than allocating another day blindly.</p><p>This does not make all side effects exactly once. A crash after a remote write but before a local acknowledgment leaves uncertainty. Recovery needs to inspect authoritative remote state. A repository commit identifier, request identity, and non-forced update help resolve that ambiguity.</p><p>Design question: what is the smallest record that makes recovery deterministic? For this case: destination, generation key, file list, verified checks, source references, and the next unresolved action.</p>",
+    "tag": "Foundation · harness engineering",
+    "goal": "An agent writes five pages, then loses its conversation context.",
+    "concept": "<p>An agent writes five pages, then loses its conversation context. A note saying “done” could cause the next session to skip tests that never ran.</p><p>The harness is the code around the model that runs tools and records progress. Store a small handoff outside temporary conversation memory: what exists, what was checked, and what remains. A file being written and a file being verified are different states.</p>",
+    "example": "<p>The record below survives the loss of the temporary session variable. Recovery sees five written files but no successful checks, so its next action is verification. Only observed checks justify marking the work verified.</p>",
     "practice": "Write an artifact, reset the session, and inspect whether it is considered verified. Repeat after verification. Explain why the durable state must not simply copy whatever the model says. Name a remote action whose outcome you would inspect before retrying.",
-    "boundary": "This is an executable in-memory state machine. \u201cNew session\u201d clears only working memory while retaining the simulated durable record; reloading the whole page resets the model. Verification is simulated, not a real code test or an LLM call.",
+    "boundary": "This is an executable in-memory state machine. “New session” clears only working memory while retaining the simulated durable record; reloading the whole page resets the model. Verification is simulated, not a real code test or an LLM call.",
     "sim": "<button id=\"write\">Write artifact</button><button id=\"verify\">Verify artifact</button><button id=\"restart\">New session</button><button id=\"reset\">Reset model</button><pre id=\"world\" aria-live=\"polite\"></pre>",
     "js": "let durable={status:'planned',evidence:[]},working='fresh';const show=()=>world.textContent=`Working memory: ${working}\nDurable status: ${durable.status}\nEvidence: ${durable.evidence.join(', ')||'none'}\nNext: ${durable.status==='planned'?'write artifact':durable.status==='written'?'run checks':'continue to next bounded unit'}`;write.onclick=()=>{if(durable.status==='planned'){durable.status='written';working='artifact produced'}else working='existing artifact reused';show()};verify.onclick=()=>{if(durable.status==='planned'){working='blocked: no artifact'}else{durable.status='verified';durable.evidence=['simulated check passed'];working='verification recorded'}show()};restart.onclick=()=>{working='fresh session; read durable record';show()};reset.onclick=()=>{durable={status:'planned',evidence:[]};working='fresh';show()};show();",
     "questions": [
@@ -210,20 +527,115 @@
         "https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents",
         "2025-11-26"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>A language model’s active context is temporary. A harness is the surrounding execution system: it provides tools, selects work, records state, and decides how to continue. Anthropic describes an initial setup phase followed by sessions that make bounded progress, inspect previous artifacts, and leave a clean handoff. Its experiment highlights premature completion and insufficient end-to-end checking as recurring failure modes. <a href=\"https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents\">Read the original engineering report</a>.</p><p>For your own design, treat the handoff as a small operational record. It should let another session determine what is verified, what is uncertain, and which action is safe next. A confident paragraph is weaker than a result tied to an exact artifact and check.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> An agent is generating these study pages. It writes five HTML files, then loses its context before checking the buttons. A note saying “Day complete” creates a false starting point for the next session. A useful record instead says “files written; browser validation pending; generation number 1; repository head X.”</p><p>Use an explicit progression: planned → written → verified. The transition to verified requires observed checks. Commit the lesson files and their manifest together, so readers do not see a manifest referring to absent pages. Before a retry, inspect the repository for the same date and day number; reuse or repair it rather than allocating another day blindly.</p><p>This does not make all side effects exactly once. A crash after a remote write but before a local acknowledgment leaves uncertainty. Recovery needs to inspect authoritative remote state. A repository commit identifier, request identity, and non-forced update help resolve that ambiguity.</p><p>Design question: what is the smallest record that makes recovery deterministic? For this case: destination, generation key, file list, verified checks, source references, and the next unresolved action.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "durable = {\"files\": 5, \"status\": \"written\", \"checks\": []}",
+          "note": "The handoff says what exists, without claiming success."
+        },
+        {
+          "code": "session = {\"last_thought\": \"test next\"}",
+          "note": "Conversation memory has a useful but temporary thought."
+        },
+        {
+          "code": "session = {}",
+          "note": "A reset loses temporary memory."
+        },
+        {
+          "code": "next_action = \"verify\" if durable[\"status\"] == \"written\" else \"inspect\"",
+          "note": "Recovery reads the durable record and chooses verification."
+        },
+        {
+          "code": "durable[\"checks\"] = [\"synthetic check passed\"]; durable[\"status\"] = \"verified\"",
+          "note": "In this toy, an explicitly supplied passing result permits the transition."
+        }
+      ],
+      "limit": "The dictionary represents external durable storage; it is not durable by itself. Real recovery must inspect actual artifacts and checks. The synthetic passing result is input to this example, not evidence that any real page passed.",
+      "expect": {
+        "next_action": "verify"
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "durable": {
+              "files": 5,
+              "status": "written",
+              "checks": []
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "durable": {
+              "files": 5,
+              "status": "written",
+              "checks": []
+            },
+            "session": {
+              "last_thought": "test next"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "durable": {
+              "files": 5,
+              "status": "written",
+              "checks": []
+            },
+            "session": {}
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "durable": {
+              "files": 5,
+              "status": "written",
+              "checks": []
+            },
+            "session": {},
+            "next_action": "verify"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "durable": {
+              "files": 5,
+              "status": "verified",
+              "checks": [
+                "synthetic check passed"
+              ]
+            },
+            "session": {},
+            "next_action": "verify"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-21"
   },
   {
     "slug": "technology-breakthroughs",
     "track": "Technology breakthroughs",
     "title": "ToolGrad: build the answer path first",
-    "tag": "Research spotlight \u00b7 September 10, 2026",
-    "goal": "Explain answer-first tool-use data generation and design an evaluation that distinguishes executable examples from real task coverage.",
-    "concept": "<p>Tool-use training needs pairs: a user request and a valid sequence of tool operations. ToolGrad reverses a common generation order. It develops a working tool chain, then creates the matching request. Its loop proposes candidate APIs, executes them, selects a useful extension based on feedback, and updates the example. Here \u201ctextual gradients\u201d refers to descriptive feedback guiding refinement, not ordinary numerical backpropagation through API calls. <a href=\"https://research.google/blog/toolgrad-efficient-tool-use-dataset-generation-with-textual-gradients/\">Google\u2019s September 10, 2026 report</a>.</p><p>The paper was initially submitted in August 2025 and revised in June 2026; the September article is a later research write-up. The authors report efficient generation and benchmark gains. These results motivate an experiment, not a conclusion that arbitrary enterprise agent tasks are solved. <a href=\"https://arxiv.org/abs/2508.04086\">Versioned paper and artifacts</a>.</p>",
-    "example": "<p><strong>Original teaching case:</strong> Build synthetic examples for a data-incident assistant. Available functions are listDatasets, fetchFreshness(datasetId), and explainDelay(measurement). A valid chain lists datasets, uses a returned identifier to fetch freshness, then explains the returned measurement. A corresponding request could ask which monitored dataset is late and why.</p><p>Starting with \u201crepair every broken pipeline\u201d may create an impossible example when no repair tool exists. Starting with an executable chain reduces that mismatch. But it introduces another risk: the generated requests may cluster around what is easy to execute. A dataset can be perfectly valid and still omit difficult, frequent user needs.</p><p>For a pilot, compare two equally funded generation approaches. Hold out a human-written set of realistic incident tasks before generating either dataset. Measure correct task outcomes, tool-argument validity, unsupported-action refusal, and coverage across tool families. Separate training and evaluation cases by underlying workflow, not just paraphrased request text.</p><p>My recommendation for the fictional incident assistant is a small offline experiment with sandbox tools. Do not train on production identifiers, incident secrets, or unreviewed generated \u201crepairs.\u201d This model teaches dependency validity; it does not reproduce ToolGrad\u2019s reported performance.</p>",
+    "tag": "Research spotlight · September 10, 2026",
+    "goal": "A training example asks an assistant to repair a pipeline, but its tools can only read data.",
+    "concept": "<p>A training example asks an assistant to repair a pipeline, but its tools can only read data. That example cannot be completed, however fluent its wording.</p><p>ToolGrad explores building tool-use examples from an executable path first. Start with what the tools can actually do, connect their inputs and outputs, then write a matching request. A valid path is useful training material, but it may overrepresent easy tasks.</p>",
+    "example": "<p>Our incident assistant can list datasets, fetch freshness for one returned ID, and explain the result. It cannot repair a job. Watch the dataset ID move through this small chain before deciding which user request the chain supports.</p>",
     "practice": "Try explainDelay first, then build the valid chain. Predict which state field each call consumes and produces. Write one task that these three tools cannot satisfy, and explain how a training set of only successful chains could hide that limitation.",
     "boundary": "The local JavaScript uses deterministic mock tools and synthetic values to enforce dependencies. It has no proposer model, training loop, real APIs, or learned selector. It illustrates the answer-first idea without claiming to implement or benchmark ToolGrad.",
     "sim": "<button id=\"list\">listDatasets()</button><button id=\"fresh\">fetchFreshness(id)</button><button id=\"explain\">explainDelay(measurement)</button><button id=\"reset\">Reset chain</button><pre id=\"world\" aria-live=\"polite\"></pre>",
-    "js": "let state={},chain=[];const show=(m='Build a valid chain before writing the request.')=>world.textContent=`State: ${JSON.stringify(state,null,2)}\nChain: ${chain.join(' \u2192 ')||'empty'}\n${m}`;list.onclick=()=>{state={datasetId:'demo-orders'};chain=['listDatasets'];show()};fresh.onclick=()=>{if(!state.datasetId)return show('Invalid dependency: datasetId is missing.');state.delayMinutes=18;chain=['listDatasets','fetchFreshness'];delete state.explanation;show()};explain.onclick=()=>{if(state.delayMinutes===undefined)return show('Invalid dependency: measurement is missing.');state.explanation='Demo upstream arrival is 18 minutes late.';chain=['listDatasets','fetchFreshness','explainDelay'];show('Matching request: Inspect freshness for the demo dataset and explain the observed delay.')};reset.onclick=()=>{state={};chain=[];show()};show();",
+    "js": "let state={},chain=[];const show=(m='Build a valid chain before writing the request.')=>world.textContent=`State: ${JSON.stringify(state,null,2)}\nChain: ${chain.join(' → ')||'empty'}\n${m}`;list.onclick=()=>{state={datasetId:'demo-orders'};chain=['listDatasets'];show()};fresh.onclick=()=>{if(!state.datasetId)return show('Invalid dependency: datasetId is missing.');state.delayMinutes=18;chain=['listDatasets','fetchFreshness'];delete state.explanation;show()};explain.onclick=()=>{if(state.delayMinutes===undefined)return show('Invalid dependency: measurement is missing.');state.explanation='Demo upstream arrival is 18 minutes late.';chain=['listDatasets','fetchFreshness','explainDelay'];show('Matching request: Inspect freshness for the demo dataset and explain the observed delay.')};reset.onclick=()=>{state={};chain=[];show()};show();",
     "questions": [
       [
         "Why construct a valid chain before its request?",
@@ -267,6 +679,136 @@
         "https://arxiv.org/abs/2508.04086",
         "Initial 2025-08-06; revised 2026-06-17"
       ]
-    ]
+    ],
+    "advanced_detail": "<p>Tool-use training needs pairs: a user request and a valid sequence of tool operations. ToolGrad reverses a common generation order. It develops a working tool chain, then creates the matching request. Its loop proposes candidate APIs, executes them, selects a useful extension based on feedback, and updates the example. Here “textual gradients” refers to descriptive feedback guiding refinement, not ordinary numerical backpropagation through API calls. <a href=\"https://research.google/blog/toolgrad-efficient-tool-use-dataset-generation-with-textual-gradients/\">Google’s September 10, 2026 report</a>.</p><p>The paper was initially submitted in August 2025 and revised in June 2026; the September article is a later research write-up. The authors report efficient generation and benchmark gains. These results motivate an experiment, not a conclusion that arbitrary enterprise agent tasks are solved. <a href=\"https://arxiv.org/abs/2508.04086\">Versioned paper and artifacts</a>.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> Build synthetic examples for a data-incident assistant. Available functions are listDatasets, fetchFreshness(datasetId), and explainDelay(measurement). A valid chain lists datasets, uses a returned identifier to fetch freshness, then explains the returned measurement. A corresponding request could ask which monitored dataset is late and why.</p><p>Starting with “repair every broken pipeline” may create an impossible example when no repair tool exists. Starting with an executable chain reduces that mismatch. But it introduces another risk: the generated requests may cluster around what is easy to execute. A dataset can be perfectly valid and still omit difficult, frequent user needs.</p><p>For a pilot, compare two equally funded generation approaches. Hold out a human-written set of realistic incident tasks before generating either dataset. Measure correct task outcomes, tool-argument validity, unsupported-action refusal, and coverage across tool families. Separate training and evaluation cases by underlying workflow, not just paraphrased request text.</p><p>My recommendation for the fictional incident assistant is a small offline experiment with sandbox tools. Do not train on production identifiers, incident secrets, or unreviewed generated “repairs.” This model teaches dependency validity; it does not reproduce ToolGrad’s reported performance.</p>",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "datasets = [\"demo-orders\", \"demo-payments\"]",
+          "note": "The first tool returns available identifiers."
+        },
+        {
+          "code": "selected = datasets[0]",
+          "note": "Choose an ID that actually exists."
+        },
+        {
+          "code": "freshness = {\"demo-orders\": {\"delay_minutes\": 18}}",
+          "note": "A synthetic tool fixture contains a measured delay."
+        },
+        {
+          "code": "measurement = freshness[selected]",
+          "note": "The next tool receives the returned ID."
+        },
+        {
+          "code": "answer = selected + \" is \" + str(measurement[\"delay_minutes\"]) + \" minutes late\"",
+          "note": "The explanation uses the returned measurement."
+        },
+        {
+          "code": "supported_request = \"Explain the late dataset\"",
+          "note": "This request matches the available read-only chain."
+        }
+      ],
+      "limit": "This executes fixture lookups, not ToolGrad training or live tools. It demonstrates input/output dependency, not the paper’s quality gains or task coverage.",
+      "expect": {
+        "answer": "demo-orders is 18 minutes late"
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "datasets": [
+              "demo-orders",
+              "demo-payments"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "datasets": [
+              "demo-orders",
+              "demo-payments"
+            ],
+            "selected": "demo-orders"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "datasets": [
+              "demo-orders",
+              "demo-payments"
+            ],
+            "selected": "demo-orders",
+            "freshness": {
+              "demo-orders": {
+                "delay_minutes": 18
+              }
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "datasets": [
+              "demo-orders",
+              "demo-payments"
+            ],
+            "selected": "demo-orders",
+            "freshness": {
+              "demo-orders": {
+                "delay_minutes": 18
+              }
+            },
+            "measurement": {
+              "delay_minutes": 18
+            }
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "datasets": [
+              "demo-orders",
+              "demo-payments"
+            ],
+            "selected": "demo-orders",
+            "freshness": {
+              "demo-orders": {
+                "delay_minutes": 18
+              }
+            },
+            "measurement": {
+              "delay_minutes": 18
+            },
+            "answer": "demo-orders is 18 minutes late"
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "datasets": [
+              "demo-orders",
+              "demo-payments"
+            ],
+            "selected": "demo-orders",
+            "freshness": {
+              "demo-orders": {
+                "delay_minutes": 18
+              }
+            },
+            "measurement": {
+              "delay_minutes": 18
+            },
+            "answer": "demo-orders is 18 minutes late",
+            "supported_request": "Explain the late dataset"
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "presentation_revision": "2026-09-29-option5",
+    "source_checked_on": "2026-09-21"
   }
 ]

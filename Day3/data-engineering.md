@@ -2,7 +2,7 @@
 
 Data engineering · Day3 · 15 minutes
 
-Predict when Spark marks a shuffled partition as skewed, then reason about splitting, replication, and the remaining bottleneck.
+Most tasks in a join finish quickly, but one task reads a much larger partition.
 
 ## Recall (2 minutes)
 
@@ -10,25 +10,67 @@ Predict when Spark marks a shuffled partition as skewed, then reason about split
 
 ## Understand (4 minutes)
 
-A sort-merge join can look well provisioned on average while one shuffled partition determines the stage duration. Spark Adaptive Query Execution (AQE) uses runtime statistics to revise a physical plan after a shuffle. Current Spark 4.2 documentation says AQE has been enabled by default since Spark 3.2 and can split skewed sort-merge-join partitions, optionally replicating the matching side.
+Most tasks in a join finish quickly, but one task reads a much larger partition. The whole job waits for that straggler.
 
-For the documented skew rule, a partition is considered skewed only when it is larger than both a factor times the median partition size and an absolute byte threshold. The documented defaults are factor 5 and 256 MB. “Five times median” alone is not the rule.
-
-
-
-Original teaching case: A customer-fact join produces shuffled partitions of 40, 42, 43, 44, 45, and 900 MB. The median is 43.5 MB. With factor 5, the relative boundary is 217.5 MB; with the 256 MB absolute threshold, the effective boundary is 256 MB. The 900 MB partition clears both tests.
-
-With a 64 MB advisory target, the calculator divides 900 MB into 15 approximately 60 MB pieces. The largest modeled task input falls from 900 MB to 60 MB. That is a useful intuition for straggler relief, not a 15× runtime promise: reading, shuffling, scheduling, spilling, replication, and downstream work remain.
-
-isSkewed = size > factor × median
-        AND size > absoluteThreshold
-pieces = ceil(size / advisoryTarget)
-
-At platform scale, first verify that the skew is real in runtime statistics. Then ask whether a hot key, data-quality default, or tenant concentration is the business cause. AQE treats the physical symptom; key salting, pre-aggregation, or a data-contract repair may be the durable response.
+Skew means work is unevenly distributed. Spark’s adaptive query execution, or AQE, can use runtime sizes to split eligible oversized join partitions. A partition must be large compared with both its peers and an absolute threshold. Splitting reduces the largest unit of work; it does not remove all overhead.
 
 
 
-## Explore (5 minutes)
+For sizes 40, 42, 43, 44, 45, and 900 MB, the median is 43.5 MB. Five times that is 217.5 MB. The 900 MB partition also exceeds 256 MB. Dividing it toward a 64 MB target gives 15 pieces of about 60 MB.
+
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+sizes = [40, 42, 43, 44, 45, 900]
+median = (sizes[2] + sizes[3]) / 2
+threshold = max(5 * median, 256)
+skewed = sizes[-1] > threshold
+pieces = (sizes[-1] + 63) // 64
+piece_mb = sizes[-1] / pieces
+```
+
+1. The last partition is much larger than its peers.
+
+   Changed values: `{"sizes": [40, 42, 43, 44, 45, 900]}`
+
+2. The middle pair gives 43.5 MB.
+
+   Changed values: `{"median": 43.5}`
+
+3. Both conditions imply a 256 MB effective threshold.
+
+   Changed values: `{"threshold": 256}`
+
+4. The 900 MB partition qualifies in this toy.
+
+   Changed values: `{"skewed": true}`
+
+5. Round up to 15 pieces at the advisory target.
+
+   Changed values: `{"pieces": 15}`
+
+6. Each idealized piece is 60 MB.
+
+   Changed values: `{"piece_mb": 60.0}`
+
+[Full runnable example](examples/data-engineering.py).
+
+Limits: This is split-size arithmetic, not a Spark scheduler. Actual split boundaries, supported join types, replicated input, spilling, and task overhead affect the plan and runtime.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A sort-merge join can look well provisioned on average while one shuffled partition determines the stage duration. Spark Adaptive Query Execution (AQE) uses runtime statistics to revise a physical plan after a shuffle. Current Spark 4.2 documentation says AQE has been enabled by default since Spark 3.2 and can split skewed sort-merge-join partitions, optionally replicating the matching side.</p><p>For the documented skew rule, a partition is considered skewed only when it is larger than both a factor times the median partition size and an absolute byte threshold. The documented defaults are factor 5 and 256 MB. “Five times median” alone is not the rule.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A customer-fact join produces shuffled partitions of 40, 42, 43, 44, 45, and 900 MB. The median is 43.5 MB. With factor 5, the relative boundary is 217.5 MB; with the 256 MB absolute threshold, the effective boundary is 256 MB. The 900 MB partition clears both tests.</p><p>With a 64 MB advisory target, the calculator divides 900 MB into 15 approximately 60 MB pieces. The largest modeled task input falls from 900 MB to 60 MB. That is a useful intuition for straggler relief, not a 15× runtime promise: reading, shuffling, scheduling, spilling, replication, and downstream work remain.</p><pre>isSkewed = size &gt; factor × median
+        AND size &gt; absoluteThreshold
+pieces = ceil(size / advisoryTarget)</pre><p>At platform scale, first verify that the skew is real in runtime statistics. Then ask whether a hot key, data-quality default, or tenant concentration is the business cause. AQE treats the physical symptom; key salting, pre-aggregation, or a data-contract repair may be the durable response.</p>
+
+</details>
+
+## Explore (remaining exploration time)
 
 Predict the effective boundary and split count before moving a control. Raise the absolute threshold above the hot partition, then shrink the advisory target. Explain why smaller pieces can add work even when they reduce the longest task.
 

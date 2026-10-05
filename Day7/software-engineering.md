@@ -2,7 +2,7 @@
 
 Software engineering · Day7 · 15 minutes
 
-Trace one end-to-end latency budget across RPC hops and stop work that can no longer help the caller.
+A user gives a request 500 milliseconds.
 
 ## Recall (2 minutes)
 
@@ -10,23 +10,67 @@ Trace one end-to-end latency budget across RPC hops and stop work that can no lo
 
 ## Understand (4 minutes)
 
-A per-hop timeout answers “how long may I wait here?” An end-to-end deadline answers the user-facing question: “after what instant is this result no longer useful?” If every hop starts a fresh 500 ms timeout, a three-hop request can consume far more than the caller's 500 ms budget.
+A user gives a request 500 milliseconds. The API spends 140 ms before calling the next service. Giving that next call a fresh 500 ms exceeds the user’s original budget.
 
-Deadline propagation carries the remaining budget downstream. gRPC implementations can convert an incoming absolute deadline into a timeout with elapsed time deducted, avoiding dependence on synchronized clocks. When the deadline expires, cancellation must propagate—but application code is still responsible for stopping spawned work.
+A deadline is the time by which the whole operation must finish. Pass the remaining budget to downstream work. A timeout controls how long one call waits; resetting it at every hop can keep work running after the caller has left.
 
 
 
-Original teaching case: A lineage UI gives an impact query 500 ms. The API spends 140 ms on authentication and graph planning, then calls a scoring service that needs 420 ms.
+After 140 ms, 360 ms remain. The downstream operation needs 420 ms, so it cannot finish in time. If it observes cancellation, the propagated deadline limits total work to about 500 ms instead of 560.
 
-remaining budget = 500 − 140 = 360 ms
+
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```java
+int totalBudgetMs = 500;
+int spentMs = 140;
+int remainingMs = Math.max(0, totalBudgetMs - spentMs);
+int downstreamNeedMs = 420;
+int totalWithDeadline = spentMs + Math.min(remainingMs, downstreamNeedMs);
+int totalWithFreshTimeout = spentMs + downstreamNeedMs;
+```
+
+1. The caller sets the end-to-end budget.
+
+   Changed values: `{"totalBudgetMs": "500"}`
+
+2. Authentication and planning consume part of it.
+
+   Changed values: `{"spentMs": "140"}`
+
+3. Only 360 ms remain.
+
+   Changed values: `{"remainingMs": "360"}`
+
+4. The downstream work needs longer than that.
+
+   Changed values: `{"downstreamNeedMs": "420"}`
+
+5. Observed cancellation caps the modeled total at 500 ms.
+
+   Changed values: `{"totalWithDeadline": "500"}`
+
+6. A fresh-hop timeout allows 560 ms of work.
+
+   Changed values: `{"totalWithFreshTimeout": "560"}`
+
+[Full runnable example](examples/software-engineering.java).
+
+Limits: This uses known durations, not real network calls. Deadlines only reduce server work when cancellation reaches the running operations. Clock handling, queues, and cleanup also matter.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A per-hop timeout answers “how long may I wait here?” An end-to-end deadline answers the user-facing question: “after what instant is this result no longer useful?” If every hop starts a fresh 500 ms timeout, a three-hop request can consume far more than the caller's 500 ms budget.</p><p>Deadline propagation carries the remaining budget downstream. gRPC implementations can convert an incoming absolute deadline into a timeout with elapsed time deducted, avoiding dependence on synchronized clocks. When the deadline expires, cancellation must propagate—but application code is still responsible for stopping spawned work.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A lineage UI gives an impact query 500 ms. The API spends 140 ms on authentication and graph planning, then calls a scoring service that needs 420 ms.</p><pre>remaining budget = 500 − 140 = 360 ms
 propagated call: cancel at 360 ms; total ≈ 500 ms
-fresh 500 ms hop: finish at 560 ms; caller already left
+fresh 500 ms hop: finish at 560 ms; caller already left</pre><p>Propagation does not make the downstream faster. It prevents 60 ms of work that cannot reach the caller, releases a connection sooner, and preserves capacity for requests that can still succeed. The server must observe cancellation inside long CPU loops, database work, and child tasks; otherwise the deadline is only a client-side illusion.</p>
 
-Propagation does not make the downstream faster. It prevents 60 ms of work that cannot reach the caller, releases a connection sooner, and preserves capacity for requests that can still succeed. The server must observe cancellation inside long CPU loops, database work, and child tasks; otherwise the deadline is only a client-side illusion.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Predict whether the default request succeeds. Disable propagation, then increase pre-work. Explain where useless work appears and what telemetry would reveal it.
 

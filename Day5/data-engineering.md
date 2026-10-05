@@ -2,7 +2,7 @@
 
 Data engineering · Day5 · 15 minutes
 
-Predict how one logical time filter is planned across old and new partition specs without rewriting historical files.
+A two-hour incident query reads a whole day of old data.
 
 ## Recall (2 minutes)
 
@@ -10,25 +10,62 @@ Predict how one logical time filter is planned across old and new partition spec
 
 ## Understand (4 minutes)
 
-A partition is a physical pruning hint, not part of the business question. Apache Iceberg's hidden partitioning lets a query filter on source columns such as event_time; the table derives the appropriate partition filter. That separation makes the layout evolvable.
+A two-hour incident query reads a whole day of old data. You want future data stored in smaller time groups without rewriting everything today.
 
-When the table changes from day to hour partitioning, existing files stay in their old daily layout and new files use the hourly layout. Iceberg keeps both partition specs in metadata and plans each layout separately. The change is a metadata operation, not an eager rewrite.
+Partition evolution changes the layout for new writes while the table remembers how older files were laid out. Queries still filter by event time. The planner uses the appropriate rule for each file group. Old files do not become more finely divided just because the new rule exists.
 
 
 
-Original teaching case: A lineage-events table writes Days 1–7 into one file per day. Query latency for a two-hour incident window is dominated by reading a whole day. On Day 8, the platform changes new writes to hourly partitioning.
+The toy table has one 24-hour file on Day 6 and hourly files on Day 10. A two-hour query touches 24 hours of old file coverage but only two hours of new file coverage. The query’s meaning stays the same.
 
-The SQL remains WHERE event_time BETWEEN .... For Day 6, the planner maps that predicate to the old day transform and scans one 24-hour file. For Day 10, it maps the same predicate to the new hour transform and scans two one-hour files. If a query crosses the cutover, both planning rules participate.
 
-ALTER TABLE lineage.events
+
+
+## Step through the code (within the 5-minute exploration)
+
+Spend about two minutes here and three in the interactive lab. These are actual recorded executions of the synthetic example, replayed in the HTML page.
+
+```python
+old_file_hours = [24]; new_file_hours = [1] * 24
+query_hours = [10, 11]
+old_scan_hours = sum(old_file_hours)
+new_scan_hours = sum(new_file_hours[h] for h in query_hours)
+same_filter = "event_time in hours 10 and 11"
+```
+
+1. The two layouts have different file granularity.
+
+   Changed values: `{"old_file_hours": [24], "new_file_hours": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]}`
+
+2. The requested interval covers two hours.
+
+   Changed values: `{"query_hours": [10, 11]}`
+
+3. The old day-sized file is still the pruning unit.
+
+   Changed values: `{"old_scan_hours": 24}`
+
+4. The new layout selects two hourly files.
+
+   Changed values: `{"new_scan_hours": 2}`
+
+5. The consumer asks the same question of both layouts.
+
+   Changed values: `{"same_filter": "event_time in hours 10 and 11"}`
+
+[Full runnable example](examples/data-engineering.py).
+
+Limits: This models file coverage, not bytes or an Iceberg planner. File statistics may prune more, and real file sizes vary. Partition evolution does not itself rewrite historical data.
+
+<details><summary>Optional deeper explanation and original worked example</summary>
+
+<p>A partition is a physical pruning hint, not part of the business question. Apache Iceberg's hidden partitioning lets a query filter on source columns such as <code>event_time</code>; the table derives the appropriate partition filter. That separation makes the layout evolvable.</p><p>When the table changes from day to hour partitioning, existing files stay in their old daily layout and new files use the hourly layout. Iceberg keeps both partition specs in metadata and plans each layout separately. The change is a metadata operation, not an eager rewrite.</p><h3>Original detailed example</h3><p><strong>Original teaching case:</strong> A lineage-events table writes Days 1–7 into one file per day. Query latency for a two-hour incident window is dominated by reading a whole day. On Day 8, the platform changes new writes to hourly partitioning.</p><p>The SQL remains <code>WHERE event_time BETWEEN ...</code>. For Day 6, the planner maps that predicate to the old day transform and scans one 24-hour file. For Day 10, it maps the same predicate to the new hour transform and scans two one-hour files. If a query crosses the cutover, both planning rules participate.</p><pre>ALTER TABLE lineage.events
 REPLACE PARTITION FIELD day(event_time)
-WITH hour(event_time);
+WITH hour(event_time);</pre><p>No historical rewrite means no immediate migration blast radius, but it also means old files do not magically gain hourly pruning. A deliberate rewrite or compaction can improve them later. Engine/version support, catalog coordination, file sizing, and manifest maintenance still belong in the production plan.</p>
 
-No historical rewrite means no immediate migration blast radius, but it also means old files do not magically gain hourly pruning. A deliberate rewrite or compaction can improve them later. Engine/version support, catalog coordination, file sizing, and manifest maintenance still belong in the production plan.
+</details>
 
-
-
-## Explore (5 minutes)
+## Explore (remaining exploration time)
 
 Predict the scanned time for a two-hour query before moving the day across the cutover. Then disable evolution and explain why query text can remain stable while physical pruning changes.
 

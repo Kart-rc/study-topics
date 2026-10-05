@@ -1,0 +1,973 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Save the order and a “send later” note together",
+    "tag": "Foundation · Transactional outbox",
+    "goal": "Keep an order and its notification from drifting apart when a process crashes.",
+    "concept": "<p>A shop accepts order A100. It must save the order in its database and tell the shipping service about it through Kafka. If it saves the order and crashes before sending the message, shipping never hears about the order.</p><p>Think of a restaurant: the cashier records both the sale and a kitchen ticket. The ticket waits until someone delivers it. An <strong>outbox</strong> is that waiting tray, stored as a database table.</p><p>Save the order and its outbox row in <strong>one transaction</strong>: the database saves both, or neither. A separate worker, called a <strong>relay</strong>, reads saved outbox rows and sends them to Kafka. After Kafka confirms the send, the relay marks the row sent.</p><div class=\"diagram\"><div class=\"dbgroup\"><strong>One database transaction</strong><div class=\"tiles\"><div class=\"tile\">Order A100<br>status: accepted</div><div class=\"tile\">Outbox E7<br>status: waiting</div></div></div><p class=\"arrow\">↓ Relay sends the saved ticket</p><div class=\"tile\">Kafka → shipping consumer</div></div><p>The database remembers what still needs sending. Kafka remembers what it received. These are separate records. That gap is why a retry can send the same event twice.</p>",
+    "example": "<p>Give the event a stable name: <strong>E7</strong>. The relay sends E7, then crashes before marking it sent. After restart, E7 still looks pending, so the relay sends it again. Kafka may now contain E7 at two different offsets.</p><p>The shipping consumer must recognize <em>event E7</em>, not only its Kafka offset. It saves an E7 processing marker together with the shipment update in its own database transaction. Two copies then produce one shipment.</p><p><strong>Try to predict:</strong> after that crash, does a pending outbox row mean “never sent”? No. It means “not yet recorded as sent.”</p>",
+    "practice": "Press Save order, Send event, Crash, then Send event again. Read the three boxes after every click. Deliver the messages first with duplicate protection on, then repeat with it off.",
+    "boundary": "This is a local state machine, not a Kafka or database emulator. Each Save action represents a completed atomic transaction. It models one event and one relay, without ordering, concurrent workers, retries with backoff, or lost acknowledgements. A real consumer needs a unique marker and business update in one transaction. External effects such as email need their own strategy. Event IDs require a suitable namespace and retention policy.",
+    "sim": "<div class=\"tiles\"><div class=\"tile\"><strong>Order database</strong><p id=\"dbView\"></p></div><div class=\"tile\"><strong>Kafka</strong><p id=\"brokerView\"></p></div><div class=\"tile\"><strong>Shipping database</strong><p id=\"shipView\"></p></div></div><button id=\"saveOrder\">1. Save order + ticket</button><button id=\"sendEvent\">2. Send event</button><button id=\"markSent\">3. Mark ticket sent</button><button id=\"crashRelay\">Crash / restart relay</button><label><input id=\"dedup\" type=\"checkbox\" checked> Consumer recognizes event E7</label><button id=\"deliver\">Deliver waiting messages</button><button id=\"resetLab\">Reset example</button><p id=\"world\" role=\"status\" aria-live=\"polite\"></p>",
+    "js": "let order=false,ticket='absent',copies=0,delivered=0,shipments=0,seen=false,ack=false;\nfunction paint(){dbView.textContent=`A100: ${order?'saved':'absent'} · E7: ${ticket}`;brokerView.textContent=`${copies} copies of E7`;shipView.textContent=`${shipments} shipments · E7 marker: ${seen?'saved':'absent'}`;}\nfunction tell(s){world.textContent=s;paint();}\nsaveOrder.onclick=()=>{if(order)return tell('A100 is already saved. Reset to start again.');order=true;ticket='pending';tell('Both rows committed together. A crash now cannot erase the waiting ticket.');};\nsendEvent.onclick=()=>{if(ticket!=='pending')return tell('No pending ticket to send.');copies++;ack=true;tell('Kafka accepted E7. The ticket still says pending until step 3.');};\nmarkSent.onclick=()=>{if(!ack)return tell('No send acknowledgement in this relay session. Send first.');ticket='sent';tell('The relay recorded success.');};\ncrashRelay.onclick=()=>{ack=false;tell('Relay memory lost. The three saved states survive. A pending ticket can be sent again.');};\ndeliver.onclick=()=>{while(delivered<copies){if(!dedup.checked||!seen){shipments++;if(dedup.checked)seen=true;}delivered++;}tell('Consumer processed the queued copies. Compare copies with shipments.');};\nresetLab.onclick=()=>{order=false;ticket='absent';copies=delivered=shipments=0;seen=ack=false;tell('Empty systems. Start with Save order.');};resetLab.onclick();",
+    "questions": [
+      [
+        "E7 reached Kafka, but the relay crashed before marking it sent. What can happen?",
+        [
+          "E7 is safely deleted",
+          "E7 is sent again",
+          "The order is rolled back"
+        ],
+        1,
+        "The saved ticket is still pending, so the relay may resend it. Kafka receiving E7 does not update the order database. A later relay crash cannot undo a committed order."
+      ],
+      [
+        "Why save the order and ticket in one transaction?",
+        [
+          "It makes Kafka part of the database",
+          "It prevents every duplicate",
+          "It prevents a saved order without a saved send request"
+        ],
+        2,
+        "Both database rows commit together. Kafka remains separate, and the relay can still publish a duplicate."
+      ],
+      [
+        "Two Kafka records contain the same event E7 at different offsets. What identifies this duplicate?",
+        [
+          "The stable event ID E7",
+          "Only the Kafka offset",
+          "The order ID for every possible event"
+        ],
+        0,
+        "E7 identifies this logical event across repeated sends. Offsets identify different Kafka records. Order A100 may legitimately have several different events."
+      ]
+    ],
+    "sources": [
+      [
+        "AWS: Transactional outbox pattern",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html",
+        "Living guidance; publication date not stated"
+      ]
+    ],
+    "written_questions": [
+      "Explain why a pending ticket does not prove that Kafka never received E7.",
+      "Suppose the consumer also sends an email. Why does its database marker alone not guarantee one email?"
+    ],
+    "source_checked_on": "2026-09-29",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "import sqlite3",
+          "note": "Use Python’s built-in SQLite library for a real local transaction."
+        },
+        {
+          "code": "db = sqlite3.connect(\":memory:\"); db.executescript(\"CREATE TABLE orders(id TEXT PRIMARY KEY); CREATE TABLE outbox(event_id TEXT PRIMARY KEY, status TEXT);\")",
+          "note": "Create the two tables in an in-memory demonstration database."
+        },
+        {
+          "code": "with db:\n    db.execute(\"INSERT INTO orders VALUES (?)\", (\"A100\",))\n    db.execute(\"INSERT INTO outbox VALUES (?, ?)\", (\"E7\", \"pending\"))",
+          "note": "The transaction saves the order and pending ticket together."
+        },
+        {
+          "code": "order_rows = db.execute(\"SELECT * FROM orders\").fetchall(); tickets = db.execute(\"SELECT * FROM outbox\").fetchall()",
+          "note": "Read the committed rows. Both exist."
+        },
+        {
+          "code": "kafka = [\"E7\"]; relay_ack = True",
+          "note": "A list represents the first successful publish."
+        },
+        {
+          "code": "relay_ack = False",
+          "note": "A relay restart loses its temporary acknowledgement; the ticket remains pending."
+        },
+        {
+          "code": "kafka.append(\"E7\")",
+          "note": "Retrying the pending ticket creates a second copy."
+        },
+        {
+          "code": "db.execute(\"UPDATE outbox SET status = ? WHERE event_id = ?\", (\"sent\", \"E7\")); db.commit()",
+          "note": "After the second send, record the successful delivery."
+        },
+        {
+          "code": "tickets = db.execute(\"SELECT * FROM outbox\").fetchall(); distinct_events = list(dict.fromkeys(kafka))",
+          "note": "The outbox is sent; stable E7 identity reveals one logical event in two copies."
+        }
+      ],
+      "limit": "The SQLite transaction actually executes. Kafka is a Python list, and dict.fromkeys only illustrates stable-ID recognition; neither is a production relay or transactional consumer. The database is in memory, so this models a relay restart, not loss of the database process.",
+      "expect": {
+        "order_rows": [
+          [
+            "A100"
+          ]
+        ],
+        "tickets": [
+          [
+            "E7",
+            "sent"
+          ]
+        ],
+        "distinct_events": [
+          "E7"
+        ]
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {}
+        },
+        {
+          "step": 2,
+          "state": {}
+        },
+        {
+          "step": 3,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "pending"
+              ]
+            ]
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "pending"
+              ]
+            ],
+            "kafka": [
+              "E7"
+            ],
+            "relay_ack": true
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "pending"
+              ]
+            ],
+            "kafka": [
+              "E7"
+            ],
+            "relay_ack": false
+          }
+        },
+        {
+          "step": 6,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "pending"
+              ]
+            ],
+            "kafka": [
+              "E7",
+              "E7"
+            ],
+            "relay_ack": false
+          }
+        },
+        {
+          "step": 7,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "pending"
+              ]
+            ],
+            "kafka": [
+              "E7",
+              "E7"
+            ],
+            "relay_ack": false
+          }
+        },
+        {
+          "step": 8,
+          "state": {
+            "order_rows": [
+              [
+                "A100"
+              ]
+            ],
+            "tickets": [
+              [
+                "E7",
+                "sent"
+              ]
+            ],
+            "kafka": [
+              "E7",
+              "E7"
+            ],
+            "relay_ack": false,
+            "distinct_events": [
+              "E7"
+            ]
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5"
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Stop calling a failing service, then try one small probe",
+    "tag": "Foundation · Circuit breaker",
+    "goal": "Protect a busy application from repeatedly waiting on a service that is already failing.",
+    "concept": "<p>Your checkout service calls a delivery-price service. That service is down. Every checkout waits for a timeout. Soon many requests are waiting at once, tying up connections and workers.</p><p>A <strong>circuit breaker</strong> remembers recent failures. After enough failures, it stops forwarding calls for a short time. Checkout gets a quick “temporarily unavailable” response instead of another long wait.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Closed</strong><br>Calls pass through</div><div class=\"tile\"><strong>Open</strong><br>Calls are blocked</div><div class=\"tile\"><strong>Half-open</strong><br>Try a small probe</div></div><p>Closed → failures → Open → waiting period → Half-open</p><p>Probe succeeds → Closed. Probe fails → Open again.</p></div><p>The names come from an electrical switch: a <em>closed</em> circuit carries current. Here it means calls are allowed. “Open” means stop calling.</p>",
+    "example": "<p>For this example, choose three consecutive failures and a five-second wait. The first three calls reach the broken service and fail. The fourth is blocked immediately. After five seconds, permit one trial call.</p><p>If that trial succeeds, normal calls resume. If it fails, wait again. These numbers are teaching choices, not production recommendations. A real configuration depends on traffic rate and the cost of a wrong decision.</p><p>For checkout, a useful response might be “delivery quote unavailable; please try later.” Returning a made-up price would change the business meaning of the operation.</p>",
+    "practice": "Leave the service unhealthy and call it four times. Compare forwarded and blocked counts. Advance five seconds, make the service healthy, then send the probe. Reset and try a failed probe.",
+    "boundary": "The model uses sequential calls and consecutive failures. It does not model rolling windows, concurrent probes, shared breaker state, slow calls, or real clocks. A breaker still needs request timeouts. It does not make payment retries safe or prove that all service operations recovered.",
+    "sim": "<div class=\"tiles\"><div id=\"closedCard\" class=\"tile\">Closed<br>Allow calls</div><div id=\"openCard\" class=\"tile\">Open<br>Block calls</div><div id=\"probeCard\" class=\"tile\">Half-open<br>Probe allowed</div></div><label><input id=\"healthy\" type=\"checkbox\"> Delivery-price service is healthy</label><button id=\"callService\">Send a call</button><button id=\"advance\">Advance 5 seconds</button><button id=\"resetLab\">Reset</button><p id=\"counts\"></p><p id=\"world\" role=\"status\" aria-live=\"polite\"></p>",
+    "js": "let state='closed',failures=0,forwarded=0,blocked=0,clock=0,reopenAt=0;\nfunction paint(){closedCard.className='tile '+(state==='closed'?'active':'');openCard.className='tile '+(state==='open'?'active':'');probeCard.className='tile '+(state==='half-open'?'active':'');counts.textContent=`Time ${clock}s · Forwarded ${forwarded} · Blocked ${blocked} · Consecutive failures ${failures}`;}\ncallService.onclick=()=>{if(state==='open'&&clock<reopenAt){blocked++;world.textContent='Blocked here. No call reached the service.';}else{if(state==='open')state='half-open';forwarded++;if(healthy.checked){failures=0;state='closed';world.textContent='Call succeeded. Normal calls are allowed.';}else{failures++;if(state==='half-open'||failures>=3){state='open';reopenAt=clock+5;world.textContent='Call failed. Breaker opens for 5 seconds.';}else world.textContent='Call reached the service and failed.';}}paint();};\nadvance.onclick=()=>{clock+=5;if(state==='open'&&clock>=reopenAt){state='half-open';world.textContent='Waiting period ended. The next call is a probe.';}else world.textContent='Clock advanced. No call was sent.';paint();};\nresetLab.onclick=()=>{state='closed';failures=forwarded=blocked=clock=reopenAt=0;healthy.checked=false;world.textContent='Service is down. Send calls to see the breaker react.';paint();};resetLab.onclick();",
+    "questions": [
+      [
+        "After three failures open this breaker, what happens to a fourth immediate call?",
+        [
+          "It is blocked without reaching the service",
+          "It must wait for another network timeout",
+          "It becomes a successful response"
+        ],
+        0,
+        "Open means the local breaker rejects the call. It avoids another remote wait, but it cannot turn a failed operation into a success."
+      ],
+      [
+        "Why allow a small probe after waiting?",
+        [
+          "To replay all failed payments",
+          "To get evidence that the service recovered",
+          "To disable timeouts"
+        ],
+        1,
+        "A probe tests recovery with limited exposure. It is not permission to replay side effects, and remote calls still need timeouts."
+      ],
+      [
+        "What remains necessary after adding a breaker?",
+        [
+          "No other controls",
+          "Unlimited retries",
+          "Timeouts and safe rules for retries"
+        ],
+        2,
+        "A closed breaker still forwards requests, which can hang without timeouts. Retrying operations that change state requires separate duplicate protection."
+      ]
+    ],
+    "sources": [
+      [
+        "Microsoft Azure Architecture Center: Circuit Breaker pattern",
+        "https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker",
+        "Living architecture guidance"
+      ]
+    ],
+    "written_questions": [
+      "Why is an immediate unavailable response sometimes better than a long wait?",
+      "If one probe succeeds but the next hundred calls overload the service, what would you change?"
+    ],
+    "source_checked_on": "2026-09-29",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "String state = \"closed\"; int failures = 0;",
+          "note": "Closed allows calls to reach the service."
+        },
+        {
+          "code": "failures += 1;",
+          "note": "The first forwarded call fails."
+        },
+        {
+          "code": "failures += 1;",
+          "note": "The second call fails."
+        },
+        {
+          "code": "failures += 1;",
+          "note": "The third call fails."
+        },
+        {
+          "code": "state = failures >= 3 ? \"open\" : state;",
+          "note": "The chosen threshold opens the breaker."
+        },
+        {
+          "code": "boolean forwardFourthCall = !state.equals(\"open\");",
+          "note": "The next immediate call is blocked locally."
+        },
+        {
+          "code": "state = \"half-open\";",
+          "note": "For this trace, the waiting period has now elapsed."
+        },
+        {
+          "code": "boolean probeSucceeded = true;",
+          "note": "Supply a successful probe result."
+        },
+        {
+          "code": "state = probeSucceeded ? \"closed\" : \"open\";",
+          "note": "The successful probe allows normal calls again."
+        }
+      ],
+      "limit": "This sequential state trace is not a thread-safe circuit-breaker library. It supplies the elapsed wait and probe result explicitly. The interactive lab lets you explore failed probes too.",
+      "expect": {
+        "forwardFourthCall": "false",
+        "state": "closed"
+      },
+      "language": "java",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "state": "closed",
+            "failures": "0"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "state": "closed",
+            "failures": "1"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "state": "closed",
+            "failures": "2"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "state": "closed",
+            "failures": "3"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "state": "open",
+            "failures": "3"
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "state": "open",
+            "failures": "3",
+            "forwardFourthCall": "false"
+          }
+        },
+        {
+          "step": 6,
+          "state": {
+            "state": "half-open",
+            "failures": "3",
+            "forwardFourthCall": "false"
+          }
+        },
+        {
+          "step": 7,
+          "state": {
+            "state": "half-open",
+            "failures": "3",
+            "forwardFourthCall": "false",
+            "probeSucceeded": "true"
+          }
+        },
+        {
+          "step": 8,
+          "state": {
+            "state": "closed",
+            "failures": "3",
+            "forwardFourthCall": "false",
+            "probeSucceeded": "true"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "presentation_revision": "2026-09-29-option5"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Replace one route at a time",
+    "tag": "Foundation · Strangler fig migration",
+    "goal": "Break a large system replacement into small ownership decisions with visible evidence.",
+    "concept": "<p>You need to replace an order system, but a single cutover would move every customer at once. Put a small routing layer in front of the old and new systems. The router sends each type of request to its current owner.</p><p>This is the <strong>strangler fig pattern</strong>: the new system gradually takes over useful pieces of the old one. A <strong>route</strong> is a request path, such as /tracking. A <strong>facade</strong> is the stable entry point that hides which system serves it.</p><div class=\"diagram\"><div class=\"tile\">Customers use the same entry point</div><p class=\"arrow\">↓ Router chooses one owner per route</p><div class=\"tiles\"><div class=\"tile\"><strong>Old system</strong><br>/orders · /returns</div><div class=\"tile\"><strong>New system</strong><br>/tracking</div></div></div><p>Start with a narrow capability whose behavior you can compare. Keeping order writes in one place makes ownership easier to reason about while you move a read-only tracking page.</p>",
+    "example": "<p>Order A100 is written by the old system. The new tracking service receives a read-only copy. First compare its output with the old tracking page without changing the customer response. Check status accuracy, delay, errors, and latency. Give one team responsibility for discrepancies.</p><p>Once that evidence is acceptable, route /tracking to the new service. Keep /orders and /returns with the old system. If tracking fails, the router can send tracking requests back—but only if the old system can still read the current data.</p><p>The leadership decision is not “is the new service deployed?” It is “who owns this route and its data, what evidence permits the move, and who can reverse it?”</p>",
+    "practice": "Move /tracking to the new service, then request all three routes. Break the new tracking service and request tracking again. Move tracking back to old, then turn off old-data compatibility and observe why fallback is no longer safe.",
+    "boundary": "This model routes three synthetic requests. It does not measure latency, synchronize databases, perform shadow traffic, or handle write ownership. A real facade can become a bottleneck or shared failure point. Migration needs explicit data contracts, observability, and a retirement plan; a route toggle alone is not a safe migration.",
+    "sim": "<label><input id=\"moveTracking\" type=\"checkbox\"> New system owns /tracking</label><label><input id=\"newHealthy\" type=\"checkbox\" checked> New tracking service is healthy</label><label><input id=\"oldCompatible\" type=\"checkbox\" checked> Old system can read current tracking data</label><div class=\"tiles\"><div class=\"tile\"><strong>Old owner</strong><p id=\"oldRoutes\"></p></div><div class=\"tile\"><strong>New owner</strong><p id=\"newRoutes\"></p></div></div><button id=\"requestOrders\">Request /orders</button><button id=\"requestTracking\">Request /tracking</button><button id=\"requestReturns\">Request /returns</button><p id=\"world\" role=\"status\" aria-live=\"polite\"></p>",
+    "js": "function paint(){oldRoutes.textContent=moveTracking.checked?'/orders, /returns':'/orders, /tracking, /returns';newRoutes.textContent=moveTracking.checked?'/tracking':'No customer routes';}\nfunction request(route){const owner=route==='/tracking'&&moveTracking.checked?'new':'old';const ok=route!=='/tracking'||(owner==='new'?newHealthy.checked:oldCompatible.checked);world.textContent=`${route} → ${owner} system → ${ok?'A100 response returned':'FAILED: '+(owner==='new'?'new service unavailable':'old reader cannot read current data')}`;}\nmoveTracking.onchange=()=>{paint();world.textContent='Ownership changed. Send a request to test it.';};newHealthy.onchange=oldCompatible.onchange=()=>{world.textContent='Assumption changed. Send a request to see its effect.';};requestOrders.onclick=()=>request('/orders');requestTracking.onclick=()=>request('/tracking');requestReturns.onclick=()=>request('/returns');paint();world.textContent='All routes begin with the old system.';",
+    "questions": [
+      [
+        "Only /tracking moves. Who handles /orders in this example?",
+        [
+          "Both systems write it",
+          "The new system automatically",
+          "The old system"
+        ],
+        2,
+        "The routing decision is per capability. Moving tracking does not transfer order-write ownership or require two writers."
+      ],
+      [
+        "What evidence should precede moving the tracking route?",
+        [
+          "A service deployment alone",
+          "Matching behavior and acceptable errors, latency, and data delay",
+          "The number of new code files"
+        ],
+        1,
+        "Deployment proves software exists, not that it serves correct data. Compare behavior and operational signals before transferring responsibility."
+      ],
+      [
+        "The old reader cannot understand new data. Is routing back enough?",
+        [
+          "No; compatibility must be restored or another recovery used",
+          "Yes; any old binary can read it",
+          "Yes; the router rewrites the database automatically"
+        ],
+        0,
+        "Routing changes the destination, not the data format. A recovery plan must account for what the destination can actually read."
+      ]
+    ],
+    "sources": [
+      [
+        "AWS: Strangler fig pattern",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+        "Living guidance; publication date not stated"
+      ]
+    ],
+    "written_questions": [
+      "Name the owner and evidence gate you would require before moving /tracking.",
+      "If the router fails, which customers are affected, and how would you reduce that risk?"
+    ],
+    "source_checked_on": "2026-09-29",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "owners = {\"/orders\": \"old\", \"/tracking\": \"old\", \"/returns\": \"old\"}",
+          "note": "Every route begins with one old-system owner."
+        },
+        {
+          "code": "owners[\"/tracking\"] = \"new\"",
+          "note": "Move only the tracking route."
+        },
+        {
+          "code": "order_owner = owners[\"/orders\"]; tracking_owner = owners[\"/tracking\"]",
+          "note": "Order writes stay old while tracking goes new."
+        },
+        {
+          "code": "new_healthy = False; old_data_compatible = True",
+          "note": "The new tracking service fails; the old reader is still compatible."
+        },
+        {
+          "code": "owners[\"/tracking\"] = \"old\" if old_data_compatible else \"recovery required\"",
+          "note": "The compatible fallback can restore the old route."
+        },
+        {
+          "code": "fallback_owner = owners[\"/tracking\"]",
+          "note": "The routing decision is visible in state."
+        }
+      ],
+      "limit": "This is a routing decision table, not a proxy or a data synchronization system. A safe move still requires behavior checks, compatible state, capacity, and a named owner.",
+      "expect": {
+        "order_owner": "old",
+        "tracking_owner": "new",
+        "fallback_owner": "old"
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "old",
+              "/returns": "old"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "new",
+              "/returns": "old"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "new",
+              "/returns": "old"
+            },
+            "order_owner": "old",
+            "tracking_owner": "new"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "new",
+              "/returns": "old"
+            },
+            "order_owner": "old",
+            "tracking_owner": "new",
+            "new_healthy": false,
+            "old_data_compatible": true
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "old",
+              "/returns": "old"
+            },
+            "order_owner": "old",
+            "tracking_owner": "new",
+            "new_healthy": false,
+            "old_data_compatible": true
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "owners": {
+              "/orders": "old",
+              "/tracking": "old",
+              "/returns": "old"
+            },
+            "order_owner": "old",
+            "tracking_owner": "new",
+            "new_healthy": false,
+            "old_data_compatible": true,
+            "fallback_owner": "old"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "presentation_revision": "2026-09-29-option5"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Valid tool input can still be the wrong action",
+    "tag": "Foundation · Harness engineering and tool contracts",
+    "goal": "Check an AI-generated action against the request and permission before the tool runs.",
+    "concept": "<p>A user asks an assistant to refund $25 on order A100. The refund tool accepts <code>order_id</code> and <code>amount_cents</code>. The assistant sends 25 as the amount. The JSON is valid, but the tool would refund only 25 cents.</p><p>A <strong>schema</strong> checks the shape of input: field names, types, and allowed ranges. It can require an integer greater than zero. That still does not tell it whether 25 cents matches the user's request.</p><p>The <strong>harness</strong> is the code around the model that checks and runs actions. It should compare the proposed action with trusted request details and current permissions before calling the tool.</p><div class=\"diagram\"><div class=\"tile\">Proposal: A100, amount_cents = 25</div><p>↓ Check three different questions</p><div class=\"tiles\"><div class=\"tile\">Shape<br>Is it a positive integer?</div><div class=\"tile\">Intent<br>Is it the requested $25?</div><div class=\"tile\">Permission<br>May this user refund A100?</div></div><p>Execute only when all three pass.</p></div>",
+    "example": "<p>The trusted request in this toy example is fixed: A100, $25, or 2,500 cents. The authorized account owns A100, which has 5,000 refundable cents.</p><p>Proposal A100/25 passes the integer check and account check, but fails the request match. A100/2500 passes all three. B200/2500 has the right amount but the wrong order and no permission.</p><p>Use clear parameter names and examples in the tool description: <code>amount_cents: 2500</code> means $25. Descriptions help the model propose good inputs. Checks still enforce the rules.</p>",
+    "practice": "Try the four proposals. Read which gate fails and why. Run the safe proposal once. Observe that checking alone changes no balance. Try running it again to see the simple duplicate-action guard.",
+    "boundary": "The model uses fixed trusted intent and permissions, not natural-language understanding or real authorization. It sends no network requests or money. Production code must validate against trusted identity and current state atomically where needed, manage approval policies, and use persistent idempotency keys for retryable side effects. JSON validity alone does not provide those controls.",
+    "sim": "<p>Trusted request: refund $25 on A100. Available balance: <span id=\"balanceView\"></span>.</p><button id=\"wrongUnits\">Try A100 / 25 cents</button><button id=\"correctInput\">Try A100 / 2500 cents</button><button id=\"wrongOrder\">Try B200 / 2500 cents</button><button id=\"negativeInput\">Try A100 / −10 cents</button><p id=\"proposal\"></p><div class=\"tiles\"><div class=\"tile\" id=\"shapeGate\"></div><div class=\"tile\" id=\"intentGate\"></div><div class=\"tile\" id=\"permissionGate\"></div></div><button id=\"execute\">Run mock refund</button><button id=\"resetLab\">Reset</button><p id=\"world\" role=\"status\" aria-live=\"polite\"></p>",
+    "js": "let proposedOrder='A100',amount=25,balance=5000,done=false;\nfunction gates(){return [Number.isInteger(amount)&&amount>0,proposedOrder==='A100'&&amount===2500,proposedOrder==='A100'&&amount<=balance];}\nfunction paint(){const g=gates();proposal.textContent=`Proposal: ${proposedOrder}, amount_cents = ${amount}`;balanceView.textContent=`${balance} cents`;shapeGate.textContent=`${g[0]?'PASS':'STOP'} · Shape: positive integer`;intentGate.textContent=`${g[1]?'PASS':'STOP'} · Intent: A100 and 2500 cents`;permissionGate.textContent=`${g[2]?'PASS':'STOP'} · Permission/state: owned order and sufficient balance`;}\nfunction choose(o,a){proposedOrder=o;amount=a;paint();world.textContent='Checked only. No refund has run.';}\nwrongUnits.onclick=()=>choose('A100',25);correctInput.onclick=()=>choose('A100',2500);wrongOrder.onclick=()=>choose('B200',2500);negativeInput.onclick=()=>choose('A100',-10);\nexecute.onclick=()=>{if(done){world.textContent='This approved action already ran. No second refund.';return;}if(!gates().every(Boolean)){world.textContent='Blocked. At least one required check failed.';return;}balance-=amount;done=true;paint();world.textContent='Mock refund ran once: 2500 cents refunded.';};\nresetLab.onclick=()=>{balance=5000;done=false;choose('A100',25);};resetLab.onclick();",
+    "questions": [
+      [
+        "A100 / 25 cents passes the schema. Why is it blocked?",
+        [
+          "JSON cannot contain 25",
+          "The amount does not match the requested $25",
+          "All refunds are forbidden"
+        ],
+        1,
+        "25 is a valid positive integer, but it means $0.25. The trusted request is 2500 cents; schema validity does not establish intent."
+      ],
+      [
+        "Why keep checks outside the model?",
+        [
+          "Trusted code must enforce action rules before execution",
+          "A clear prompt guarantees every action",
+          "Tool names automatically enforce permissions"
+        ],
+        0,
+        "Descriptions guide proposals. The surrounding code checks trusted intent, identity, and state. A prompt or name is not an authorization boundary."
+      ],
+      [
+        "What is missing from this browser-only duplicate guard?",
+        [
+          "A longer tool description",
+          "More JSON fields with no checks",
+          "Persistent protection across crashes and retries"
+        ],
+        2,
+        "The toy done flag disappears on reload. A real retryable side effect needs a durable idempotency strategy at the system performing it."
+      ]
+    ],
+    "sources": [
+      [
+        "Anthropic: Writing effective tools for agents",
+        "https://www.anthropic.com/engineering/writing-tools-for-agents",
+        "Published 2025-09-11"
+      ],
+      [
+        "JSON Schema: Numeric types",
+        "https://json-schema.org/understanding-json-schema/reference/numeric",
+        "Living specification guide"
+      ]
+    ],
+    "written_questions": [
+      "Explain to a teammate why amount_cents is better than amount, and why the better name is still insufficient.",
+      "If permissions change after validation but before execution, where should the final check happen?"
+    ],
+    "source_checked_on": "2026-09-29",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "intent = {\"order_id\": \"A100\", \"amount_cents\": 2500}",
+          "note": "Trusted request details express $25 as 2,500 cents."
+        },
+        {
+          "code": "proposal = {\"order_id\": \"A100\", \"amount_cents\": 25}",
+          "note": "The first proposal uses the wrong unit conversion."
+        },
+        {
+          "code": "shape_ok = isinstance(proposal[\"amount_cents\"], int) and proposal[\"amount_cents\"] > 0",
+          "note": "The amount passes this simplified positive-integer check."
+        },
+        {
+          "code": "intent_ok = proposal == intent",
+          "note": "It does not match the requested amount."
+        },
+        {
+          "code": "proposal = {\"order_id\": \"A100\", \"amount_cents\": 2500}",
+          "note": "Correct the amount before execution."
+        },
+        {
+          "code": "shape_ok = type(proposal[\"amount_cents\"]) is int and proposal[\"amount_cents\"] > 0; intent_ok = proposal == intent",
+          "note": "Recheck the corrected proposal; exact int excludes Python booleans."
+        },
+        {
+          "code": "permission_ok = proposal[\"order_id\"] == \"A100\" and proposal[\"amount_cents\"] <= 5000",
+          "note": "The synthetic account owns this order and has sufficient balance."
+        },
+        {
+          "code": "execute_allowed = shape_ok and intent_ok and permission_ok",
+          "note": "All independent requirements must pass."
+        }
+      ],
+      "limit": "This validates a fixed synthetic request and performs no refund. Production authorization and balance checks must use trusted current state; retries need durable duplicate protection. Real schema validation should reject unexpected fields and types.",
+      "expect": {
+        "execute_allowed": true
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 25
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 25
+            },
+            "shape_ok": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 25
+            },
+            "shape_ok": true,
+            "intent_ok": false
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "shape_ok": true,
+            "intent_ok": false
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "shape_ok": true,
+            "intent_ok": true
+          }
+        },
+        {
+          "step": 6,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "shape_ok": true,
+            "intent_ok": true,
+            "permission_ok": true
+          }
+        },
+        {
+          "step": 7,
+          "state": {
+            "intent": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "proposal": {
+              "order_id": "A100",
+              "amount_cents": 2500
+            },
+            "shape_ok": true,
+            "intent_ok": true,
+            "permission_ok": true,
+            "execute_allowed": true
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "presentation_revision": "2026-09-29-option5"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "A light-based memory that remembers its setting",
+    "tag": "Research claim · Published September 8, 2026",
+    "goal": "Understand the promise of a programmable optical weight without mistaking a lab result for a ready data center.",
+    "concept": "<p>Imagine a dimmer switch that remembers its setting after you remove the power used to set it. Now imagine that setting controls a material's light emission. The stored setting can act like a <strong>weight</strong>: a number that scales an input in a computation.</p><p>A September 2026 Nature Communications paper reports a material whose internal electric polarization can set lasting light-emission levels. <strong>Nonvolatile</strong> means the state persists without continuous power to keep it stored.</p><div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Write</strong><br>Use electrical pulses to set a level</div><div class=\"tile\"><strong>Hold</strong><br>Remove programming power; keep the level</div><div class=\"tile\"><strong>Read</strong><br>Use light and a detector to observe it</div></div></div><p>The authors report 16 levels, retention longer than 27 hours, and an 8 × 8 array demonstration. These are reported laboratory results. They do not establish indefinite retention or production-scale reliability.</p>",
+    "example": "<p>Our arithmetic example assigns level 10 out of 15 a normalized weight of 10/15. With input 0.6, the weighted output is 0.6 × 10/15 = 0.4. This evenly spaced mapping is our teaching simplification, not a measured calibration curve from the device.</p><p>Turn off programming power after saving level 10. The model remembers 10. Turn off the reading light: the value is still stored, but there is no optical reading.</p><p><strong>The key distinction:</strong> no electrical standby power for retaining a state does not mean no energy for writing, illumination, detection, or computation. A useful engineering comparison needs the whole system energy budget.</p>",
+    "practice": "Choose level 10 and press Program. Remove programming power and confirm the saved level remains. Switch off reading light and observe the missing readout. Change the slider while power is off: does the saved level change?",
+    "boundary": "This is an ideal 16-level memory and linear arithmetic model, not a physics simulation. It has no noise, drift, endurance limit, calibration error, or energy model. It cannot reproduce the paper’s accuracy or prove an energy advantage. Reported retention is an observed duration, not an unlimited lifetime. Primary-source abstract was verified through the search index; direct publisher access redirected to an unavailable identity endpoint.",
+    "sim": "<label>Requested level: <input id=\"level\" type=\"range\" min=\"0\" max=\"15\" value=\"10\"><span id=\"requested\"></span></label><label><input id=\"writePower\" type=\"checkbox\" checked> Programming power is connected</label><label><input id=\"readLight\" type=\"checkbox\" checked> Reading light and detector are on</label><button id=\"program\">Program selected level</button><div class=\"tiles\"><div class=\"tile\"><strong>Saved level</strong><p id=\"storedView\"></p><div class=\"meter\"><div id=\"levelBar\"></div></div></div><div class=\"tile\"><strong>Optical readout</strong><p id=\"readView\"></p></div></div><p id=\"world\" role=\"status\" aria-live=\"polite\"></p>",
+    "js": "let stored=0;\nfunction paint(){requested.textContent=`${level.value} of 15`;storedView.textContent=`${stored} of 15`;levelBar.style.width=(stored/15*100)+'%';readView.textContent=readLight.checked?`Input 0.6 × weight ${(stored/15).toFixed(3)} = ${(0.6*stored/15).toFixed(3)}`:'No optical reading. The level is still stored.';}\nlevel.oninput=()=>{paint();world.textContent='Slider changed the request, not the saved level. Press Program to write.';};\nprogram.onclick=()=>{if(!writePower.checked){world.textContent='Cannot program without programming power. Saved level unchanged.';return;}stored=Number(level.value);paint();world.textContent='Level programmed. Now remove programming power.';};\nwritePower.onchange=()=>{paint();world.textContent=writePower.checked?'Programming power restored.':'Programming power removed; stored level retained in this ideal model.';};readLight.onchange=()=>{paint();world.textContent='Reading changed, not the stored level.';};paint();world.textContent='Begin by programming level 10.';",
+    "questions": [
+      [
+        "After programming level 10, what does removing programming power do in the model?",
+        [
+          "It deletes the state",
+          "It keeps level 10",
+          "It guarantees a free optical reading"
+        ],
+        1,
+        "Nonvolatile storage retains the programmed state. Reading still needs the modeled light and detector; retention is not the same as free operation."
+      ],
+      [
+        "What does the source’s zero electrical standby power claim concern?",
+        [
+          "All energy in an AI system",
+          "No energy for programming",
+          "Keeping the stored state"
+        ],
+        2,
+        "The claim concerns retention. Writing, illumination, detection, and surrounding electronics are different parts of the energy budget."
+      ],
+      [
+        "Why is the slider model not evidence of device accuracy?",
+        [
+          "It assumes ideal levels and linear arithmetic",
+          "It has exactly 16 settings",
+          "It uses a browser"
+        ],
+        0,
+        "The model assumes the behavior it demonstrates. Physical accuracy needs measured noise, calibration, drift, and other device evidence; the setting count alone is insufficient."
+      ]
+    ],
+    "sources": [
+      [
+        "Wen, Chen et al.: Ferroelectrically programmable lanthanide luminescent memristor",
+        "https://www.nature.com/articles/s41467-026-77397-0",
+        "Published 2026-09-08; research article"
+      ]
+    ],
+    "written_questions": [
+      "Explain the difference between energy to retain a weight and energy to use it in a computation.",
+      "What measurements would you require before comparing this device with a conventional inference system?"
+    ],
+    "source_checked_on": "2026-09-29",
+    "walkthrough": {
+      "steps": [
+        {
+          "code": "requested_level = 10; write_power = True",
+          "note": "Choose one of the 16 levels, numbered 0 through 15."
+        },
+        {
+          "code": "stored_level = requested_level if write_power else 0",
+          "note": "The powered programming step stores level 10."
+        },
+        {
+          "code": "write_power = False",
+          "note": "Removing programming power does not change the stored variable."
+        },
+        {
+          "code": "read_light = True; input_value = 0.6",
+          "note": "Reading and arithmetic have separate modeled inputs."
+        },
+        {
+          "code": "output = input_value * stored_level / 15 if read_light else None",
+          "note": "The ideal weighted output is 0.4."
+        },
+        {
+          "code": "read_light = False; output = None",
+          "note": "No reading is available, while the stored level remains 10."
+        }
+      ],
+      "limit": "This is an ideal memory analogy and arithmetic, not device physics. It omits drift, noise, finite retention, energy cost, and calibration. The code cannot validate the research result.",
+      "expect": {
+        "stored_level": 10,
+        "output": null
+      },
+      "language": "python",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "requested_level": 10,
+            "write_power": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "requested_level": 10,
+            "write_power": true,
+            "stored_level": 10
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "requested_level": 10,
+            "write_power": false,
+            "stored_level": 10
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "requested_level": 10,
+            "write_power": false,
+            "stored_level": 10,
+            "read_light": true,
+            "input_value": 0.6
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "requested_level": 10,
+            "write_power": false,
+            "stored_level": 10,
+            "read_light": true,
+            "input_value": 0.6,
+            "output": 0.4
+          }
+        },
+        {
+          "step": 5,
+          "state": {
+            "requested_level": 10,
+            "write_power": false,
+            "stored_level": 10,
+            "read_light": false,
+            "input_value": 0.6,
+            "output": null
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "presentation_revision": "2026-09-29-option5"
+  }
+]
