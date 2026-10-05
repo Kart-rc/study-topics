@@ -1,0 +1,49 @@
+name: Browser smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chromium:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned test dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        timeout-minutes: 2
+      - name: Check latest bundle and reuse simulated DOM checks
+        run: npm run test:models
+        timeout-minutes: 1
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+        timeout-minutes: 4
+      - name: Desktop and mobile browser smoke
+        run: npm run test:browser
+        timeout-minutes: 6
+      - name: Preserve synthetic-only browser evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: browser-smoke-evidence
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
