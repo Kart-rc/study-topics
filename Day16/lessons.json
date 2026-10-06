@@ -1,0 +1,1089 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Fewer tiny tasks: Spark AQE coalesces shuffle partitions",
+    "goal": "Explain how Spark can begin with many shuffle partitions, observe their real sizes, and merge neighboring small partitions before the next stage runs.",
+    "tag": "Foundation · Apache Spark 4.2 Adaptive Query Execution",
+    "concept": "<p>Imagine a warehouse that prepared 200 delivery boxes before knowing how much each order would contain. After packing, many boxes hold only one small item. Sending one truck per box wastes time.</p>\n<p>A Spark shuffle does something similar. It writes buckets of data for the next stage. The planned bucket count is chosen before Spark knows the exact output sizes.</p>\n<p><strong>Adaptive Query Execution (AQE)</strong> waits for the map tasks to finish, reads the actual bucket sizes, and can combine neighboring small buckets into fewer tasks.</p>\n<div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Planned</strong><p>8 · 12 · 3 · 64 · 5 MB</p></div><div class=\"tile active\"><strong>Observed</strong><p>real map-output sizes</p></div><div class=\"tile\"><strong>Next stage</strong><p>23 · 64 · 5 MB</p></div></div><p class=\"arrow\">AQE merges adjacent small partitions; it does not reshuffle their keys.</p></div>",
+    "example": "<p>Suppose a shuffle produces five partitions: <code>[8, 12, 3, 64, 5]</code> MB. Our toy target is 32 MB.</p><ol><li>8 + 12 + 3 = 23 MB, so those neighbors become one task.</li><li>Adding the next 64 MB partition would exceed the target, so 23 MB closes.</li><li>The 64 MB partition stays alone. The final 5 MB partition also stays alone.</li></ol><p>The next stage starts three tasks instead of five. That reduces task-launch overhead. It does not fix the 64 MB partition; skew splitting is a separate AQE feature.</p>",
+    "practice": "Predict the task groups, then change the advisory size. Watch task count fall while the original total bytes stay constant.",
+    "boundary": "This is a greedy teaching model, not Spark’s exact coalescing algorithm. Spark uses map-output statistics and configuration bounds; the advisory size is a target, not a guarantee. Coalescing works on contiguous shuffle partitions. It does not remove a shuffle, fix every skewed key, or guarantee faster execution when fewer tasks reduce useful parallelism.",
+    "sim": "<label>Advisory task size <input id=\"advisoryMb\" type=\"range\" min=\"16\" max=\"96\" step=\"8\" value=\"32\"> <span id=\"advisoryValue\"></span></label><button id=\"coalesceShuffle\">Coalesce observed partitions</button><div id=\"shuffleTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const shuffleSizes=[8,12,3,64,5];function paint(){const target=Number(advisoryMb.value),groups=[];let current=0;for(const size of shuffleSizes){if(current&&current+size>target){groups.push(current);current=0}current+=size}if(current)groups.push(current);advisoryValue.textContent=target+' MB';shuffleTiles.replaceChildren();groups.forEach((g,i)=>{const t=document.createElement('div');t.className='tile '+(g<=target?'active':'');t.innerHTML='<strong>Task '+(i+1)+'</strong><p>'+g+' MB</p>';shuffleTiles.appendChild(t)});world.textContent='Observed shuffle: '+JSON.stringify(shuffleSizes)+' MB\\nCoalesced tasks: '+JSON.stringify(groups)+' MB\\nTask count: '+shuffleSizes.length+' → '+groups.length+'\\nTotal data: '+shuffleSizes.reduce((a,b)=>a+b,0)+' MB (unchanged)';}coalesceShuffle.onclick=paint;advisoryMb.oninput=paint;paint();",
+    "questions": [
+      [
+        "With a 32 MB target, which partitions merge first?",
+        [
+          "8, 12, and 3 MB",
+          "3 and 64 MB",
+          "64 and 5 MB"
+        ],
+        0,
+        "The first three adjacent partitions total 23 MB, still below the toy target."
+      ],
+      [
+        "Why can AQE make this decision better than the original plan?",
+        [
+          "It sees runtime map-output sizes",
+          "It guesses from file names",
+          "It changes every key"
+        ],
+        0,
+        "AQE uses statistics produced while the query is running."
+      ],
+      [
+        "What remains unsolved in this example?",
+        [
+          "The 64 MB partition may still need skew handling",
+          "All data ordering is lost",
+          "The shuffle is removed"
+        ],
+        0,
+        "Coalescing small partitions and splitting skewed partitions solve different problems."
+      ]
+    ],
+    "written_questions": [
+      "Why should a busy shared cluster start with enough partitions and let AQE coalesce rather than begin with too few?",
+      "When might coalescing make a stage slower even though it launches fewer tasks?"
+    ],
+    "sources": [
+      [
+        "Apache Spark 4.2: SQL Performance Tuning",
+        "https://spark.apache.org/docs/latest/sql-performance-tuning.html",
+        "Living 4.2 documentation; AQE and post-shuffle coalescing"
+      ],
+      [
+        "Apache Spark 4.2: SQL configuration",
+        "https://spark.apache.org/docs/latest/configuration.html#spark-sql",
+        "Living 4.2 configuration reference"
+      ]
+    ],
+    "source_checked_on": "2026-10-06",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "sizes_mb = [8, 12, 3, 64, 5]\ntarget_mb = 32",
+          "note": "Start with actual map-output sizes and a synthetic 32 MB advisory target."
+        },
+        {
+          "code": "groups = []\ncurrent = 0",
+          "note": "Prepare the output groups and one open group."
+        },
+        {
+          "code": "for size in sizes_mb:\n    if current and current + size > target_mb:\n        groups.append(current)\n        current = 0\n    current += size\nif current:\n    groups.append(current)",
+          "note": "Scan in order. Close a group before the next partition would cross the target."
+        },
+        {
+          "code": "task_reduction = len(sizes_mb) - len(groups)\ntotal_before = sum(sizes_mb)\ntotal_after = sum(groups)",
+          "note": "We removed two task launches without changing the number of bytes."
+        }
+      ],
+      "expect": {
+        "groups": [
+          23,
+          64,
+          5
+        ],
+        "task_reduction": 2,
+        "total_before": 92,
+        "total_after": 92
+      },
+      "limit": "The runnable code implements only the lesson’s contiguous greedy model. Spark’s production rule also considers minimum sizes, initial partition count, cluster parallelism, and other AQE decisions.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "sizes_mb": [
+              8,
+              12,
+              3,
+              64,
+              5
+            ],
+            "target_mb": 32
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "sizes_mb": [
+              8,
+              12,
+              3,
+              64,
+              5
+            ],
+            "target_mb": 32,
+            "groups": [],
+            "current": 0
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "sizes_mb": [
+              8,
+              12,
+              3,
+              64,
+              5
+            ],
+            "target_mb": 32,
+            "groups": [
+              23,
+              64,
+              5
+            ],
+            "current": 5,
+            "size": 5
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "sizes_mb": [
+              8,
+              12,
+              3,
+              64,
+              5
+            ],
+            "target_mb": 32,
+            "groups": [
+              23,
+              64,
+              5
+            ],
+            "current": 5,
+            "size": 5,
+            "task_reduction": 2,
+            "total_before": 92,
+            "total_after": 92
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "advanced_detail": "<p>Spark 4.2 documents AQE as enabled by default. Coalescing requires both AQE and <code>spark.sql.adaptive.coalescePartitions.enabled</code>. The default <code>parallelismFirst=true</code> can prioritize cluster parallelism over the advisory target; Spark recommends considering <code>false</code> on a busy cluster to avoid many small tasks. Validate with the final adaptive plan and SQL UI statistics, not configuration alone.</p>"
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Both saw a safe world: snapshot-isolation write skew",
+    "goal": "See how two transactions can update different rows and still break one shared business rule, then understand why serializable isolation may abort one transaction.",
+    "tag": "Foundation · PostgreSQL 18 transaction isolation",
+    "concept": "<p>Two doctors, Alice and Bob, are on call. The rule is simple: at least one doctor must remain available.</p><p>Alice and Bob each start a transaction at the same time. Each sees the same snapshot: both doctors are available. Each takes only their own name off the schedule. Because they update different rows, there is no direct row-write conflict.</p>\n<div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Alice’s snapshot</strong><p>Alice ✓ · Bob ✓</p></div><div class=\"tile\"><strong>Bob’s snapshot</strong><p>Alice ✓ · Bob ✓</p></div><div class=\"tile active\"><strong>Both commit</strong><p>Alice ✗ · Bob ✗</p></div></div><p class=\"arrow\">Two individually reasonable decisions create one impossible schedule.</p></div><p>This is <strong>write skew</strong>: transactions write different rows, but their decisions depend on an overlapping set of rows.</p>",
+    "example": "<p>Under PostgreSQL Repeatable Read, both transactions can keep their starting snapshots. Alice writes only Alice’s row; Bob writes only Bob’s row. The rule is broken even though neither overwrote the other.</p><p>Under Serializable isolation, PostgreSQL tracks read/write dependencies. If both commits would produce a result impossible under any one-at-a-time order, one transaction fails with SQLSTATE <code>40001</code>. The application must retry the whole transaction. On retry, the loser sees only one doctor left and stays on call.</p>",
+    "practice": "Switch between Repeatable Read and Serializable. Predict whether both transactions commit and how many doctors remain.",
+    "boundary": "This model demonstrates one two-row invariant. Real database behavior depends on the product and isolation level. Serializable can abort transactions that look safe locally, so retry the complete transaction and ignore results from the aborted attempt. Explicit locks or a different data model can also enforce some invariants.",
+    "sim": "<label>Isolation <select id=\"isolationLevel\"><option value=\"repeatable\">Repeatable Read / snapshot</option><option value=\"serializable\">Serializable</option></select></label><button id=\"runDoctors\">Run both requests together</button><div id=\"doctorTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const serial=isolationLevel.value==='serializable';const alice='OFF',bob=serial?'ON':'OFF',aborted=serial?'Bob':'none';doctorTiles.innerHTML='<div class=\"tile\"><strong>Alice transaction</strong><p>commits OFF</p></div><div class=\"tile '+(serial?'':'active')+'\"><strong>Bob transaction</strong><p>'+(serial?'40001 · retry':'commits OFF')+'</p></div><div class=\"tile '+(bob==='ON'?'active':'')+'\"><strong>Final schedule</strong><p>Alice '+alice+' · Bob '+bob+'</p></div>';world.textContent='Starting snapshot: Alice ON, Bob ON\\nDirect row conflict: false\\nSerialization abort: '+aborted+'\\nFinal on-call count: '+(bob==='ON'?1:0)+'\\nInvariant satisfied: '+(bob==='ON');}runDoctors.onclick=paint;isolationLevel.onchange=paint;paint();",
+    "questions": [
+      [
+        "Under the toy Repeatable Read run, what is the final schedule?",
+        [
+          "Both doctors are off call",
+          "Alice stays on",
+          "Both transactions must conflict on one row"
+        ],
+        0,
+        "Each transaction changes a different row, so the shared invariant can fail."
+      ],
+      [
+        "Why can Serializable reject one commit?",
+        [
+          "The combined result has no equivalent one-at-a-time order",
+          "Serializable always allows only one transaction",
+          "It detects matching user names"
+        ],
+        0,
+        "Serializable permits only outcomes consistent with some serial order."
+      ],
+      [
+        "What must the application do after SQLSTATE 40001?",
+        [
+          "Retry the entire transaction from a fresh snapshot",
+          "Commit the old partial result",
+          "Reuse decisions from the aborted transaction"
+        ],
+        0,
+        "PostgreSQL says aborted transaction results must be ignored and the whole transaction retried."
+      ]
+    ],
+    "written_questions": [
+      "Explain why row-level conflict detection alone misses the on-call rule.",
+      "When would an explicit lock or redesigned invariant row be preferable to generalized Serializable retries?"
+    ],
+    "sources": [
+      [
+        "PostgreSQL 18: Transaction Isolation",
+        "https://www.postgresql.org/docs/current/transaction-iso.html",
+        "Living PostgreSQL 18 documentation; Repeatable Read, Serializable, and retries"
+      ],
+      [
+        "PostgreSQL wiki: Serializable Snapshot Isolation",
+        "https://wiki.postgresql.org/wiki/SSI",
+        "Foundation; worked write-skew examples"
+      ]
+    ],
+    "source_checked_on": "2026-10-06",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "snapshot = {'Alice': True, 'Bob': True}\nalice_saw_backup = snapshot['Bob']\nbob_saw_backup = snapshot['Alice']",
+          "note": "Both transactions read the same two-doctor snapshot."
+        },
+        {
+          "code": "repeatable_result = snapshot.copy()\nif alice_saw_backup:\n    repeatable_result['Alice'] = False\nif bob_saw_backup:\n    repeatable_result['Bob'] = False",
+          "note": "Each writes a different row. Snapshot isolation allows the unsafe combination in this toy."
+        },
+        {
+          "code": "serializable_result = snapshot.copy()\nserializable_result['Alice'] = False\nbob_aborted = True",
+          "note": "Serializable dependency checking chooses one transaction to abort."
+        },
+        {
+          "code": "if bob_aborted and not serializable_result['Alice']:\n    serializable_result['Bob'] = True\nrepeatable_on_call = sum(repeatable_result.values())\nserializable_on_call = sum(serializable_result.values())",
+          "note": "Bob retries, sees Alice already off, and remains on call."
+        }
+      ],
+      "expect": {
+        "repeatable_result": {
+          "Alice": false,
+          "Bob": false
+        },
+        "bob_aborted": true,
+        "serializable_result": {
+          "Alice": false,
+          "Bob": true
+        },
+        "repeatable_on_call": 0,
+        "serializable_on_call": 1
+      },
+      "limit": "The code records the logical anomaly and retry; it does not run PostgreSQL or reproduce its predicate-lock implementation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "snapshot": {
+              "Alice": true,
+              "Bob": true
+            },
+            "alice_saw_backup": true,
+            "bob_saw_backup": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "snapshot": {
+              "Alice": true,
+              "Bob": true
+            },
+            "alice_saw_backup": true,
+            "bob_saw_backup": true,
+            "repeatable_result": {
+              "Alice": false,
+              "Bob": false
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "snapshot": {
+              "Alice": true,
+              "Bob": true
+            },
+            "alice_saw_backup": true,
+            "bob_saw_backup": true,
+            "repeatable_result": {
+              "Alice": false,
+              "Bob": false
+            },
+            "serializable_result": {
+              "Alice": false,
+              "Bob": true
+            },
+            "bob_aborted": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "snapshot": {
+              "Alice": true,
+              "Bob": true
+            },
+            "alice_saw_backup": true,
+            "bob_saw_backup": true,
+            "repeatable_result": {
+              "Alice": false,
+              "Bob": false
+            },
+            "serializable_result": {
+              "Alice": false,
+              "Bob": true
+            },
+            "bob_aborted": true,
+            "repeatable_on_call": 0,
+            "serializable_on_call": 1
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.py"
+    },
+    "advanced_detail": "<p>PostgreSQL 18 describes Repeatable Read as snapshot isolation and explicitly allows serialization anomalies. Serializable adds dependency monitoring without making every operation block, but applications must handle serialization failures—normally SQLSTATE <code>40001</code>—with a full retry.</p>"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Green before failure, red after: capacity for one-zone loss",
+    "goal": "Turn regional average utilization into a zonal evacuation decision by checking the load each surviving zone must carry.",
+    "tag": "Architecture judgment · AWS zonal resilience",
+    "concept": "<p>A three-lane bridge carries 120 cars per minute. Each lane can carry 60. Today each lane carries 40, so the dashboard says 67% utilized. Green.</p><p>Now close one lane. The same 120 cars must fit into two lanes: 60 each. The service has no operating margin for retries, uneven balancing, or a second small fault.</p>\n<div class=\"diagram\"><div class=\"tiles\"><div class=\"tile active\"><strong>Normal</strong><p>40 / 60 in each AZ</p></div><div class=\"tile\"><strong>Evacuate one AZ</strong><p>60 / 60 in each survivor</p></div><div class=\"tile\"><strong>80% target</strong><p>needs 75 capacity per AZ</p></div></div><p class=\"arrow\">A green regional average does not prove the fleet can lose a zone.</p></div>",
+    "example": "<p>The first calculation is <code>normal load per zone = total / zones</code>. The failure calculation is <code>evacuated load per survivor = total / (zones - 1)</code>.</p><p>For 120 requests/second across three zones, the failure load is 60. If the operating target is 80%, each surviving zone needs at least <code>60 / 0.8 = 75</code> requests/second of capacity.</p><p>This is an N+1 question: can the system meet its useful-work target after losing one failure domain, without first depending on a stressed control plane to add capacity?</p>",
+    "practice": "Change traffic and per-zone capacity. Compare the calm-day dashboard with the one-zone-loss result before choosing a rollout or evacuation plan.",
+    "boundary": "This arithmetic assumes even traffic, one complete zone loss, identical zones, and instantly movable requests. Real planning must include zonal services, quotas, connection pools, data locality, retry amplification, autoscaling delay, fail-open/closed behavior, and correlated failures. A target such as 80% is a design input, not an AWS guarantee.",
+    "sim": "<label>Total useful requests/s <input id=\"regionalLoad\" type=\"range\" min=\"60\" max=\"210\" step=\"10\" value=\"120\"> <span id=\"loadValue\"></span></label><label>Capacity per AZ <input id=\"zoneCapacity\" type=\"range\" min=\"50\" max=\"110\" step=\"5\" value=\"60\"> <span id=\"capacityValue\"></span></label><button id=\"evacuateZone\">Evacuate one of three AZs</button><div id=\"zoneTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const load=Number(regionalLoad.value),cap=Number(zoneCapacity.value),normal=load/3,failed=load/2,target=.8,safe=failed<=cap*target;loadValue.textContent=load;capacityValue.textContent=cap;zoneTiles.innerHTML='<div class=\"tile active\"><strong>Normal average</strong><p>'+Math.round(normal/cap*100)+'%</p></div><div class=\"tile '+(failed<=cap?'active':'')+'\"><strong>After one AZ loss</strong><p>'+Math.round(failed/cap*100)+'%</p></div><div class=\"tile '+(safe?'active':'')+'\"><strong>80% guardrail</strong><p>'+(safe?'PASS':'FAIL')+'</p></div>';world.textContent='Normal per AZ: '+normal.toFixed(1)+' requests/s\\nAfter evacuation per survivor: '+failed.toFixed(1)+' requests/s\\nHard capacity exceeded: '+(failed>cap)+'\\n80% operating target met: '+safe+'\\nMinimum capacity/AZ for target: '+(failed/target).toFixed(1);}evacuateZone.onclick=paint;[regionalLoad,zoneCapacity].forEach(x=>x.oninput=paint);paint();",
+    "questions": [
+      [
+        "At 120 requests/s and 60 capacity per AZ, what happens after one AZ is lost?",
+        [
+          "Each survivor reaches 100%",
+          "Each remains at 67%",
+          "Traffic disappears"
+        ],
+        0,
+        "Two survivors each receive 60 requests/s, exactly their hard capacity."
+      ],
+      [
+        "Why is the normal regional utilization misleading?",
+        [
+          "It averages across capacity that will not exist during evacuation",
+          "CPU metrics are never useful",
+          "Availability Zones always share capacity"
+        ],
+        0,
+        "Failure planning must recalculate against the surviving failure domains."
+      ],
+      [
+        "What is the main boundary of the toy?",
+        [
+          "It ignores imbalance, retries, quotas, and recovery delay",
+          "It proves autoscaling is unnecessary",
+          "It guarantees all AWS services evacuate instantly"
+        ],
+        0,
+        "The arithmetic is a first guardrail, not a full recovery proof."
+      ]
+    ],
+    "written_questions": [
+      "What production evidence would prove that zonal evacuation works beyond this capacity calculation?",
+      "How would retry amplification change the required post-failure headroom?"
+    ],
+    "sources": [
+      [
+        "AWS Builders’ Library: Static stability using Availability Zones",
+        "https://aws.amazon.com/builders-library/static-stability-using-availability-zones/",
+        "Foundation; designs that keep working when dependencies are impaired"
+      ],
+      [
+        "AWS Well-Architected Reliability Pillar",
+        "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html",
+        "Document revision published 2024-11-06; resilience and recovery guidance"
+      ]
+    ],
+    "source_checked_on": "2026-10-06",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "zones = 3\ntotal_rps = 120\ncapacity_per_zone = 60\noperating_target = 0.80",
+          "note": "Define the failure domains, useful load, hard capacity, and desired post-failure margin."
+        },
+        {
+          "code": "normal_rps_per_zone = total_rps / zones\nnormal_utilization = normal_rps_per_zone / capacity_per_zone",
+          "note": "The calm-day regional view looks healthy at about 67%."
+        },
+        {
+          "code": "survivors = zones - 1\nevacuated_rps_per_zone = total_rps / survivors\nevacuated_utilization = evacuated_rps_per_zone / capacity_per_zone",
+          "note": "Remove one zone before dividing. Each survivor now reaches 100%."
+        },
+        {
+          "code": "minimum_capacity = evacuated_rps_per_zone / operating_target\npasses_target = capacity_per_zone >= minimum_capacity",
+          "note": "To stay at or below 80%, every zone needs 75 requests/s of capacity."
+        }
+      ],
+      "expect": {
+        "normal_rps_per_zone": 40.0,
+        "normal_utilization": 0.6666666666666666,
+        "survivors": 2,
+        "evacuated_rps_per_zone": 60.0,
+        "evacuated_utilization": 1.0,
+        "minimum_capacity": 75.0,
+        "passes_target": false
+      },
+      "limit": "The model is deterministic capacity arithmetic. It does not simulate AWS routing, queueing, retries, autoscaling, or a zonal data plane.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "zones": 3,
+            "total_rps": 120,
+            "capacity_per_zone": 60,
+            "operating_target": 0.8
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "zones": 3,
+            "total_rps": 120,
+            "capacity_per_zone": 60,
+            "operating_target": 0.8,
+            "normal_rps_per_zone": 40.0,
+            "normal_utilization": 0.6666666666666666
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "zones": 3,
+            "total_rps": 120,
+            "capacity_per_zone": 60,
+            "operating_target": 0.8,
+            "normal_rps_per_zone": 40.0,
+            "normal_utilization": 0.6666666666666666,
+            "survivors": 2,
+            "evacuated_rps_per_zone": 60.0,
+            "evacuated_utilization": 1.0
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "zones": 3,
+            "total_rps": 120,
+            "capacity_per_zone": 60,
+            "operating_target": 0.8,
+            "normal_rps_per_zone": 40.0,
+            "normal_utilization": 0.6666666666666666,
+            "survivors": 2,
+            "evacuated_rps_per_zone": 60.0,
+            "evacuated_utilization": 1.0,
+            "minimum_capacity": 75.0,
+            "passes_target": false
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "advanced_detail": "<p>A senior review should ask for a game-day or controlled zonal shift that verifies routing, application health, data dependencies, and useful-work SLIs. Trigger, mechanism, cascade, and missing control are distinct: the zone loss is the trigger; insufficient survivor headroom is the mechanism; retries and saturation are the cascade; customer errors are the impact; an N+1 capacity gate is one missing control.</p>"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Script the agent’s world: deterministic tool-loop tests",
+    "goal": "Test the orchestration around an agent with fixed model steps, then keep model quality and provider behavior in separate evaluations.",
+    "tag": "New development · OpenAI Agents SDK testing utilities",
+    "concept": "<p>A travel rehearsal does not wait for a real storm. It injects a known cancellation and checks whether the team follows the playbook.</p><p>An agent harness can do the same. Instead of asking a live model what to do, give the runner a fixed script: call <code>lookup_order</code>, then call <code>refund_order</code>, then return the final message.</p>\n<div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Step 1</strong><p>lookup_order(O42)</p></div><div class=\"tile\"><strong>Step 2</strong><p>refund_order(O42)</p></div><div class=\"tile active\"><strong>Step 3</strong><p>“Refund started”</p></div></div><p class=\"arrow\">The test passes only when the application consumes the whole expected script.</p></div>",
+    "example": "<p>The OpenAI Agents SDK documents in-memory, provider-neutral test utilities such as <code>ScriptedModel</code>. They make no model request and record normalized interactions owned by the SDK.</p><p>Our tiny executable queue uses the same testing idea. Each application action must match the next expected step. If a refactor returns after the lookup and silently skips the refund, <code>assert_complete()</code> fails because one tool call and the final response remain unused.</p>",
+    "practice": "Choose a correct flow, a skipped refund, or an unexpected tool. Predict which exact harness assertion fails.",
+    "boundary": "A scripted model tests deterministic orchestration: tool wiring, handoffs, guardrails, retry paths, and call shape. It does not prove that a live model will choose the right plan, that a provider will serialize requests correctly, or that a real tool is safe. Cover those boundaries with model evaluations, provider-adapter tests, integration tests, and production traces.",
+    "sim": "<label>Application behavior <select id=\"agentPath\"><option value=\"correct\">lookup → refund → final</option><option value=\"skip\">lookup → final</option><option value=\"wrong\">lookup → email_customer → final</option></select></label><button id=\"runHarness\">Run scripted harness</button><div id=\"harnessTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const expected=['lookup_order','refund_order','assistant_message'];function paint(){const actual=agentPath.value==='correct'?expected:agentPath.value==='skip'?['lookup_order','assistant_message']:['lookup_order','email_customer','assistant_message'];let mismatch=-1;for(let i=0;i<actual.length;i++){if(actual[i]!==expected[i]){mismatch=i;break}}const complete=mismatch<0&&actual.length===expected.length;harnessTiles.replaceChildren();expected.forEach((step,i)=>{const t=document.createElement('div');const seen=actual[i],ok=seen===step;t.className='tile '+(ok?'active':'');t.innerHTML='<strong>Expected '+(i+1)+'</strong><p>'+step+'<br>actual: '+(seen||'missing')+'</p>';harnessTiles.appendChild(t)});world.textContent='Model/API calls made: 0\\nExpected: '+JSON.stringify(expected)+'\\nActual: '+JSON.stringify(actual)+'\\nFirst mismatch: '+(mismatch<0?'none':mismatch+1)+'\\nassert_complete: '+(complete?'PASS':'FAIL');}runHarness.onclick=paint;agentPath.onchange=paint;paint();",
+    "questions": [
+      [
+        "The application skips refund_order. What should the script harness report?",
+        [
+          "FAIL because expected steps remain or appear out of order",
+          "PASS because the final text sounds good",
+          "Call a live model to decide"
+        ],
+        0,
+        "Exact scripted steps expose accidental workflow drift."
+      ],
+      [
+        "What does a scripted model test best?",
+        [
+          "Application-owned orchestration and tool-loop behavior",
+          "The live model’s production judgment",
+          "Cloud network latency"
+        ],
+        0,
+        "The official utilities isolate behavior owned by the application and SDK."
+      ],
+      [
+        "What remains outside this test?",
+        [
+          "Model quality and real provider/tool integration",
+          "Whether the queue is empty",
+          "The names of expected calls"
+        ],
+        0,
+        "Use separate eval and integration layers for external behavior."
+      ]
+    ],
+    "written_questions": [
+      "Which agent failure paths should be scripted before a production release, and why?",
+      "Why is exact scripted testing dangerous if it is mistaken for a model-quality evaluation?"
+    ],
+    "sources": [
+      [
+        "OpenAI Agents SDK: Testing",
+        "https://openai.github.io/openai-agents-python/testing/",
+        "Living official documentation; deterministic provider-neutral testing utilities"
+      ],
+      [
+        "OpenAI Agents SDK: Tracing",
+        "https://openai.github.io/openai-agents-python/tracing/",
+        "Living official documentation; production trace structure and processors"
+      ]
+    ],
+    "source_checked_on": "2026-10-06",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "expected = ['lookup_order', 'refund_order', 'assistant_message']\nactual = []",
+          "note": "Write the exact orchestration contract before running the application."
+        },
+        {
+          "code": "actual.append('lookup_order')\norder = {'id': 'O42', 'paid': True}",
+          "note": "The first fixed model step asks for the lookup tool."
+        },
+        {
+          "code": "if order['paid']:\n    actual.append('refund_order')\n    refund = {'order': 'O42', 'status': 'started'}",
+          "note": "The application executes the next expected tool using a synthetic result."
+        },
+        {
+          "code": "actual.append('assistant_message')\nassert_complete = actual == expected",
+          "note": "Exact completion proves the whole scripted tool loop was consumed."
+        }
+      ],
+      "expect": {
+        "actual": [
+          "lookup_order",
+          "refund_order",
+          "assistant_message"
+        ],
+        "order": {
+          "id": "O42",
+          "paid": true
+        },
+        "refund": {
+          "order": "O42",
+          "status": "started"
+        },
+        "assert_complete": true
+      },
+      "limit": "This standard-library queue teaches the documented testing boundary; it is not the OpenAI Agents SDK implementation and makes no model, tool, tracing, or network call.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "expected": [
+              "lookup_order",
+              "refund_order",
+              "assistant_message"
+            ],
+            "actual": []
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "expected": [
+              "lookup_order",
+              "refund_order",
+              "assistant_message"
+            ],
+            "actual": [
+              "lookup_order"
+            ],
+            "order": {
+              "id": "O42",
+              "paid": true
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "expected": [
+              "lookup_order",
+              "refund_order",
+              "assistant_message"
+            ],
+            "actual": [
+              "lookup_order",
+              "refund_order"
+            ],
+            "order": {
+              "id": "O42",
+              "paid": true
+            },
+            "refund": {
+              "order": "O42",
+              "status": "started"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "expected": [
+              "lookup_order",
+              "refund_order",
+              "assistant_message"
+            ],
+            "actual": [
+              "lookup_order",
+              "refund_order",
+              "assistant_message"
+            ],
+            "order": {
+              "id": "O42",
+              "paid": true
+            },
+            "refund": {
+              "order": "O42",
+              "status": "started"
+            },
+            "assert_complete": true
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "advanced_detail": "<p>The official SDK testing guide says its deterministic utilities run in memory and make no model, sandbox-provider, or Realtime API requests. It also states the boundary explicitly: use real provider adapters or integration environments for behavior owned by an external model, protocol, or sandbox provider. That separation keeps fast harness tests truthful.</p>"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Seven clocks, one fibre network: compare time across borders",
+    "goal": "Understand what an international optical-clock comparison measures, what “agreement within uncertainty” means, and what the 2026 experiment did not yet prove.",
+    "tag": "New research · Physical Review Research · 2026-09-01",
+    "concept": "<p>Imagine four laboratories building their own ultra-precise rulers. Comparing each ruler only with itself cannot reveal whether the laboratories agree. They must compare them through a shared measurement link.</p><p>Optical clocks count extremely high-frequency atomic transitions. A 2026 experiment connected seven clocks at four national metrology institutes through Europe’s optical-fibre network for a two-month comparison campaign.</p>\n<div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>INRIM · Italy</strong><p>clock ratios</p></div><div class=\"tile\"><strong>LNE-OP · France</strong><p>clock ratios</p></div><div class=\"tile\"><strong>NPL · UK</strong><p>Yb⁺ E3</p></div><div class=\"tile active\"><strong>PTB · Germany</strong><p>Yb⁺ E3</p></div></div><p class=\"arrow\">Stabilized fibre links carry frequency comparisons—not a normal internet timestamp.</p></div>",
+    "example": "<p>The paper reports ratio uncertainties from <code>7.7 × 10⁻¹⁸</code> to <code>6.1 × 10⁻¹⁷</code>. The independently developed NPL and PTB ytterbium-ion clocks agreed within an uncertainty of <code>7.7 × 10⁻¹⁸</code>—the paper describes this as the first international verification of two independently developed optical clocks below one part in <code>10¹⁷</code>.</p><p>Our toy uses synthetic normalized deviations. If clock A reads +2 units, clock B reads −1, and their comparison uncertainty is 7.7, their 3-unit difference is inside the uncertainty band.</p>",
+    "practice": "Move two synthetic clock readings and their uncertainty. Predict when the comparison changes from agreement to a discrepancy worth investigating.",
+    "boundary": "The slider is a one-dimensional uncertainty check using synthetic values. It is not the paper’s estimator, fibre-noise cancellation, systematic uncertainty budget, clock operation schedule, or ratio network. Agreement within an uncertainty interval does not prove either clock is perfectly correct, nor does one campaign redefine the SI second.",
+    "sim": "<label>Clock A deviation <input id=\"clockA\" type=\"range\" min=\"-12\" max=\"12\" value=\"2\"> <span id=\"clockAValue\"></span></label><label>Clock B deviation <input id=\"clockB\" type=\"range\" min=\"-12\" max=\"12\" value=\"-1\"> <span id=\"clockBValue\"></span></label><label>Combined uncertainty <input id=\"clockU\" type=\"range\" min=\"2\" max=\"12\" step=\"0.1\" value=\"7.7\"> <span id=\"clockUValue\"></span></label><button id=\"compareClocks\">Compare clocks</button><div id=\"clockTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const a=Number(clockA.value),b=Number(clockB.value),u=Number(clockU.value),delta=Math.abs(a-b),agree=delta<=u;clockAValue.textContent=a+' units';clockBValue.textContent=b+' units';clockUValue.textContent=u.toFixed(1)+' units';clockTiles.innerHTML='<div class=\"tile\"><strong>Clock A</strong><p>'+a+'</p></div><div class=\"tile\"><strong>Clock B</strong><p>'+b+'</p></div><div class=\"tile '+(agree?'active':'')+'\"><strong>Comparison</strong><p>'+(agree?'AGREES WITHIN U':'INVESTIGATE')+'</p></div>';world.textContent='Synthetic absolute difference: '+delta.toFixed(1)+' units\\nSynthetic uncertainty: '+u.toFixed(1)+' units\\nAgreement within uncertainty: '+agree+'\\nPaper’s best reported comparison uncertainty: 7.7 × 10⁻¹⁸\\nToy units are not fractional-frequency measurements.';}compareClocks.onclick=paint;[clockA,clockB,clockU].forEach(x=>x.oninput=paint);paint();",
+    "questions": [
+      [
+        "In the default toy, the readings differ by 3 and uncertainty is 7.7. What is the conclusion?",
+        [
+          "They agree within the stated uncertainty",
+          "The clocks are identical",
+          "The SI second is redefined"
+        ],
+        0,
+        "The difference is inside the toy uncertainty band; that is a bounded claim."
+      ],
+      [
+        "Why link independently built clocks?",
+        [
+          "To test consistency across laboratories and implementations",
+          "To make ordinary network packets faster",
+          "To eliminate every systematic uncertainty"
+        ],
+        0,
+        "Independent implementations make agreement more meaningful than one clock comparing with itself."
+      ],
+      [
+        "What must not be inferred from the study?",
+        [
+          "One campaign alone proves perfect clocks or completes SI redefinition",
+          "Fibre links can compare frequency ratios",
+          "The campaign involved seven clocks"
+        ],
+        0,
+        "The paper provides important evidence, not the entire institutional redefinition process."
+      ]
+    ],
+    "written_questions": [
+      "Why is international agreement a harder claim than excellent uncertainty reported by one laboratory?",
+      "What additional evidence would you want before using an optical-clock network operationally?"
+    ],
+    "sources": [
+      [
+        "Pizzocaro et al., Physical Review Research: International optical clock comparison",
+        "https://journals.aps.org/prresearch/abstract/10.1103/l4bh-ryxs",
+        "Original research; published 2026-09-01"
+      ],
+      [
+        "NIST: Optical Clocks—The Future of Time",
+        "https://www.nist.gov/atomic-clocks/how-atomic-clocks-work/optical-clocks-future-time",
+        "Foundation; published 2024-08-22"
+      ]
+    ],
+    "source_checked_on": "2026-10-06",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "clock_a = 2.0\nclock_b = -1.0\ncombined_uncertainty = 7.7",
+          "note": "Use synthetic normalized deviations; retain the paper’s 7.7 value only as a teaching scale."
+        },
+        {
+          "code": "difference = abs(clock_a - clock_b)",
+          "note": "The toy clocks differ by three units."
+        },
+        {
+          "code": "agrees_within_uncertainty = difference <= combined_uncertainty",
+          "note": "A difference inside the declared band counts as agreement in this simple model."
+        },
+        {
+          "code": "claim = 'agreement' if agrees_within_uncertainty else 'investigate discrepancy'",
+          "note": "State only the supported comparison claim."
+        }
+      ],
+      "expect": {
+        "difference": 3.0,
+        "agrees_within_uncertainty": true,
+        "claim": "agreement"
+      },
+      "limit": "The runnable example uses synthetic normalized readings and a simple threshold. It does not reproduce the article’s frequency-ratio analysis or uncertainty propagation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "clock_a": 2.0,
+            "clock_b": -1.0,
+            "combined_uncertainty": 7.7
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "clock_a": 2.0,
+            "clock_b": -1.0,
+            "combined_uncertainty": 7.7,
+            "difference": 3.0
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "clock_a": 2.0,
+            "clock_b": -1.0,
+            "combined_uncertainty": 7.7,
+            "difference": 3.0,
+            "agrees_within_uncertainty": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "clock_a": 2.0,
+            "clock_b": -1.0,
+            "combined_uncertainty": 7.7,
+            "difference": 3.0,
+            "agrees_within_uncertainty": true,
+            "claim": "agreement"
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "advanced_detail": "<p>The peer-reviewed paper was published September 1, 2026 in <em>Physical Review Research</em>. It reports seven optical clocks across INRIM, LNE-OP, NPL, and PTB, with ratio uncertainties spanning 7.7 × 10⁻¹⁸ to 6.1 × 10⁻¹⁷. Treat performance numbers as the authors’ experimental results, not a general guarantee for optical-clock networks.</p>"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "The production secret waits: GitHub deployment environments",
+    "goal": "Model how an environment can hold a deployment job until branch and approval protections pass, then release environment secrets to that job.",
+    "tag": "Living platform guidance · GitHub Actions environments",
+    "concept": "<p>A bank vault does not hand over the production key just because someone reached the vault door. It checks who arrived and whether another person approved the release.</p><p>A GitHub Actions job can reference an environment such as <code>production</code>. Protection rules can restrict deployment branches, require a reviewer, or impose a wait timer. Environment secrets become available only after the protection rules pass.</p>\n<div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>Build job</strong><p>artifact ready</p></div><div class=\"tile\"><strong>Environment gate</strong><p>main branch + approval</p></div><div class=\"tile active\"><strong>Deploy job</strong><p>secret released here</p></div></div><p class=\"arrow\">A queued deployment job does not receive the environment secret early.</p></div>",
+    "example": "<p>The workflow declares the environment on the deployment job:</p><pre><code>jobs:\n  deploy:\n    environment: production\n    steps:\n      - run: ./deploy.sh\n        env:\n          TOKEN: ${{ secrets.PROD_TOKEN }}</code></pre><p>If the branch is not allowed, the job is denied. If approval is required but missing, it waits. Only after the rules pass can the job start and read <code>PROD_TOKEN</code>.</p>",
+    "practice": "Change the branch and reviewer decision. Predict whether the job is denied, waiting, or running—and whether the secret is available.",
+    "boundary": "This model covers one environment with a branch restriction and one required approval. GitHub plan, repository visibility, admin-bypass settings, wait timers, custom protection rules, and self-hosted runner security change the real boundary. An environment gate does not make a deployment script safe or isolate a self-hosted runner.",
+    "sim": "<label>Source branch <select id=\"deployBranch\"><option value=\"main\">main</option><option value=\"feature\">feature/refactor</option></select></label><label>Reviewer <select id=\"deployApproval\"><option value=\"pending\">not yet approved</option><option value=\"approved\">approved by another reviewer</option><option value=\"self\">self-approved</option></select></label><label><input id=\"preventSelf\" type=\"checkbox\" checked> Prevent self-review</label><button id=\"evaluateDeploy\">Evaluate production job</button><div id=\"deployTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "function paint(){const branchOk=deployBranch.value==='main',approval=deployApproval.value,selfBlocked=preventSelf.checked&&approval==='self',approved=approval==='approved'||(approval==='self'&&!selfBlocked);const state=!branchOk?'DENIED':!approved?'WAITING':'RUNNING',secret=state==='RUNNING';deployTiles.innerHTML='<div class=\"tile '+(branchOk?'active':'')+'\"><strong>Branch rule</strong><p>'+(branchOk?'PASS':'FAIL')+'</p></div><div class=\"tile '+(approved?'active':'')+'\"><strong>Approval</strong><p>'+(approved?'PASS':selfBlocked?'SELF BLOCKED':'WAIT')+'</p></div><div class=\"tile '+(secret?'active':'')+'\"><strong>PROD_TOKEN</strong><p>'+(secret?'AVAILABLE':'WITHHELD')+'</p></div>';world.textContent='Environment: production\\nJob state: '+state+'\\nEnvironment secret available: '+secret+'\\nDeployment executed: '+(state==='RUNNING');}evaluateDeploy.onclick=paint;[deployBranch,deployApproval,preventSelf].forEach(x=>x.onchange=paint);paint();",
+    "questions": [
+      [
+        "Main is allowed but approval is pending. What can the job read?",
+        [
+          "The environment secret is withheld while the job waits",
+          "The secret is printed in build logs",
+          "The deploy job runs immediately"
+        ],
+        0,
+        "Environment secrets are not available until required protection rules pass."
+      ],
+      [
+        "Why put the environment on the deploy job instead of the build job?",
+        [
+          "Only the deployment boundary should receive production authority",
+          "Every job should receive all secrets",
+          "It makes tests unnecessary"
+        ],
+        0,
+        "Least privilege keeps build and test work outside the production trust boundary."
+      ],
+      [
+        "What remains true after approval?",
+        [
+          "The deployment script and runner still need their own security controls",
+          "Approval proves the release is defect-free",
+          "Self-hosted runners become isolated containers"
+        ],
+        0,
+        "Environment approval is one gate, not a full supply-chain or runtime control."
+      ]
+    ],
+    "written_questions": [
+      "Which automated signal would you add as a custom protection rule, and what false positive could block safe releases?",
+      "How would you design emergency bypass so it is fast, visible, and reviewable?"
+    ],
+    "sources": [
+      [
+        "GitHub Docs: Deployments and environments",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments",
+        "Living official documentation; protection rules and environment secrets"
+      ],
+      [
+        "GitHub Docs: Workflow syntax—jobs.<job_id>.environment",
+        "https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#jobsjob_idenvironment",
+        "Living official syntax reference"
+      ]
+    ],
+    "source_checked_on": "2026-10-06",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "branch = 'main'\napproval = 'pending'\nallowed_branches = {'main'}\nprevent_self_review = True",
+          "note": "Model a production environment that accepts main and requires an independent approval."
+        },
+        {
+          "code": "branch_ok = branch in allowed_branches\napproved = approval == 'approved_by_other'",
+          "note": "The branch passes, but the reviewer decision is still missing."
+        },
+        {
+          "code": "job_state = 'DENIED' if not branch_ok else ('WAITING' if not approved else 'RUNNING')",
+          "note": "Protection rules determine whether the deploy job is denied, waiting, or running."
+        },
+        {
+          "code": "environment_secret_available = job_state == 'RUNNING'\ndeployment_executed = environment_secret_available",
+          "note": "The environment secret appears only after the job is allowed to start."
+        }
+      ],
+      "expect": {
+        "branch_ok": true,
+        "approved": false,
+        "job_state": "WAITING",
+        "environment_secret_available": false,
+        "deployment_executed": false
+      },
+      "limit": "The Python decision model does not call GitHub, create an environment, or exercise plan-specific protection-rule availability.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "branch": "main",
+            "approval": "pending",
+            "prevent_self_review": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "branch": "main",
+            "approval": "pending",
+            "prevent_self_review": true,
+            "branch_ok": true,
+            "approved": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "branch": "main",
+            "approval": "pending",
+            "prevent_self_review": true,
+            "branch_ok": true,
+            "approved": false,
+            "job_state": "WAITING"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "branch": "main",
+            "approval": "pending",
+            "prevent_self_review": true,
+            "branch_ok": true,
+            "approved": false,
+            "job_state": "WAITING",
+            "environment_secret_available": false,
+            "deployment_executed": false
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "advanced_detail": "<p>GitHub documents required reviewers, wait timers, deployment branch/tag restrictions, administrator bypass settings, custom protection rules, and environment secrets. Required reviewers can include up to six users or teams, but only one approval is needed. Availability varies by plan and repository visibility, so verify the current repository settings rather than copying a generic policy.</p>"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "One error shape, stable meaning: RFC 9457 Problem Details",
+    "goal": "Design HTTP errors that preserve status-code semantics while giving clients a stable machine-readable problem type and occurrence identifier.",
+    "tag": "Standard · IETF RFC 9457 · July 2023",
+    "concept": "<p>Suppose three services reject order O42. One returns <code>{\"error\":\"no stock\"}</code>, another returns <code>{\"message\":\"failed\"}</code>, and the third returns an HTML page. Every client needs custom parsing.</p><p>RFC 9457 defines a common envelope called <strong>Problem Details</strong>. The HTTP status keeps its normal meaning. The body adds a stable problem <code>type</code>, a short <code>title</code>, occurrence-specific <code>detail</code>, and an <code>instance</code> identifier.</p>\n<div class=\"diagram\"><div class=\"tiles\"><div class=\"tile\"><strong>HTTP</strong><p>409 Conflict</p></div><div class=\"tile active\"><strong>type</strong><p>/problems/out-of-stock</p></div><div class=\"tile\"><strong>instance</strong><p>/errors/e-731</p></div></div><p class=\"arrow\">Branch on stable type; show detail to a person; trace one occurrence by instance.</p></div>",
+    "example": "<p>For order O42, the response can use <code>Content-Type: application/problem+json</code>:</p><pre><code>{\n  \"type\": \"https://api.example/problems/out-of-stock\",\n  \"title\": \"Item is out of stock\",\n  \"status\": 409,\n  \"detail\": \"SKU-7 cannot fulfill order O42\",\n  \"instance\": \"/errors/e-731\",\n  \"sku\": \"SKU-7\"\n}</code></pre><p>A client branches on the stable <code>type</code> URI, not on the human sentence in <code>detail</code>. The <code>status</code> member is advisory and must match the actual HTTP response status generated by the origin server.</p>",
+    "practice": "Switch among out-of-stock, rate-limit, and internal-error cases. Watch the HTTP status, stable type, occurrence ID, and client action change without parsing prose.",
+    "boundary": "Problem Details is an error envelope, not a distributed tracing system, retry policy, validation framework, or debugging dump. Do not leak stack traces or sensitive data. Clients must ignore unknown extensions. The actual HTTP status still controls generic intermediaries; a disagreeing body status is unsafe.",
+    "sim": "<label>Failure <select id=\"problemKind\"><option value=\"stock\">SKU-7 is out of stock</option><option value=\"rate\">request rate exceeded</option><option value=\"server\">unexpected server failure</option></select></label><button id=\"renderProblem\">Return problem response</button><div id=\"problemTiles\" class=\"tiles\"></div><pre id=\"world\" aria-live=\"polite\"></pre>",
+    "js": "const problems={stock:{status:409,type:'https://api.example/problems/out-of-stock',title:'Item is out of stock',action:'ask user to change item',instance:'/errors/e-731'},rate:{status:429,type:'https://api.example/problems/rate-limit',title:'Too many requests',action:'honor Retry-After',instance:'/errors/e-732'},server:{status:500,type:'https://api.example/problems/internal',title:'Internal server error',action:'stop automatic retry storm',instance:'/errors/e-733'}};function paint(){const p=problems[problemKind.value];problemTiles.innerHTML='<div class=\"tile active\"><strong>HTTP '+p.status+'</strong><p>application/problem+json</p></div><div class=\"tile\"><strong>Stable type</strong><p>'+p.type.split('/').pop()+'</p></div><div class=\"tile\"><strong>Client action</strong><p>'+p.action+'</p></div>';world.textContent=JSON.stringify({type:p.type,title:p.title,status:p.status,detail:p.title+' for order O42',instance:p.instance},null,2)+'\\n\\nClient does: '+p.action;}renderProblem.onclick=paint;problemKind.onchange=paint;paint();",
+    "questions": [
+      [
+        "Which field should machine logic use as the primary problem identifier?",
+        [
+          "The type URI",
+          "A substring inside detail",
+          "The title’s punctuation"
+        ],
+        0,
+        "RFC 9457 defines type as the primary problem identifier; detail is human-readable."
+      ],
+      [
+        "What if the body says status 409 but the actual response is HTTP 500?",
+        [
+          "That disagreement is unsafe; generic software follows the HTTP response",
+          "The body always overrides HTTP",
+          "Both statuses are ignored"
+        ],
+        0,
+        "The status member is advisory and generators must use the same actual response status."
+      ],
+      [
+        "What is a security boundary?",
+        [
+          "Do not expose stack traces or sensitive internals in problem details",
+          "Put database credentials in detail",
+          "Require clients to dereference every type URI"
+        ],
+        0,
+        "Problem details describe the HTTP interface, not internal debugging state."
+      ]
+    ],
+    "written_questions": [
+      "Design one stable problem type for a data-platform API and identify the client action it enables.",
+      "When is an ordinary HTTP status sufficient without a Problem Details body?"
+    ],
+    "sources": [
+      [
+        "IETF RFC 9457: Problem Details for HTTP APIs",
+        "https://www.rfc-editor.org/rfc/rfc9457.html",
+        "Standards Track; published July 2023; obsoletes RFC 7807"
+      ],
+      [
+        "OpenAPI Specification 3.1.1",
+        "https://spec.openapis.org/oas/v3.1.1.html",
+        "Official specification; response content and schemas"
+      ]
+    ],
+    "source_checked_on": "2026-10-06",
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "failure = 'out_of_stock'\norder_id = 'O42'\noccurrence = 'e-731'",
+          "note": "Start with one domain failure and one specific occurrence."
+        },
+        {
+          "code": "problem = {\n    'type': 'https://api.example/problems/out-of-stock',\n    'title': 'Item is out of stock',\n    'status': 409,\n}",
+          "note": "Use a stable type for machines, a short title for people, and the normal HTTP status."
+        },
+        {
+          "code": "problem['detail'] = f'SKU-7 cannot fulfill order {order_id}'\nproblem['instance'] = f'/errors/{occurrence}'",
+          "note": "Add occurrence-specific explanation and an opaque support identifier."
+        },
+        {
+          "code": "http_status = 409\ncontent_type = 'application/problem+json'\nclient_action = 'change item' if problem['type'].endswith('out-of-stock') else 'inspect'\nstatus_matches = http_status == problem['status']",
+          "note": "The client branches on type, while the transport and body statuses remain consistent."
+        }
+      ],
+      "expect": {
+        "problem": {
+          "type": "https://api.example/problems/out-of-stock",
+          "title": "Item is out of stock",
+          "status": 409,
+          "detail": "SKU-7 cannot fulfill order O42",
+          "instance": "/errors/e-731"
+        },
+        "http_status": 409,
+        "content_type": "application/problem+json",
+        "client_action": "change item",
+        "status_matches": true
+      },
+      "limit": "The Python object demonstrates field roles. It is not an HTTP server, content-negotiation implementation, OpenAPI validator, or security filter.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "failure": "out_of_stock",
+            "order_id": "O42",
+            "occurrence": "e-731"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "failure": "out_of_stock",
+            "order_id": "O42",
+            "occurrence": "e-731",
+            "problem": {
+              "type": "https://api.example/problems/out-of-stock",
+              "title": "Item is out of stock",
+              "status": 409
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "failure": "out_of_stock",
+            "order_id": "O42",
+            "occurrence": "e-731",
+            "problem": {
+              "type": "https://api.example/problems/out-of-stock",
+              "title": "Item is out of stock",
+              "status": 409,
+              "detail": "SKU-7 cannot fulfill order O42",
+              "instance": "/errors/e-731"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "failure": "out_of_stock",
+            "order_id": "O42",
+            "occurrence": "e-731",
+            "problem": {
+              "type": "https://api.example/problems/out-of-stock",
+              "title": "Item is out of stock",
+              "status": 409,
+              "detail": "SKU-7 cannot fulfill order O42",
+              "instance": "/errors/e-731"
+            },
+            "http_status": 409,
+            "content_type": "application/problem+json",
+            "client_action": "change item",
+            "status_matches": true
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "advanced_detail": "<p>RFC 9457 replaced RFC 7807 in July 2023. It defines <code>application/problem+json</code>, the standard members, extension behavior, and security considerations. Unknown extensions must be ignored. A resolvable type URI is encouraged, but clients should not automatically dereference it during normal handling.</p>"
+  }
+]

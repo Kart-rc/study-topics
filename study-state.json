@@ -21,7 +21,7 @@
     30
   ],
   "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
-  "last_generated_day": 15,
+  "last_generated_day": 16,
   "days": [
     {
       "number": 1,
@@ -335,6 +335,30 @@
         "apis-microservices"
       ],
       "validation": "Executed code traces, seven interactive mechanisms, quizzes, save/export, sources, local links and track-aware spaced reviews verified; real-browser layout and native behavior unverified because the Chromium download was unavailable in this runtime. See Day15/VALIDATION.md."
+    },
+    {
+      "number": 16,
+      "folder": "Day16",
+      "date": "2026-10-06",
+      "generation_key": "2026-10-06",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day1+14",
+        "Day13+3",
+        "Day15+1",
+        "Day7+7"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs",
+        "ci-cd-github-actions",
+        "apis-microservices"
+      ],
+      "validation": "Executed code traces, seven interactive mechanisms, quizzes, save/export, sources, local links, and track-aware spaced reviews verified; local native browser unavailable, so repository Browser smoke is the native-browser gate. See Day16/VALIDATION.md."
     }
   ],
   "submitted_assessments": [],
