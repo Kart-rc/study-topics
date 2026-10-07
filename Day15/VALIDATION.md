@@ -2,6 +2,14 @@
 
 Checked on 2026-10-05.
 
+## Practical use-case revision · 2026-10-07
+
+All seven lessons now include a visible “Use case: when to use this” section in HTML and Markdown: when the idea fits, a concrete example, and an adoption boundary or simpler alternative. It is included in the existing four-minute explanation; each lesson remains 15 minutes and Day15 remains 105 minutes.
+
+The new guidance was checked against the original primary sources. Existing source dates, questions, answer choices, code, recorded execution frames, and generation/review state were compared with the published baseline and preserved. The separate `use_case_checked_on` field records this revision's research check.
+
+The Day15 mechanism verifier, all 92 repository lesson replay/quiz/save/export/link checks, and the bundle-policy tests passed locally. The `historical-use-cases.spec.cjs` browser regression explicitly covers all seven Day15 pages on desktop and mobile, because the main smoke suite otherwise selects only the newest day. Native verification runs in the repository's Browser smoke workflow; see the result attached to this revision commit. Local Chromium remains unavailable. This regression checks content visibility, JavaScript errors, and horizontal layout, not a full accessibility audit or Safari/Firefox behavior.
+
 ## Observed checks
 
 - Executed all seven synthetic examples with `scripts/walkthrough.py`; each produced four recorded state frames and matched its declared final values.

@@ -3,6 +3,12 @@
     "slug": "data-engineering",
     "track": "Data engineering",
     "title": "The commit is the boundary",
+    "use_case": {
+      "when": "Use Iceberg’s concurrency controls when independent jobs write to the same table and readers need a consistent view. This matters when a streaming append overlaps a batch load or table maintenance.",
+      "example": "Two Spark jobs add orders to an S3-backed Iceberg table. Blue adds file C first. Amber prepared D from the older A, B snapshot. Amber must refresh and validate before publishing A, B, C, D, so Blue’s orders stay visible.",
+      "decision": "Use the table library’s commit protocol rather than replacing a shared file list yourself. Retry compatible appends; replan conflicting rewrites. If conflicts are frequent, reducing overlapping maintenance may be simpler than increasing retries. This protects table publication, not external notifications."
+    },
+    "use_case_checked_on": "2026-10-07",
     "tag": "Foundation · current documentation",
     "goal": "Two people edit the same table.",
     "concept": "<p>Two people edit the same table. Blue adds file C. Amber adds file D. If Amber saves an old file list after Blue, C can disappear from the table even though the file still exists.</p><p>An Iceberg snapshot is the list of files a reader should use. Publishing a new list must check that the starting version is still current. If it changed, refresh the list and check whether your change still makes sense. This is optimistic concurrency: prepare work first, then reject a stale save.</p>",
@@ -200,6 +206,12 @@
     "slug": "software-engineering",
     "track": "Software engineering",
     "title": "When retries multiply an outage",
+    "use_case": {
+      "when": "Review retry ownership when a slow dependency receives more traffic during an outage, or when several services and their SDKs each retry the same user action.",
+      "example": "A data-quality UI calls a rule service, which calls a metadata service, which reads a catalog. With three total attempts at each layer, 100 user requests can create up to 2,700 catalog attempts. One retry owner allowing three attempts reduces this example’s upper bound to 300.",
+      "decision": "Set a bounded attempt budget and deadline, then use backoff and jitter for temporary failures. Do not retry invalid requests. Before retrying a write, establish how duplicate effects are prevented. Waiting alone does not fix multiplied attempts."
+    },
+    "use_case_checked_on": "2026-10-07",
     "tag": "Foundation · distributed systems",
     "goal": "A failed request can trigger a second request.",
     "concept": "<p>A failed request can trigger a second request. If every service in a call chain retries, one user action can create many calls at the bottom of the chain.</p><p>Count total attempts, including the first call. Three layers allowing three attempts each can produce 3 × 3 × 3 = 27 attempts at the deepest service. Waiting between attempts helps timing; it does not reduce this worst-case count. Choose a retry owner and a total budget.</p>",
@@ -348,6 +360,12 @@
     "slug": "distinguished-engineer",
     "track": "Distinguished Engineer",
     "title": "Turn an SLO into a decision",
+    "use_case": {
+      "when": "Use an SLO and an agreed error-budget policy when product and engineering leaders need a shared basis for choosing reliability work versus new features. Measure the outcome users depend on.",
+      "example": "A reporting platform promises 99.5% of 10,000 scheduled deliveries will arrive on time and pass checks. Thirty bad deliveries have used 30 of the 50 allowed misses. If a repeated defect is consuming the remaining 20 quickly, fixing it may deserve priority over another feature.",
+      "decision": "Agree on the measurement window, owners, and actions before an incident. Inspect failure trends and customer impact before changing release plans. A remaining-budget number alone should not decide a release freeze."
+    },
+    "use_case_checked_on": "2026-10-07",
     "tag": "Foundation · technical influence",
     "goal": "A dashboard says “99.5% reliable.” What should the team do with that number? Start by saying what customers were promised and how a missed promise is counted..",
     "concept": "<p>A dashboard says “99.5% reliable.” What should the team do with that number? Start by saying what customers were promised and how a missed promise is counted.</p><p>A service-level objective, or SLO, is a target over a stated time window. The error budget is how many failures that target permits. It helps leaders agree when reliability work should take priority. Counting successful retries as extra deliveries would hide the original misses.</p>",
@@ -481,6 +499,12 @@
     "slug": "genai-engineering",
     "track": "GenAI engineering",
     "title": "An agent handoff that survives a reset",
+    "use_case": {
+      "when": "Use a durable handoff when an agent’s work spans sessions, may be interrupted, or includes writes whose results must be checked before continuing. Keep the record with the artifacts it describes.",
+      "example": "An agent generates five study pages, then stops before testing them. Its saved record says which files exist, their version, and that checks remain pending. A fresh session reads that record, inspects the files, and performs the missing checks instead of generating another bundle.",
+      "decision": "Record observed evidence and the next unresolved action. For a short, read-only question, this structure may be unnecessary. After an uncertain remote write, inspect the destination; a local progress note cannot prove what actually happened."
+    },
+    "use_case_checked_on": "2026-10-07",
     "tag": "Foundation · harness engineering",
     "goal": "An agent writes five pages, then loses its conversation context.",
     "concept": "<p>An agent writes five pages, then loses its conversation context. A note saying “done” could cause the next session to skip tests that never ran.</p><p>The harness is the code around the model that runs tools and records progress. Store a small handoff outside temporary conversation memory: what exists, what was checked, and what remains. A file being written and a file being verified are different states.</p>",
@@ -628,6 +652,12 @@
     "slug": "technology-breakthroughs",
     "track": "Technology breakthroughs",
     "title": "ToolGrad: build the answer path first",
+    "use_case": {
+      "when": "Consider this research approach when building synthetic tool-use training examples and many generated requests cannot be completed with the tools available. Start with a small offline experiment using sandbox tools.",
+      "example": "A data-incident assistant can list datasets, fetch freshness for a returned ID, and explain the measurement. Build and check that chain first, then write a matching request about the demo dataset’s 18-minute delay. A request to repair the pipeline would require a tool the assistant does not have.",
+      "decision": "Compare generated examples against independent, human-written tasks. For a few fixed workflows, manually authored examples may be simpler. Successful chains do not establish coverage or production readiness; include unsupported requests and failure cases in evaluation."
+    },
+    "use_case_checked_on": "2026-10-07",
     "tag": "Research spotlight · September 10, 2026",
     "goal": "A training example asks an assistant to repair a pipeline, but its tools can only read data.",
     "concept": "<p>A training example asks an assistant to repair a pipeline, but its tools can only read data. That example cannot be completed, however fluent its wording.</p><p>ToolGrad explores building tool-use examples from an executable path first. Start with what the tools can actually do, connect their inputs and outputs, then write a matching request. A valid path is useful training material, but it may overrepresent easy tasks.</p>",

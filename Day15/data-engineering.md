@@ -48,6 +48,16 @@ The cleaner works in the background. A consumer that is caught up can still see 
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use a compacted topic when services need to rebuild the latest value for each key after a restart, such as an order-status cache or a table of active data-quality rules.
+
+**Practical example.** A replacement order service replays the topic into an empty table. It keeps O42 as shipped and removes O17 when it reads the tombstone. It needs today's state, so retaining every earlier packed or queued value adds recovery work without helping that purpose.
+
+**How to decide.** Choose stable keys and allow enough tombstone retention for the slowest supported rebuild. Keep a separate history when every change matters for audit. For a small table with infrequent refreshes, a database snapshot may be simpler.
+
 
 ## Step through the code (within the 5-minute exploration)
 

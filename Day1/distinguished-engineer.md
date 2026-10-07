@@ -20,6 +20,16 @@ Of 10,000 scheduled deliveries, 99.5% must arrive on time and pass checks. That 
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use an SLO and an agreed error-budget policy when product and engineering leaders need a shared basis for choosing reliability work versus new features. Measure the outcome users depend on.
+
+**Practical example.** A reporting platform promises 99.5% of 10,000 scheduled deliveries will arrive on time and pass checks. Thirty bad deliveries have used 30 of the 50 allowed misses. If a repeated defect is consuming the remaining 20 quickly, fixing it may deserve priority over another feature.
+
+**How to decide.** Agree on the measurement window, owners, and actions before an incident. Inspect failure trends and customer impact before changing release plans. A remaining-budget number alone should not decide a release freeze.
+
 
 ## Step through the code (within the 5-minute exploration)
 

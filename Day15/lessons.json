@@ -1,6 +1,12 @@
 [
   {
     "slug": "data-engineering",
+    "use_case": {
+      "when": "Use a compacted topic when services need to rebuild the latest value for each key after a restart, such as an order-status cache or a table of active data-quality rules.",
+      "example": "A replacement order service replays the topic into an empty table. It keeps O42 as shipped and removes O17 when it reads the tombstone. It needs today's state, so retaining every earlier packed or queued value adds recovery work without helping that purpose.",
+      "decision": "Choose stable keys and allow enough tombstone retention for the slowest supported rebuild. Keep a separate history when every change matters for audit. For a small table with infrequent refreshes, a database snapshot may be simpler."
+    },
+    "use_case_checked_on": "2026-10-07",
     "track": "Data engineering",
     "title": "Keep the newest fact: Kafka compaction and tombstones",
     "goal": "Rebuild a keyed table from a compacted Kafka topic without mistaking compaction for instant deletion.",
@@ -260,6 +266,12 @@
   },
   {
     "slug": "software-engineering",
+    "use_case": {
+      "when": "Use graceful shutdown whenever deployments, scaling, or maintenance can stop a service while requests or background tasks are still running. It is especially useful when abrupt termination causes failed requests or repeated business effects.",
+      "example": "An EKS rollout replaces the Pod handling order O42. Stop new arrivals, then let its remaining eight seconds of database work finish within the ten-second grace period. With only five seconds available, the retry needs a durable record or idempotency key to avoid repeating the effect.",
+      "decision": "Set the wait from measured drain times and test cancellation. For work lasting minutes or hours, use durable jobs and checkpoints instead of making every rollout wait indefinitely."
+    },
+    "use_case_checked_on": "2026-10-07",
     "track": "Software engineering",
     "title": "Stop, drain, then force: graceful shutdown",
     "goal": "Shut down a service without accepting work that cannot finish inside the termination window.",
@@ -394,6 +406,12 @@
   },
   {
     "slug": "distinguished-engineer",
+    "use_case": {
+      "when": "Use two-window burn-rate alerts when a service has a meaningful user-facing SLO but brief error spikes produce noisy pages. The question is whether failures are spending the error budget fast enough to need action now.",
+      "example": "Your data-quality API targets 99.9% successful requests. In this lesson, 2% errors over five minutes and 1.2% over an hour exceed the illustrative 10× threshold together. Page the owner; a short spike with only 0.2% over the hour does not meet this paging rule.",
+      "decision": "Backtest thresholds against real incidents and define the response. Use slower tickets for chronic harm. For sparse traffic, consider synthetic checks or longer aggregation because one failed request can distort the rate."
+    },
+    "use_case_checked_on": "2026-10-07",
     "track": "Distinguished Engineer",
     "title": "Two windows, one page: alert on sustained budget burn",
     "goal": "Use a short and a long error-rate window together so a brief spike does not page, while sustained customer harm does.",
@@ -528,6 +546,12 @@
   },
   {
     "slug": "genai-engineering",
+    "use_case": {
+      "when": "Use an action gate when an agent reads external content and can also send information or change systems. A document can supply facts, but it must not expand what the user authorized.",
+      "example": "The user asks for an O42 summary. An email tells the agent to upload a customer token. The gate allows the summary and blocks the send. Similarly, a profiling report may suggest a data-quality rule; its text cannot authorize publishing that rule for another team.",
+      "decision": "Enforce allowed actions, targets, and permissions outside model-generated text. If the task only needs answers, omit write tools. Keep tool credentials narrow; matching an allowed action name alone does not make every argument safe."
+    },
+    "use_case_checked_on": "2026-10-07",
     "track": "GenAI engineering",
     "title": "The document can inform, not authorize: gate agent actions",
     "goal": "Keep untrusted tool content from granting itself permission to send data or perform side effects.",
@@ -660,6 +684,12 @@
   },
   {
     "slug": "technology-breakthroughs",
+    "use_case": {
+      "when": "This research is relevant to specialist laboratories that need to grip microscopic objects in tight spaces. It offers a candidate approach for microassembly and cell-manipulation experiments, rather than a ready-made tool for ordinary software or data-platform work.",
+      "example": "A researcher assembling a tiny shaft and bearing needs a controllable grip where a larger tool cannot fit. The paper demonstrates related microassembly and single-cell manipulation. The lesson's light slider illustrates the control idea; it cannot select a safe setting for a real cell.",
+      "decision": "Consider a research evaluation when object size, access, and force requirements justify it. Compare established manipulation methods first, and validate temperature, gripping force, and sample survival before claiming suitability for an application."
+    },
+    "use_case_checked_on": "2026-10-07",
     "track": "Technology breakthroughs",
     "title": "A tiny claw on a fibre: light-driven 3D micromanipulation",
     "goal": "Understand how a fibre-tip gripper combines a rigid skeleton and soft light-heated muscle to handle tiny objects.",
@@ -811,6 +841,12 @@
   },
   {
     "slug": "ci-cd-github-actions",
+    "use_case": {
+      "when": "Use GitHub Actions OIDC when a workflow must access AWS and you want each job to receive temporary credentials instead of storing a long-lived AWS access key in repository secrets.",
+      "example": "A production data-quality service workflow needs to publish its deployment artifact. Its token identifies the expected repository and prod environment; AWS accepts that context and grants a role with the required access. A copied workflow in an unrelated repository fails the trust check.",
+      "decision": "Use separate roles for different deployment privileges and match the actual token claims. A build that only runs local tests needs no AWS role. OIDC replaces stored credentials; environment approval and least-privilege role permissions still serve separate purposes."
+    },
+    "use_case_checked_on": "2026-10-07",
     "track": "CI/CD & GitHub Actions",
     "title": "A temporary cloud badge: GitHub Actions OIDC to AWS",
     "goal": "Replace stored AWS access keys with short-lived credentials whose token claims name the exact repository context.",
@@ -957,6 +993,12 @@
   },
   {
     "slug": "apis-microservices",
+    "use_case": {
+      "when": "Use deadline propagation when a request crosses several services and a late answer is no longer useful to the caller. It helps prevent downstream work from consuming resources after the caller has stopped waiting.",
+      "example": "GetOrder has 500 ms. After the profile service uses 120 ms, inventory gets only the remaining 380 ms. Giving inventory a fresh budget lets its 450 ms operation continue past the customer's limit. The same problem appears when a data-quality API calls metadata and policy services.",
+      "decision": "Choose budgets from measured latency and stop work when cancellation arrives. For long-running processing, return a durable job identifier and expose job status. A deadline does not undo a payment or database change already committed."
+    },
+    "use_case_checked_on": "2026-10-07",
     "track": "APIs & Microservices",
     "title": "One clock across the call chain: gRPC deadlines",
     "goal": "Propagate a caller's remaining time so downstream services stop work after the result is no longer useful.",

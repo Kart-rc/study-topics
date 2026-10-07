@@ -20,6 +20,16 @@ Start with A and B at version 0. Blue publishes A, B, C at version 1. Amber’s 
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use Iceberg’s concurrency controls when independent jobs write to the same table and readers need a consistent view. This matters when a streaming append overlaps a batch load or table maintenance.
+
+**Practical example.** Two Spark jobs add orders to an S3-backed Iceberg table. Blue adds file C first. Amber prepared D from the older A, B snapshot. Amber must refresh and validate before publishing A, B, C, D, so Blue’s orders stay visible.
+
+**How to decide.** Use the table library’s commit protocol rather than replacing a shared file list yourself. Retry compatible appends; replan conflicting rewrites. If conflicts are frequent, reducing overlapping maintenance may be simpler than increasing retries. This protects table publication, not external notifications.
+
 
 ## Step through the code (within the 5-minute exploration)
 

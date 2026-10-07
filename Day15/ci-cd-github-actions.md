@@ -43,6 +43,16 @@ A copied workflow from another repository gets a different subject and should be
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use GitHub Actions OIDC when a workflow must access AWS and you want each job to receive temporary credentials instead of storing a long-lived AWS access key in repository secrets.
+
+**Practical example.** A production data-quality service workflow needs to publish its deployment artifact. Its token identifies the expected repository and prod environment; AWS accepts that context and grants a role with the required access. A copied workflow in an unrelated repository fails the trust check.
+
+**How to decide.** Use separate roles for different deployment privileges and match the actual token claims. A build that only runs local tests needs no AWS role. OIDC replaces stored credentials; environment approval and least-privilege role permissions still serve separate purposes.
+
 
 ## Step through the code (within the 5-minute exploration)
 

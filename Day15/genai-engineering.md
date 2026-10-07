@@ -36,6 +36,16 @@ if not authorized:
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use an action gate when an agent reads external content and can also send information or change systems. A document can supply facts, but it must not expand what the user authorized.
+
+**Practical example.** The user asks for an O42 summary. An email tells the agent to upload a customer token. The gate allows the summary and blocks the send. Similarly, a profiling report may suggest a data-quality rule; its text cannot authorize publishing that rule for another team.
+
+**How to decide.** Enforce allowed actions, targets, and permissions outside model-generated text. If the task only needs answers, omit write tools. Keep tool credentials narrow; matching an allowed action name alone does not make every argument safe.
+
 
 ## Step through the code (within the 5-minute exploration)
 

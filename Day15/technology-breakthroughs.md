@@ -39,6 +39,16 @@ More light narrows the toy jaw. A safe operating band matters because a living c
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** This research is relevant to specialist laboratories that need to grip microscopic objects in tight spaces. It offers a candidate approach for microassembly and cell-manipulation experiments, rather than a ready-made tool for ordinary software or data-platform work.
+
+**Practical example.** A researcher assembling a tiny shaft and bearing needs a controllable grip where a larger tool cannot fit. The paper demonstrates related microassembly and single-cell manipulation. The lesson's light slider illustrates the control idea; it cannot select a safe setting for a real cell.
+
+**How to decide.** Consider a research evaluation when object size, access, and force requirements justify it. Compare established manipulation methods first, and validate temperature, gripping force, and sample survival before claiming suitability for an application.
+
 
 ## Step through the code (within the 5-minute exploration)
 

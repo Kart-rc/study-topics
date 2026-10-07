@@ -45,6 +45,16 @@ If the grace period is only five seconds, the process is forced out with three s
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use graceful shutdown whenever deployments, scaling, or maintenance can stop a service while requests or background tasks are still running. It is especially useful when abrupt termination causes failed requests or repeated business effects.
+
+**Practical example.** An EKS rollout replaces the Pod handling order O42. Stop new arrivals, then let its remaining eight seconds of database work finish within the ten-second grace period. With only five seconds available, the retry needs a durable record or idempotency key to avoid repeating the effect.
+
+**How to decide.** Set the wait from measured drain times and test cancellation. For work lasting minutes or hours, use durable jobs and checkpoints instead of making every rollout wait indefinitely.
+
 
 ## Step through the code (within the 5-minute exploration)
 

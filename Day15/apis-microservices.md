@@ -39,6 +39,16 @@ gRPC implementations may propagate automatically or require configuration. Serve
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use deadline propagation when a request crosses several services and a late answer is no longer useful to the caller. It helps prevent downstream work from consuming resources after the caller has stopped waiting.
+
+**Practical example.** GetOrder has 500 ms. After the profile service uses 120 ms, inventory gets only the remaining 380 ms. Giving inventory a fresh budget lets its 450 ms operation continue past the customer's limit. The same problem appears when a data-quality API calls metadata and policy services.
+
+**How to decide.** Choose budgets from measured latency and stop work when cancellation arrives. For long-running processing, return a durable job identifier and expose job status. A deadline does not undo a payment or database change already committed.
+
 
 ## Step through the code (within the 5-minute exploration)
 

@@ -20,6 +20,16 @@ Our incident assistant can list datasets, fetch freshness for one returned ID, a
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Consider this research approach when building synthetic tool-use training examples and many generated requests cannot be completed with the tools available. Start with a small offline experiment using sandbox tools.
+
+**Practical example.** A data-incident assistant can list datasets, fetch freshness for a returned ID, and explain the measurement. Build and check that chain first, then write a matching request about the demo dataset’s 18-minute delay. A request to repair the pipeline would require a tool the assistant does not have.
+
+**How to decide.** Compare generated examples against independent, human-written tasks. For a few fixed workflows, manually authored examples may be simpler. Successful chains do not establish coverage or production readiness; include unsupported requests and failure cases in evaluation.
+
 
 ## Step through the code (within the 5-minute exploration)
 

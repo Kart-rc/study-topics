@@ -37,6 +37,16 @@ The threshold and windows are policy choices. The useful leadership move is to t
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use two-window burn-rate alerts when a service has a meaningful user-facing SLO but brief error spikes produce noisy pages. The question is whether failures are spending the error budget fast enough to need action now.
+
+**Practical example.** Your data-quality API targets 99.9% successful requests. In this lesson, 2% errors over five minutes and 1.2% over an hour exceed the illustrative 10× threshold together. Page the owner; a short spike with only 0.2% over the hour does not meet this paging rule.
+
+**How to decide.** Backtest thresholds against real incidents and define the response. Use slower tickets for chronic harm. For sparse traffic, consider synthetic checks or longer aggregation because one failed request can distort the rate.
+
 
 ## Step through the code (within the 5-minute exploration)
 

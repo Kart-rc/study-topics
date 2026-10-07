@@ -20,6 +20,16 @@ The record below survives the loss of the temporary session variable. Recovery s
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use a durable handoff when an agent’s work spans sessions, may be interrupted, or includes writes whose results must be checked before continuing. Keep the record with the artifacts it describes.
+
+**Practical example.** An agent generates five study pages, then stops before testing them. Its saved record says which files exist, their version, and that checks remain pending. A fresh session reads that record, inspects the files, and performs the missing checks instead of generating another bundle.
+
+**How to decide.** Record observed evidence and the next unresolved action. For a short, read-only question, this structure may be unnecessary. After an uncertain remote write, inspect the destination; a local progress note cannot prove what actually happened.
+
 
 ## Step through the code (within the 5-minute exploration)
 

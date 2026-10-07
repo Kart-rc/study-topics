@@ -20,6 +20,16 @@ For 100 user requests, the nested policy can produce 2,700 catalog calls. If onl
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Review retry ownership when a slow dependency receives more traffic during an outage, or when several services and their SDKs each retry the same user action.
+
+**Practical example.** A data-quality UI calls a rule service, which calls a metadata service, which reads a catalog. With three total attempts at each layer, 100 user requests can create up to 2,700 catalog attempts. One retry owner allowing three attempts reduces this example’s upper bound to 300.
+
+**How to decide.** Set a bounded attempt budget and deadline, then use backoff and jitter for temporary failures. Do not retry invalid requests. Before retrying a write, establish how duplicate effects are prevented. Waiting alone does not fix multiplied attempts.
+
 
 ## Step through the code (within the 5-minute exploration)
 
