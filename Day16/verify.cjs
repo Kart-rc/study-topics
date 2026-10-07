@@ -56,6 +56,10 @@ for(const L of lessons){
   assert(h.includes('checked 2026-10-06'));assert(h.includes('15 minutes'));
   assert(h.includes('What this model does and does not represent'));
   assert(h.includes('captured by running this exact example during the build'));
+  assert(h.includes('id="useCaseTitle">Use case: when to use this'));
+  const md=fs.readFileSync(path.join(__dirname,L.slug+'.md'),'utf8');
+  assert(md.includes('## Use case: when to use this'));
+  for(const key of ['when','example','decision']) assert(L.use_case[key].trim()&&md.includes(L.use_case[key]));
   console.log('PASS',L.slug,'mechanism, boundary and review allocation');
 }
 const state=JSON.parse(fs.readFileSync(path.join(__dirname,'../study-state.json'))),d=state.days.find(x=>x.number===16);

@@ -2,6 +2,14 @@
 
 Checked on 2026-10-06.
 
+## Use-case update · 2026-10-07
+
+All seven HTML lessons and Markdown companions now include “Use case: when to use this,” covering when the topic fits, a practical example, and a decision boundary or alternative. This is part of the existing four-minute explanation, so the lesson remains 15 minutes and the daily bundle remains 105 minutes. The daily contract and renderer require this section from Day16 onward.
+
+The new examples are original teaching scenarios. Relevant Spark, PostgreSQL, AWS, OpenAI Agents SDK, GitHub, RFC 9457, and original optical-clock paper sources were rechecked on 2026-10-07. The original source-check dates remain unchanged; `use_case_checked_on` records the new guidance check separately. Quiz identities, answer choices, execution frames, and spaced-review history were preserved.
+
+The updated Day16 semantic verifier, all 92 lesson replay/quiz/save/export/link checks, and the 15 bundle-policy tests passed locally. This revision uses the repository Browser smoke workflow for native desktop/mobile verification; its result is attached to the revision commit on GitHub.
+
 ## Passed locally
 
 - Seven lessons, seven Markdown companions, seven executable Python examples, the daily index, and the lesson manifest are present.

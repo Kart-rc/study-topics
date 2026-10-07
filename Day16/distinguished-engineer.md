@@ -33,6 +33,16 @@ This is an N+1 question: can the system meet its useful-work target after losing
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Run this capacity check before approving a zonal evacuation plan, reducing fleet size, or committing to an availability target that includes losing one Availability Zone.
+
+**Practical example.** Your data-quality API handles 120 useful requests/s across three AZs, each rated for 60. Losing one AZ pushes each survivor from 40 to 60 requests/s. To stay at the chosen 80% operating target, each AZ needs capacity for at least 75 requests/s.
+
+**How to decide.** Provision and test survivor capacity before relying on the plan. Then verify routing and data dependencies in a controlled exercise. This equal-zone model needs adjustment for uneven traffic, retries, or a database that cannot fail over as assumed.
+
 
 ## Step through the code (within the 5-minute exploration)
 
@@ -58,15 +68,15 @@ passes_target = capacity_per_zone >= minimum_capacity
 
 2. The calm-day regional view looks healthy at about 67%.
 
-   Changed values: `{"normal_rps_per_zone": 40.0, "normal_utilization": 0.6666666666666666}`
+   Changed values: `{"normal_rps_per_zone": 40, "normal_utilization": 0.6666666666666666}`
 
 3. Remove one zone before dividing. Each survivor now reaches 100%.
 
-   Changed values: `{"survivors": 2, "evacuated_rps_per_zone": 60.0, "evacuated_utilization": 1.0}`
+   Changed values: `{"survivors": 2, "evacuated_rps_per_zone": 60, "evacuated_utilization": 1}`
 
 4. To stay at or below 80%, every zone needs 75 requests/s of capacity.
 
-   Changed values: `{"minimum_capacity": 75.0, "passes_target": false}`
+   Changed values: `{"minimum_capacity": 75, "passes_target": false}`
 
 [Full runnable example](examples/distinguished-engineer.py).
 

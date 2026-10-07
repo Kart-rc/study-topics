@@ -33,6 +33,16 @@ Under Serializable isolation, PostgreSQL tracks read/write dependencies. If both
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Consider Serializable transactions when a business rule spans several rows and concurrent requests can each see a safe snapshot but jointly break the rule.
+
+**Practical example.** Alice and Bob both ask to leave the on-call rota. Each sees the other available, then updates a different row. The same risk appears when two platform administrators each disable their own account after checking that another active administrator exists.
+
+**How to decide.** Use Serializable with full-transaction retries when correctness depends on that shared rule. For a rule contained in one row, a constraint or conditional update may be simpler. Measure retry rates; keep external notifications outside retried transactions or protect them from duplication.
+
 
 ## Step through the code (within the 5-minute exploration)
 

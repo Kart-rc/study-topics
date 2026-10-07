@@ -39,6 +39,16 @@ If the branch is not allowed, the job is denied. If approval is required but mis
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use a deployment environment when a production job should wait for an allowed branch and an independent reviewer before receiving its environment secrets. Configure the protection rules on the environment as well as naming it in the workflow.
+
+**Practical example.** Your data-quality service builds an artifact after tests pass. The production job references the production environment. With main allowed but approval pending, it waits and PROD_TOKEN is withheld. After an eligible reviewer approves, the job can start and receive that secret.
+
+**How to decide.** Choose this for a release boundary that needs explicit approval. For a low-risk sandbox, automated checks may be sufficient. Confirm protection-rule availability for your GitHub plan; keep runner and deployment-script security checks too.
+
 
 ## Step through the code (within the 5-minute exploration)
 

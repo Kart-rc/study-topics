@@ -166,7 +166,13 @@
       ],
       "example_file": "examples/data-engineering.py"
     },
-    "advanced_detail": "<p>Spark 4.2 documents AQE as enabled by default. Coalescing requires both AQE and <code>spark.sql.adaptive.coalescePartitions.enabled</code>. The default <code>parallelismFirst=true</code> can prioritize cluster parallelism over the advisory target; Spark recommends considering <code>false</code> on a busy cluster to avoid many small tasks. Validate with the final adaptive plan and SQL UI statistics, not configuration alone.</p>"
+    "advanced_detail": "<p>Spark 4.2 documents AQE as enabled by default. Coalescing requires both AQE and <code>spark.sql.adaptive.coalescePartitions.enabled</code>. The default <code>parallelismFirst=true</code> can prioritize cluster parallelism over the advisory target; Spark recommends considering <code>false</code> on a busy cluster to avoid many small tasks. Validate with the final adaptive plan and SQL UI statistics, not configuration alone.</p>",
+    "use_case": {
+      "when": "Use AQE coalescing when a Spark SQL batch stage creates many tiny shuffle tasks and task-launch overhead becomes noticeable. Check the Spark UI for actual partition sizes before changing settings.",
+      "example": "Your daily order report starts with many shuffle partitions for peak volume. On a quiet day, the observed sizes are [8, 12, 3, 64, 5] MB. In this lesson’s model, combining adjacent small partitions produces [23, 64, 5] MB: three tasks instead of five, with the same 92 MB of data.",
+      "decision": "Try it on representative busy and quiet runs; compare stage duration and available parallelism. If one hot customer produces the large partition, investigate skew handling. Coalescing small neighbors does not split that hot partition."
+    },
+    "use_case_checked_on": "2026-10-07"
   },
   {
     "slug": "software-engineering",
@@ -335,7 +341,13 @@
       ],
       "example_file": "examples/software-engineering.py"
     },
-    "advanced_detail": "<p>PostgreSQL 18 describes Repeatable Read as snapshot isolation and explicitly allows serialization anomalies. Serializable adds dependency monitoring without making every operation block, but applications must handle serialization failures—normally SQLSTATE <code>40001</code>—with a full retry.</p>"
+    "advanced_detail": "<p>PostgreSQL 18 describes Repeatable Read as snapshot isolation and explicitly allows serialization anomalies. Serializable adds dependency monitoring without making every operation block, but applications must handle serialization failures—normally SQLSTATE <code>40001</code>—with a full retry.</p>",
+    "use_case": {
+      "when": "Consider Serializable transactions when a business rule spans several rows and concurrent requests can each see a safe snapshot but jointly break the rule.",
+      "example": "Alice and Bob both ask to leave the on-call rota. Each sees the other available, then updates a different row. The same risk appears when two platform administrators each disable their own account after checking that another active administrator exists.",
+      "decision": "Use Serializable with full-transaction retries when correctness depends on that shared rule. For a rule contained in one row, a constraint or conditional update may be simpler. Measure retry rates; keep external notifications outside retried transactions or protect them from duplication."
+    },
+    "use_case_checked_on": "2026-10-07"
   },
   {
     "slug": "distinguished-engineer",
@@ -419,12 +431,12 @@
         }
       ],
       "expect": {
-        "normal_rps_per_zone": 40.0,
+        "normal_rps_per_zone": 40,
         "normal_utilization": 0.6666666666666666,
         "survivors": 2,
-        "evacuated_rps_per_zone": 60.0,
-        "evacuated_utilization": 1.0,
-        "minimum_capacity": 75.0,
+        "evacuated_rps_per_zone": 60,
+        "evacuated_utilization": 1,
+        "minimum_capacity": 75,
         "passes_target": false
       },
       "limit": "The model is deterministic capacity arithmetic. It does not simulate AWS routing, queueing, retries, autoscaling, or a zonal data plane.",
@@ -445,7 +457,7 @@
             "total_rps": 120,
             "capacity_per_zone": 60,
             "operating_target": 0.8,
-            "normal_rps_per_zone": 40.0,
+            "normal_rps_per_zone": 40,
             "normal_utilization": 0.6666666666666666
           }
         },
@@ -456,11 +468,11 @@
             "total_rps": 120,
             "capacity_per_zone": 60,
             "operating_target": 0.8,
-            "normal_rps_per_zone": 40.0,
+            "normal_rps_per_zone": 40,
             "normal_utilization": 0.6666666666666666,
             "survivors": 2,
-            "evacuated_rps_per_zone": 60.0,
-            "evacuated_utilization": 1.0
+            "evacuated_rps_per_zone": 60,
+            "evacuated_utilization": 1
           }
         },
         {
@@ -470,19 +482,25 @@
             "total_rps": 120,
             "capacity_per_zone": 60,
             "operating_target": 0.8,
-            "normal_rps_per_zone": 40.0,
+            "normal_rps_per_zone": 40,
             "normal_utilization": 0.6666666666666666,
             "survivors": 2,
-            "evacuated_rps_per_zone": 60.0,
-            "evacuated_utilization": 1.0,
-            "minimum_capacity": 75.0,
+            "evacuated_rps_per_zone": 60,
+            "evacuated_utilization": 1,
+            "minimum_capacity": 75,
             "passes_target": false
           }
         }
       ],
       "example_file": "examples/distinguished-engineer.py"
     },
-    "advanced_detail": "<p>A senior review should ask for a game-day or controlled zonal shift that verifies routing, application health, data dependencies, and useful-work SLIs. Trigger, mechanism, cascade, and missing control are distinct: the zone loss is the trigger; insufficient survivor headroom is the mechanism; retries and saturation are the cascade; customer errors are the impact; an N+1 capacity gate is one missing control.</p>"
+    "advanced_detail": "<p>A senior review should ask for a game-day or controlled zonal shift that verifies routing, application health, data dependencies, and useful-work SLIs. Trigger, mechanism, cascade, and missing control are distinct: the zone loss is the trigger; insufficient survivor headroom is the mechanism; retries and saturation are the cascade; customer errors are the impact; an N+1 capacity gate is one missing control.</p>",
+    "use_case": {
+      "when": "Run this capacity check before approving a zonal evacuation plan, reducing fleet size, or committing to an availability target that includes losing one Availability Zone.",
+      "example": "Your data-quality API handles 120 useful requests/s across three AZs, each rated for 60. Losing one AZ pushes each survivor from 40 to 60 requests/s. To stay at the chosen 80% operating target, each AZ needs capacity for at least 75 requests/s.",
+      "decision": "Provision and test survivor capacity before relying on the plan. Then verify routing and data dependencies in a controlled exercise. This equal-zone model needs adjustment for uneven traffic, retries, or a database that cannot fail over as assumed."
+    },
+    "use_case_checked_on": "2026-10-07"
   },
   {
     "slug": "genai-engineering",
@@ -660,7 +678,13 @@
       ],
       "example_file": "examples/genai-engineering.py"
     },
-    "advanced_detail": "<p>The official SDK testing guide says its deterministic utilities run in memory and make no model, sandbox-provider, or Realtime API requests. It also states the boundary explicitly: use real provider adapters or integration environments for behavior owned by an external model, protocol, or sandbox provider. That separation keeps fast harness tests truthful.</p>"
+    "advanced_detail": "<p>The official SDK testing guide says its deterministic utilities run in memory and make no model, sandbox-provider, or Realtime API requests. It also states the boundary explicitly: use real provider adapters or integration environments for behavior owned by an external model, protocol, or sandbox provider. That separation keeps fast harness tests truthful.</p>",
+    "use_case": {
+      "when": "Use deterministic tool-loop tests in CI when changing tool names, argument handling, branching, or the runner that coordinates an agent. They are useful when you need a repeatable regression test without a live model call.",
+      "example": "A refund assistant must look up order O42, request its refund, then return a message. After a refactor, it says “Refund started” immediately after lookup. The scripted test fails because the refund step was skipped, even though the final sentence sounds correct.",
+      "decision": "Use the test to check orchestration that your code owns. Also run model evaluations for planning quality and integration tests for real payment behavior; a scripted success cannot prove either."
+    },
+    "use_case_checked_on": "2026-10-07"
   },
   {
     "slug": "technology-breakthroughs",
@@ -744,7 +768,7 @@
         }
       ],
       "expect": {
-        "difference": 3.0,
+        "difference": 3,
         "agrees_within_uncertainty": true,
         "claim": "agreement"
       },
@@ -753,37 +777,37 @@
         {
           "step": 0,
           "state": {
-            "clock_a": 2.0,
-            "clock_b": -1.0,
+            "clock_a": 2,
+            "clock_b": -1,
             "combined_uncertainty": 7.7
           }
         },
         {
           "step": 1,
           "state": {
-            "clock_a": 2.0,
-            "clock_b": -1.0,
+            "clock_a": 2,
+            "clock_b": -1,
             "combined_uncertainty": 7.7,
-            "difference": 3.0
+            "difference": 3
           }
         },
         {
           "step": 2,
           "state": {
-            "clock_a": 2.0,
-            "clock_b": -1.0,
+            "clock_a": 2,
+            "clock_b": -1,
             "combined_uncertainty": 7.7,
-            "difference": 3.0,
+            "difference": 3,
             "agrees_within_uncertainty": true
           }
         },
         {
           "step": 3,
           "state": {
-            "clock_a": 2.0,
-            "clock_b": -1.0,
+            "clock_a": 2,
+            "clock_b": -1,
             "combined_uncertainty": 7.7,
-            "difference": 3.0,
+            "difference": 3,
             "agrees_within_uncertainty": true,
             "claim": "agreement"
           }
@@ -791,7 +815,13 @@
       ],
       "example_file": "examples/technology-breakthroughs.py"
     },
-    "advanced_detail": "<p>The peer-reviewed paper was published September 1, 2026 in <em>Physical Review Research</em>. It reports seven optical clocks across INRIM, LNE-OP, NPL, and PTB, with ratio uncertainties spanning 7.7 × 10⁻¹⁸ to 6.1 × 10⁻¹⁷. Treat performance numbers as the authors’ experimental results, not a general guarantee for optical-clock networks.</p>"
+    "advanced_detail": "<p>The peer-reviewed paper was published September 1, 2026 in <em>Physical Review Research</em>. It reports seven optical clocks across INRIM, LNE-OP, NPL, and PTB, with ratio uncertainties spanning 7.7 × 10⁻¹⁸ to 6.1 × 10⁻¹⁷. Treat performance numbers as the authors’ experimental results, not a general guarantee for optical-clock networks.</p>",
+    "use_case": {
+      "when": "This is relevant to national measurement laboratories comparing independently built optical clocks and researchers assessing evidence for a future definition of the second. It requires specialized clocks and stabilized fibre links.",
+      "example": "Two laboratories report extremely precise clocks. An independent comparison asks whether they agree within the stated measurement uncertainty. In this lesson’s synthetic example, readings of +2 and −1 differ by 3 units, inside a 7.7-unit band; the published campaign performs a much richer real comparison.",
+      "decision": "Treat this as research to understand and monitor. An ordinary Kafka timestamp or API-latency problem does not by itself justify an optical-clock network. Agreement within uncertainty is also not proof of perfect time."
+    },
+    "use_case_checked_on": "2026-10-07"
   },
   {
     "slug": "ci-cd-github-actions",
@@ -928,7 +958,13 @@
       ],
       "example_file": "examples/ci-cd-github-actions.py"
     },
-    "advanced_detail": "<p>GitHub documents required reviewers, wait timers, deployment branch/tag restrictions, administrator bypass settings, custom protection rules, and environment secrets. Required reviewers can include up to six users or teams, but only one approval is needed. Availability varies by plan and repository visibility, so verify the current repository settings rather than copying a generic policy.</p>"
+    "advanced_detail": "<p>GitHub documents required reviewers, wait timers, deployment branch/tag restrictions, administrator bypass settings, custom protection rules, and environment secrets. Required reviewers can include up to six users or teams, but only one approval is needed. Availability varies by plan and repository visibility, so verify the current repository settings rather than copying a generic policy.</p>",
+    "use_case": {
+      "when": "Use a deployment environment when a production job should wait for an allowed branch and an independent reviewer before receiving its environment secrets. Configure the protection rules on the environment as well as naming it in the workflow.",
+      "example": "Your data-quality service builds an artifact after tests pass. The production job references the production environment. With main allowed but approval pending, it waits and PROD_TOKEN is withheld. After an eligible reviewer approves, the job can start and receive that secret.",
+      "decision": "Choose this for a release boundary that needs explicit approval. For a low-risk sandbox, automated checks may be sufficient. Confirm protection-rule availability for your GitHub plan; keep runner and deployment-script security checks too."
+    },
+    "use_case_checked_on": "2026-10-07"
   },
   {
     "slug": "apis-microservices",
@@ -1084,6 +1120,12 @@
       ],
       "example_file": "examples/apis-microservices.py"
     },
-    "advanced_detail": "<p>RFC 9457 replaced RFC 7807 in July 2023. It defines <code>application/problem+json</code>, the standard members, extension behavior, and security considerations. Unknown extensions must be ignored. A resolvable type URI is encouraged, but clients should not automatically dereference it during normal handling.</p>"
+    "advanced_detail": "<p>RFC 9457 replaced RFC 7807 in July 2023. It defines <code>application/problem+json</code>, the standard members, extension behavior, and security considerations. Unknown extensions must be ignored. A resolvable type URI is encouraged, but clients should not automatically dereference it during normal handling.</p>",
+    "use_case": {
+      "when": "Use Problem Details when multiple HTTP clients need consistent error handling across APIs, especially when the status code alone does not explain the action a client should take.",
+      "example": "In this lesson, order O42 returns HTTP 409 with the out-of-stock type so the client can ask for another item. In a data-platform API, a proposed rule-name-conflict type could tell the UI to ask for a new name while instance identifies the specific failed request for support.",
+      "decision": "Agree on stable type meanings and document them in the API contract. Keep sensitive internals out of detail. An ordinary HTTP status may be enough when clients need no additional distinction; the envelope does not choose a safe retry policy for you."
+    },
+    "use_case_checked_on": "2026-10-07"
   }
 ]

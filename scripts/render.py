@@ -44,6 +44,14 @@ def render(folder):
  day['review_keys']=sorted({key for selected in due_by_track.values() for _,key in selected})
  for L in lessons:
   slug=L['slug'];qs=L['questions'];quiz=''
+  use_case=L.get('use_case')
+  if day['number']>=16 and (not isinstance(use_case,dict) or any(not isinstance(use_case.get(k),str) or not use_case[k].strip() for k in ('when','example','decision'))):
+   raise ValueError('A practical use case with when, example, and decision is required: '+folder+'/'+slug)
+  use_html=''
+  use_md=''
+  if use_case:
+   use_html='<div class="use-case" aria-labelledby="useCaseTitle"><h2 id="useCaseTitle">Use case: when to use this</h2><p class="muted">Part of the 4-minute explanation.</p>'+''.join('<p><strong>'+label+'</strong> '+esc(use_case[key])+'</p>' for key,label in [('when','When it fits.'),('example','Practical example.'),('decision','How to decide.')])+'</div>'
+   use_md='## Use case: when to use this\n\nPart of the 4-minute explanation.\n\n'+''.join('**'+label+'** '+use_case[key]+'\n\n' for key,label in [('when','When it fits.'),('example','Practical example.'),('decision','How to decide.')])
   walk_html=walkthrough.html_block(L) if L.get("walkthrough") else ""
   checked=L.get("source_checked_on",day["date"])
   for i,(q,options,answer,why) in enumerate(qs):
@@ -61,6 +69,7 @@ def render(folder):
     review+=f'<p><a href="../{prior["folder"]}/{p["slug"]}.html">{prior["folder"]}: {esc(p["title"])}</a></p><p>{esc(q)}</p><details><summary>Recall first, then reveal the refresher</summary><p>{esc(options[a])}. {esc(why)}</p></details>'
   if not review:review='<p>No earlier lessons are due yet. Start with the prediction exercise below. This topic returns after 1, 3, 7, 14, and 30 days.</p>'
   body=f'''<nav><a href="index.html">← {folder}</a><a href="../index.html">All days</a></nav><header><p class="eyebrow">{folder} / {esc(L['track'])}</p><h1>{esc(L['title'])}</h1><p class="lead">{esc(L['goal'])}</p><span class="pill">{esc(L['tag'])}</span><div class="timing"><span>2 min · Recall</span><span>4 min · Understand</span><span>5 min · Explore</span><span>4 min · Quiz</span></div></header><section><h2>Recall earlier lessons · 2 min</h2>{review}<label>Your recall or prediction<textarea id="recall" placeholder="Write before looking at the explanation."></textarea></label></section><section><h2>Understand the idea · 4 min</h2>{L['concept']}<h2>A worked example</h2>{L['example']}</section>{walk_html}<section class="lab"><p class="eyebrow" style="color:#d6f4b5">Explore · 5 min</p><h2>Predict, change, explain</h2><p>{esc(L['practice'])}</p>{L['sim']}<details><summary>What this model does and does not represent</summary><p>{esc(L['boundary'])}</p></details></section><section><h2>Check understanding · 4 min</h2><p>Three scored questions plus two short responses keep this to 15 minutes. Commit to an answer before checking. The score records only the multiple-choice answers; it does not establish mastery.</p>{quiz}<button id="grade">Check 3 answers</button><p id="score" aria-live="polite"></p><label>4. Explain one design decision to a skeptical engineer.<textarea id="rationale"></textarea></label><label>5. Change one assumption. What breaks, and how would you detect it?<textarea id="boundaryAnswer"></textarea></label><button id="save">Save answers locally</button><button id="export">Export answers</button><p id="saved" aria-live="polite"></p><small>Local saving depends on your browser. Export downloads JSON; upload it in ChatGPT for feedback and targeted review. Nothing here sends answers to GitHub or ChatGPT. Do not put work secrets in these pages.</small></section><section><h2>Read the originals</h2><ul>{sources}</ul><p class="muted">Examples and calculator inputs are original, synthetic teaching material. Source dates distinguish established foundations from new research.</p></section><nav><a href="index.html">Back to {folder}</a></nav>'''
+  if use_html:body=body.replace(L['example']+'</section>',L['example']+use_html+'</section>',1)
   js='''const $=id=>document.getElementById(id);'''+''.join(f'const {id}=$({json.dumps(id)});' for id in re.findall(r'id="([\w]+)"',L['sim']))+L['js']
   js+='\nconst quizData='+json.dumps(qs)+';const lessonKey='+json.dumps(folder+'/'+slug)+';'+'''
 let attemptsHistory=[];
@@ -78,6 +87,7 @@ $('export').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(
   md=f"# {L['title']}\n\n{L['track']} · {folder} · 15 minutes\n\n{L['goal']}\n\n## Recall (2 minutes)\n\n{review}\n\n## Understand (4 minutes)\n\n{plain(L['concept'])}\n\n{plain(L['example'])}\n\n## Explore (5 minutes)\n\n{L['practice']}\n\nOpen {slug}.html for the executable model.\n\nModel limits: {L['boundary']}\n\n## Quiz (4 minutes)\n\n"
   for i,(q,options,a,why) in enumerate(qs):md+=f'{i+1}. {q}\n'+''.join(f'   - {o}\n' for o in options)+'\n'
   md+='4. Explain one design decision to a skeptical engineer.\n5. Change one assumption. What breaks, and how would you detect it?\n\n<details><summary>Answer key — attempt first</summary>\n\n'+ '\n\n'.join(f'{i+1}. {o[a]}. {w}' for i,(q,o,a,w) in enumerate(qs))+'\n\n</details>\n\n## Sources\n\n'+''.join(f'- [{t}]({u}) — {d}; checked {checked}.\n' for t,u,d in L['sources'])
+  if use_md:md=md.replace('## Explore (5 minutes)',use_md+'## Explore (5 minutes)',1)
   if L.get('walkthrough'):md=md.replace('## Explore (5 minutes)',walkthrough.markdown(L)+'## Explore (remaining exploration time)')
   if L.get('written_questions'):md=md.replace('Explain one design decision to a skeptical engineer.',L['written_questions'][0]).replace('Change one assumption. What breaks, and how would you detect it?',L['written_questions'][1])
   (R/folder/f'{slug}.md').write_text(md)

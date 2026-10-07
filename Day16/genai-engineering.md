@@ -31,6 +31,16 @@ Our tiny executable queue uses the same testing idea. Each application action mu
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use deterministic tool-loop tests in CI when changing tool names, argument handling, branching, or the runner that coordinates an agent. They are useful when you need a repeatable regression test without a live model call.
+
+**Practical example.** A refund assistant must look up order O42, request its refund, then return a message. After a refactor, it says “Refund started” immediately after lookup. The scripted test fails because the refund step was skipped, even though the final sentence sounds correct.
+
+**How to decide.** Use the test to check orchestration that your code owns. Also run model evaluations for planning quality and integration tests for real payment behavior; a scripted success cannot prove either.
+
 
 ## Step through the code (within the 5-minute exploration)
 

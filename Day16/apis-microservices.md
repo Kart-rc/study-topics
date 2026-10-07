@@ -40,6 +40,16 @@ A client branches on the stable type URI, not on the human sentence in detail. T
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use Problem Details when multiple HTTP clients need consistent error handling across APIs, especially when the status code alone does not explain the action a client should take.
+
+**Practical example.** In this lesson, order O42 returns HTTP 409 with the out-of-stock type so the client can ask for another item. In a data-platform API, a proposed rule-name-conflict type could tell the UI to ask for a new name while instance identifies the specific failed request for support.
+
+**How to decide.** Agree on stable type meanings and document them in the API contract. Keep sensitive internals out of detail. An ordinary HTTP status may be enough when clients need no additional distinction; the envelope does not choose a safe retry policy for you.
+
 
 ## Step through the code (within the 5-minute exploration)
 

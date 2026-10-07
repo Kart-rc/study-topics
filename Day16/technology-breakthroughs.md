@@ -33,6 +33,16 @@ Our toy uses synthetic normalized deviations. If clock A reads +2 units, clock B
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** This is relevant to national measurement laboratories comparing independently built optical clocks and researchers assessing evidence for a future definition of the second. It requires specialized clocks and stabilized fibre links.
+
+**Practical example.** Two laboratories report extremely precise clocks. An independent comparison asks whether they agree within the stated measurement uncertainty. In this lesson’s synthetic example, readings of +2 and −1 differ by 3 units, inside a 7.7-unit band; the published campaign performs a much richer real comparison.
+
+**How to decide.** Treat this as research to understand and monitor. An ordinary Kafka timestamp or API-latency problem does not by itself justify an optical-clock network. Agreement within uncertainty is also not proof of perfect time.
+
 
 ## Step through the code (within the 5-minute exploration)
 
@@ -49,11 +59,11 @@ claim = 'agreement' if agrees_within_uncertainty else 'investigate discrepancy'
 
 1. Use synthetic normalized deviations; retain the paper’s 7.7 value only as a teaching scale.
 
-   Changed values: `{"clock_a": 2.0, "clock_b": -1.0, "combined_uncertainty": 7.7}`
+   Changed values: `{"clock_a": 2, "clock_b": -1, "combined_uncertainty": 7.7}`
 
 2. The toy clocks differ by three units.
 
-   Changed values: `{"difference": 3.0}`
+   Changed values: `{"difference": 3}`
 
 3. A difference inside the declared band counts as agreement in this simple model.
 

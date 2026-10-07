@@ -35,6 +35,16 @@ Suppose a shuffle produces five partitions: [8, 12, 3, 64, 5] MB. Our toy target
 
 
 
+## Use case: when to use this
+
+Part of the 4-minute explanation.
+
+**When it fits.** Use AQE coalescing when a Spark SQL batch stage creates many tiny shuffle tasks and task-launch overhead becomes noticeable. Check the Spark UI for actual partition sizes before changing settings.
+
+**Practical example.** Your daily order report starts with many shuffle partitions for peak volume. On a quiet day, the observed sizes are [8, 12, 3, 64, 5] MB. In this lesson’s model, combining adjacent small partitions produces [23, 64, 5] MB: three tasks instead of five, with the same 92 MB of data.
+
+**How to decide.** Try it on representative busy and quiet runs; compare stage duration and available parallelism. If one hot customer produces the large partition, investigate skew handling. Coalescing small neighbors does not split that hot partition.
+
 
 ## Step through the code (within the 5-minute exploration)
 
