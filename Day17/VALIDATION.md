@@ -1,0 +1,28 @@
+# Day17 validation — 2026-10-07
+
+Seven lessons, 15 minutes each, 105 minutes total. The 2/4/5/4-minute structure includes spaced recall, use cases, code replay, live model, and quiz. No completion or mastery was inferred.
+
+## Observed before commit
+
+- Executed six Python examples and one Java example through scripts/walkthrough.py. Each final state matched its asserted expected values. The HTML replays captured execution; Python and Java do not execute in the browser.
+- Day17/verify.cjs exercises correct and broken checkpoint recovery, Bloom positives/negatives/collision handling, positive/zero/negative automation payback, repeated-trial summaries, battery energy boundaries, both deployment queue policies and reset, and pagination insertion/tie cases.
+- npm run test:models passed all 15 bundle-policy tests and the seven Day17 semantic checks.
+- node scripts/verify-walkthroughs.cjs passed for all 99 lessons: replay controls and values, boundaries, quiz scoring, answer history, simulated save/export/restore, and relative links.
+- HTML and Markdown companions contain the practical use-case fields. Seven lesson pages and their hub are standalone, with embedded CSS/JS.
+- Date key 2026-10-07 occurs once. Review keys are Day2+14, Day8+7, Day14+3, Day16+1. The original five tracks review Day2 and Day8; the two new tracks review Day14 and Day16. Oldest due items are selected under the existing two-prompt-per-track budget; remaining due items carry forward.
+- Source contents checked through current official documentation and original publisher material. Sources list check dates and known publication dates. No source URL is treated as evidence merely because it exists.
+
+## Source scope
+
+Flink stable documentation identified version 2.3.0. GitHub's May 7, 2026 announcement and current documentation confirm queue:max, its 100-pending limit, the invalid combination with cancel-in-progress:true, and waiting-arrival ordering rather than commit ordering. PostgreSQL documentation identified version 18.
+
+The battery paper was published September 30, 2026 as an early accepted manuscript. Its publisher abstract and publication metadata were retrieved through search after direct opening returned a retrieval error. The lesson limits paper-specific claims to that abstract; it does not claim to have reproduced or inspected supplementary experimental data. The 10 Ah / 1.4 V example and auxiliary-energy model are explicitly synthetic, distinct from the reported 99.0% and 75.8% efficiencies.
+
+## Native browser gate and limits
+
+Local Chromium is unavailable in this runtime. The existing repository Browser smoke workflow runs after the atomic commit. Its result for the exact commit is the authoritative native-browser evidence; this pre-commit report does not predict that result.
+
+That workflow checks desktop and mobile Chromium: layout overflow and visible controls, actual UI manipulation, replay highlighting and values, expandable explanations, quiz attempts and feedback, local-storage restoration, real downloaded JSON, navigation, local links, browser errors, and unexpected network requests. It also retains synthetic screenshots and checks historical Day1/Day15 use-case sections.
+
+No claim is made about Safari/Firefox, assistive-technology testing, pixel-perfect visual review, or real Flink/Redis/GitHub deployment/database/battery execution. Official external pages may later move; HTTP status and availability for every external source are not covered by the local link tests. No learner answers are stored in the repository.
+
