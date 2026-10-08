@@ -6,6 +6,7 @@ for(const slug of slugs){
  test('Day17 visual reasoning: '+slug,async({page},testInfo)=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('/Day17/'+slug+'.html');
+  if(await page.locator('#coreExtension').count()) await page.locator('#coreExtension > summary').click();
   const world=page.locator('#world'),lab=page.locator('.lab');
   if(slug==='data-engineering'){
    await page.locator('#checkpointNext').click();

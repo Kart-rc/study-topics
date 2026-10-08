@@ -1,12 +1,12 @@
 # Engineering field notes
 
-From Day11: seven 15-minute lessons per day for an experienced data/platform engineering leader: data engineering, software engineering, Distinguished Engineer judgment, GenAI engineering, technology breakthroughs, CI/CD & GitHub Actions, and APIs & Microservices. Days 1–10 contain the original five tracks.
+From Day11: seven lessons per day for an experienced data/platform engineering leader: data engineering, software engineering, Distinguished Engineer judgment, GenAI engineering, technology breakthroughs, CI/CD & GitHub Actions, and APIs & Microservices. Days 1–10 contain the original five tracks.
 
 ## Read
 
 Download or clone this repository and open `index.html` in a browser. Choose a Day folder, then a lesson. GitHub's file view displays HTML source; download the repository ZIP from **Code → Download ZIP** to use the interactions locally. No build, API key, account, or external JavaScript is needed to read a lesson.
 
-Each lesson includes 2 minutes of recall, 4 minutes of explanation and worked example, 5 minutes of interactive exploration, and 4 minutes of assessment. Total daily study time is 105 minutes from Day11; Days 1–10 remain 75 minutes. Sources have dates and a checked date. Established foundations are labeled separately from new research.
+Each lesson includes 2 minutes of recall, 4 minutes of explanation and worked example, 5 minutes of interactive exploration, and 4 minutes of assessment. This 15-minute structure applies through Day16 and to non-data tracks afterward. From Day17, data engineering is 30 minutes (6 concept/recall, 9 Databricks, 9 Snowflake, 6 comparison/quiz), bringing the day to 120 minutes. Days1–10 remain 75 minutes and Days11–16 remain 105 minutes. Sources have dates and a checked date. Established foundations are labeled separately from new research.
 
 ## Daily generation
 
@@ -107,4 +107,10 @@ See [TEACHING_UPDATE.md](TEACHING_UPDATE.md) for the revision scope and actual v
 - **CI/CD & GitHub Actions:** one focused daily lesson on building, testing, securing, releasing, or operating delivery pipelines.
 - **APIs & Microservices:** one focused daily lesson on REST/OpenAPI, API evolution, GraphQL, gRPC, service architecture, security, resilience, testing, or observability.
 
-Both use the same plain explanations, visuals, code walkthroughs, and quizzes. Seven lessons × 15 minutes = 105 minutes. The daily generation time remains 6:50 PM America/New_York. Spaced review for each new track begins with its first delivered lesson.
+Both use the same plain explanations, visuals, code walkthroughs, and quizzes. Days11–16 total 105 minutes. From Day17 the expanded data engineering lesson brings the total to 120 minutes. The daily generation time remains 6:50 PM America/New_York. Spaced review for each new track begins with its first delivered lesson.
+
+## Databricks and Snowflake certification path
+
+From Day17, the data engineering lesson includes distinct Databricks and Snowflake implementations with use cases, explanatory visuals, SQL/PySpark, changing execution values, and failure boundaries. See [the roadmap](CERTIFICATION_ROADMAP.md) for the December31,2026 target and [the curriculum coverage record](certification-plan.json). Targets are Databricks Data Engineer Associate and SnowPro Core COF-C03. Coverage is not mastery. Product quiz results stay in local save/export data, outside this repository.
+
+Day17 product additions were delivered October8; their spaced-review age starts then. Vendor examples are labeled not executed until run in an authorized product sandbox. The current Snowflake overview is verified; the full COF-C03 guide breakdown still requires retrieval before declaring complete coverage.

@@ -413,5 +413,23 @@
       "total_minutes": 105,
       "approved_on": "2026-10-01"
     }
-  ]
+  ],
+  "lesson_duration_changes": [
+    {
+      "effective_from_day": 17,
+      "minutes_by_track": {
+        "Data engineering": 30
+      },
+      "total_minutes": 120,
+      "approved_on": "2026-10-08",
+      "structure_minutes": {
+        "concept_and_recall": 6,
+        "databricks": 9,
+        "snowflake": 9,
+        "comparison_and_quiz": 6
+      }
+    }
+  ],
+  "certification_plan": "certification-plan.json",
+  "certification_roadmap": "CERTIFICATION_ROADMAP.md"
 }

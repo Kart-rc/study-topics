@@ -1,0 +1,36 @@
+const {test,expect}=require('@playwright/test');
+const fs=require('node:fs');
+test('Day17 product recovery, product quiz and private export',async({page},info)=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('/Day17/data-engineering.html');
+ await expect(page.locator('.timing')).toContainText('9 min · Databricks');
+ const fits=async()=>{
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  const clipped=await page.locator('.product-lesson svg text').evaluateAll(ts=>ts.filter(t=>{const a=t.getBoundingClientRect(),b=t.ownerSVGElement.getBoundingClientRect();return a.left<b.left-2||a.right>b.right+2||a.top<b.top-2||a.bottom>b.bottom+2;}).map(t=>t.textContent));expect(clipped).toEqual([]);
+ };
+ await fits();
+ for(let i=0;i<3;i++)await page.locator('#dbNext').click();
+ await expect(page.locator('#dbState')).toContainText('Crash');await expect(page.locator('#dbLine2')).toHaveClass('active');
+ await expect(page.locator('#dbDiagram svg')).toHaveAttribute('aria-label',/total 15/);
+ await page.locator('#dbNext').click();await expect(page.locator('#dbState')).toContainText('stays 15');
+ await page.locator('#dbNext').click();await expect(page.locator('#dbNext')).toBeDisabled();
+ await page.locator('#dbPolicy').selectOption('new');for(let i=0;i<5;i++)await page.locator('#dbNext').click();
+ await expect(page.locator('#dbState')).toContainText('Final total 30');await fits();
+ await page.locator('#product-databricks').screenshot({path:info.outputPath('databricks-new-query.png')});
+ await page.locator('#dbReset').click();await expect(page.locator('#dbState')).toContainText('Ready');
+ for(let i=0;i<3;i++)await page.locator('#sfNext').click();
+ await expect(page.locator('#sfState')).toContainText('Total stays 10');await expect(page.locator('#sfLine2')).toHaveClass('active');
+ await expect(page.locator('#sfDiagram svg')).toHaveAttribute('aria-label',/position V0; durable total 10/);
+ await page.locator('#sfNext').click();await expect(page.locator('#sfState')).toContainText('total 15');
+ await page.locator('#sfOutcome').selectOption('commit');for(let i=0;i<4;i++)await page.locator('#sfNext').click();
+ await expect(page.locator('#sfState')).toContainText('no new inserts');await fits();
+ await page.locator('#product-snowflake').screenshot({path:info.outputPath('snowflake-committed-retry.png')});
+ await page.locator('#productGrade').click();await expect(page.locator('#productScore')).toContainText('Answer both');
+ await page.locator('#productQ0').selectOption('0');await page.locator('#productQ1').selectOption('0');
+ await page.locator('#productGrade').click();await expect(page.locator('#productScore')).toContainText('1/2');
+ await page.locator('#productQ1').selectOption('1');await page.locator('#productGrade').click();await expect(page.locator('#productScore')).toContainText('2/2');
+ await page.locator('#save').click();await page.reload();await expect(page.locator('#productQ0')).toHaveValue('0');await expect(page.locator('#productQ1')).toHaveValue('1');
+ const pending=page.waitForEvent('download');await page.locator('#export').click();const download=await pending;
+ const result=JSON.parse(fs.readFileSync(await download.path(),'utf8'));await download.delete();
+ expect(result.product_assessment.answers).toEqual(['0','1']);expect(result.product_assessment.attempts.map(a=>a.score)).toEqual([1,2]);expect(result.attempts).toEqual([]);expect(errors).toEqual([]);
+});

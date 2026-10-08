@@ -34,3 +34,11 @@ That workflow checks desktop and mobile Chromium: layout overflow and visible co
 
 No claim is made about Safari/Firefox, assistive-technology testing, pixel-perfect visual review, or real Flink/Redis/GitHub deployment/database/battery execution. Official external pages may later move; HTTP status and availability for every external source are not covered by the local link tests. No learner answers are stored in the repository.
 
+
+## Product implementation and certification expansion — 2026-10-08
+
+Data engineering now has a 30-minute budget, including separate nine-minute Databricks and Snowflake subsections; Day17 totals 120 minutes. Original lesson identity, Flink sources/check dates, quiz, code replay, delivery date, and review history are preserved. Added-date product reviews are tracked independently.
+
+Verified locally: all99 original lesson replays and common quiz/save/export serialization; seven Day17 models; Databricks same-query retry15 versus fresh-query30; Snowflake rollback preserves10 then retry commits15, committed retry adds nothing; supplemental quiz gating/scoring; historical duration75/105 versus120 policy; added-date product-review scheduling. Native Chromium checks run in Browser smoke for the publishing commit, including product diagrams, both recovery paths, highlighting, scoring, persistence, and actual JSON download. See the workflow result for observed browser evidence.
+
+Databricks/Snowflake SQL and PySpark snippets were checked against current official documentation, but no authenticated vendor sandbox was available. They were not executed in either product. Browser models are executable JavaScript approximations, not captured vendor traces. Full Snowflake COF-C03 objective IDs/weights remain unverified; the roadmap flags this gap. Automated browser layout checks are not manual screenshot review.

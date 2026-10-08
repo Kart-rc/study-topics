@@ -26,6 +26,12 @@ for(const L of lessons){
     recover();
     assert(text('world').includes('Restored total: 10')&&text('world').includes('Lost contribution: 4'));
     nodes.bufferCount.value='0';nodes.bufferCount.oninput();recover();assert(text('world').includes('Lost contribution: 0'));
+    for(let i=0;i<5;i++)nodes.dbNext.onclick();assert(text('dbState').includes('Final total 15'));
+    nodes.dbPolicy.value='new';nodes.dbPolicy.onchange();for(let i=0;i<5;i++)nodes.dbNext.onclick();assert(text('dbState').includes('Final total 30'));
+    for(let i=0;i<3;i++)nodes.sfNext.onclick();assert(text('sfState').includes('Total stays 10'));nodes.sfNext.onclick();assert(text('sfState').includes('total 15'));
+    nodes.sfOutcome.value='commit';nodes.sfOutcome.onchange();for(let i=0;i<4;i++)nodes.sfNext.onclick();assert(text('sfState').includes('no new inserts'));
+    nodes.productQ0.value='';nodes.productQ1.value='';nodes.productGrade.onclick();assert(text('productScore').includes('Answer both'));
+    nodes.productQ0.value='0';nodes.productQ1.value='1';nodes.productGrade.onclick();assert(text('productScore').includes('2/2'));
   }
   if(L.slug==='software-engineering'){
     assert(text('world').includes('Filter: MAYBE')&&text('world').includes('Database read: true')&&text('world').includes('Returned present: false'));
@@ -67,7 +73,7 @@ for(const L of lessons){
   assert.equal(reviews,2);
   if(['ci-cd-github-actions','apis-microservices'].includes(L.slug)) assert(h.includes('Day14:')&&h.includes('Day16:'));
   else assert(h.includes('Day2:')&&h.includes('Day8:'));
-  assert(h.includes('checked 2026-10-07'));assert(h.includes('15 minutes'));
+  assert(h.includes('checked 2026-10-07'));assert(h.includes(L.slug==='data-engineering'?'30 minutes':'15 minutes'));
   assert(h.includes('What this model does and does not represent'));
   assert(h.includes('captured by running this exact example during the build'));
   assert(h.includes('id="useCaseTitle">Use case: when to use this'));
@@ -80,12 +86,12 @@ const state=JSON.parse(fs.readFileSync(path.join(__dirname,'../study-state.json'
 assert.equal(state.days.filter(x=>x.generation_key==='2026-10-07').length,1);
 assert.deepEqual(d.review_keys,['Day14+3','Day16+1','Day2+14','Day8+7']);
 assert.equal(d.lesson_slugs.length,7);
-assert(fs.readFileSync(path.join(__dirname,'index.html'),'utf8').includes('105 minutes total'));
+assert(fs.readFileSync(path.join(__dirname,'index.html'),'utf8').includes('120 minutes total'));
 for(const name of ['index.html',...lessons.map(x=>x.slug+'.html')]){
   const h=fs.readFileSync(path.join(__dirname,name),'utf8');
   for(const [,href] of h.matchAll(/href="([^"]+)"/g)){
     if(!/^https?:|^#/.test(href))assert(fs.existsSync(path.resolve(__dirname,href)),'missing '+href);
   }
 }
-console.log('PASS seven tracks, 105 minutes, unique generation key and track-aware spaced reviews.');
+console.log('PASS seven tracks, 120 minutes, unique generation key and track-aware spaced reviews.');
 

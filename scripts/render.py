@@ -3,7 +3,7 @@
 from pathlib import Path
 from datetime import date,timedelta
 import json,html,re,sys
-import walkthrough
+import walkthrough,products
 R=Path(__file__).resolve().parents[1]
 CSS='''*{box-sizing:border-box}body{margin:0;background:#f4f4ee;color:#192d32;font:17px/1.7 system-ui,sans-serif}main{max-width:960px;margin:auto;padding:32px 24px 80px}a{color:#096b73}header{padding:35px 0;border-bottom:2px solid #c4d3ce}h1{font-size:clamp(2.1rem,5vw,3.5rem);line-height:1.12;letter-spacing:-.035em;max-width:800px}h2{font-size:1.4rem;margin-top:0}p{max-width:78ch}.eyebrow{font-size:.8rem;letter-spacing:.1em;text-transform:uppercase;font-weight:750;color:#316c69}.lead{font-size:1.2rem}section,.card{background:white;border:1px solid #d9e2da;border-radius:18px;padding:26px;margin:24px 0}.lab{background:#17363b;color:#f3f7f4}.lab button{background:#d6f4b5;color:#15373a}.lab label{display:block;margin:14px 0}.lab pre{background:#0c2429;color:#d6f4b5}button{background:#185c61;color:white;border:0;border-radius:8px;padding:12px 16px;font:inherit;cursor:pointer;margin:6px 6px 6px 0}button:hover{filter:brightness(1.13)}button:focus-visible,input:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #d18621;outline-offset:3px}input[type=range]{width:min(95%,420px);display:block}input[type=number]{font:inherit;width:110px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#edf3ee;border-radius:10px;padding:20px}small,.muted{color:#56666b}.lab .muted{color:#c5d8d5}fieldset{border:1px solid #d9e2da;border-radius:12px;margin:20px 0;padding:20px}legend{font-weight:700}fieldset label{display:block;padding:6px}textarea{width:100%;min-height:90px;font:inherit;padding:12px;border:1px solid #9caaa6;border-radius:8px}details{padding:12px 0}summary{cursor:pointer;font-weight:650}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}.grid .card{margin:0}nav{display:flex;gap:16px;flex-wrap:wrap}.feedback{font-weight:600}.pill{border-radius:50px;background:#e5f0d5;padding:7px 15px;display:inline-block;font-size:.85rem}.timing{display:flex;flex-wrap:wrap;gap:12px;margin:20px 0}.timing span{background:#e8eeea;padding:6px 10px;border-radius:6px}@media(max-width:520px){main{padding:20px 15px}section{padding:20px}h1{font-size:2.2rem}}@media print{body{background:white}.lab,button{display:none}section{break-inside:avoid}main{max-width:none}}'''
 CSS += walkthrough.CSS
@@ -16,12 +16,18 @@ def expected_tracks(manifest, number):
  return max(eligible,key=lambda c:c['effective_from_day'])['tracks'] if eligible else manifest['tracks']
 def day_count(manifest, day):
  return len(day.get('lesson_slugs',expected_tracks(manifest,day['number'])))
+def lesson_minutes(manifest, day, track):
+ changes=[p for p in manifest.get('lesson_duration_changes',[]) if p['effective_from_day']<=day['number']]
+ policy=max(changes,key=lambda p:p['effective_from_day']) if changes else {}
+ return policy.get('minutes_by_track',{}).get(track,manifest['minutes_per_lesson'])
+def day_minutes(manifest,day):
+ return sum(lesson_minutes(manifest,day,t) for t in expected_tracks(manifest,day['number']))
 def render(folder):
  manifest=json.loads((R/'study-state.json').read_text());day=next(d for d in manifest['days'] if d['folder']==folder)
  lessons=json.loads((R/folder/'lessons.json').read_text());due=[]
  expected=expected_tracks(manifest,day['number'])
  if sorted(l['track'] for l in lessons)!=sorted(expected):raise ValueError('Lesson tracks do not match day policy: '+folder)
- lesson_count=len(lessons);total_minutes=lesson_count*manifest['minutes_per_lesson']
+ lesson_count=len(lessons);total_minutes=day_minutes(manifest,day)
  for prior in manifest['days']:
   if prior['number']>=day['number']:continue
   age=(date.fromisoformat(day['date'])-date.fromisoformat(prior['date'])).days
@@ -44,6 +50,12 @@ def render(folder):
  day['review_keys']=sorted({key for selected in due_by_track.values() for _,key in selected})
  for L in lessons:
   slug=L['slug'];qs=L['questions'];quiz=''
+  minutes=lesson_minutes(manifest,day,L['track'])
+  if minutes==30:
+   assert L['track']=='Data engineering'
+   assert [p['id'] for p in L.get('product_sections',[])]==['databricks','snowflake'], 'Two product sections required'
+   assert all(p['minutes']==9 for p in L['product_sections'])
+   assert len(L.get('product_questions',[]))==2
   use_case=L.get('use_case')
   if day['number']>=16 and (not isinstance(use_case,dict) or any(not isinstance(use_case.get(k),str) or not use_case[k].strip() for k in ('when','example','decision'))):
    raise ValueError('A practical use case with when, example, and decision is required: '+folder+'/'+slug)
@@ -67,13 +79,20 @@ def render(folder):
    if p:
     q,options,a,why=p['questions'][0]
     review+=f'<p><a href="../{prior["folder"]}/{p["slug"]}.html">{prior["folder"]}: {esc(p["title"])}</a></p><p>{esc(q)}</p><details><summary>Recall first, then reveal the refresher</summary><p>{esc(options[a])}. {esc(why)}</p></details>'
+  product_review=products.reviews(R,day) if minutes==30 else ''
   if not review:review='<p>No earlier lessons are due yet. Start with the prediction exercise below. This topic returns after 1, 3, 7, 14, and 30 days.</p>'
   body=f'''<nav><a href="index.html">← {folder}</a><a href="../index.html">All days</a></nav><header><p class="eyebrow">{folder} / {esc(L['track'])}</p><h1>{esc(L['title'])}</h1><p class="lead">{esc(L['goal'])}</p><span class="pill">{esc(L['tag'])}</span><div class="timing"><span>2 min · Recall</span><span>4 min · Understand</span><span>5 min · Explore</span><span>4 min · Quiz</span></div></header><section><h2>Recall earlier lessons · 2 min</h2>{review}<label>Your recall or prediction<textarea id="recall" placeholder="Write before looking at the explanation."></textarea></label></section><section><h2>Understand the idea · 4 min</h2>{L['concept']}<h2>A worked example</h2>{L['example']}</section>{walk_html}<section class="lab"><p class="eyebrow" style="color:#d6f4b5">Explore · 5 min</p><h2>Predict, change, explain</h2><p>{esc(L['practice'])}</p>{L['sim']}<details><summary>What this model does and does not represent</summary><p>{esc(L['boundary'])}</p></details></section><section><h2>Check understanding · 4 min</h2><p>Three scored questions plus two short responses keep this to 15 minutes. Commit to an answer before checking. The score records only the multiple-choice answers; it does not establish mastery.</p>{quiz}<button id="grade">Check 3 answers</button><p id="score" aria-live="polite"></p><label>4. Explain one design decision to a skeptical engineer.<textarea id="rationale"></textarea></label><label>5. Change one assumption. What breaks, and how would you detect it?<textarea id="boundaryAnswer"></textarea></label><button id="save">Save answers locally</button><button id="export">Export answers</button><p id="saved" aria-live="polite"></p><small>Local saving depends on your browser. Export downloads JSON; upload it in ChatGPT for feedback and targeted review. Nothing here sends answers to GitHub or ChatGPT. Do not put work secrets in these pages.</small></section><section><h2>Read the originals</h2><ul>{sources}</ul><p class="muted">Examples and calculator inputs are original, synthetic teaching material. Source dates distinguish established foundations from new research.</p></section><nav><a href="index.html">Back to {folder}</a></nav>'''
   if use_html:body=body.replace(L['example']+'</section>',L['example']+use_html+'</section>',1)
+  if minutes==30:
+   body=body.replace('<div class="timing"><span>2 min · Recall</span><span>4 min · Understand</span><span>5 min · Explore</span><span>4 min · Quiz</span></div>','<div class="timing"><span>6 min · Concept + recall</span><span>9 min · Databricks</span><span>9 min · Snowflake</span><span>6 min · Compare + quiz</span></div><p>30 minutes total. Existing concept code replay and lab below are optional deeper exploration.</p>')
+   a=body.index(walk_html) if walk_html else body.index('<section class="lab">')
+   b=body.index('<section><h2>Check understanding')
+   body=body[:a]+'<details id="coreExtension"><summary>Optional: original concept code replay and checkpoint lab</summary>'+body[a:b]+'</details>'+products.block(L,product_review)+body[b:]
+   body=body.replace('keep this to 15 minutes','complete the 30-minute lesson')
   js='''const $=id=>document.getElementById(id);'''+''.join(f'const {id}=$({json.dumps(id)});' for id in re.findall(r'id="([\w]+)"',L['sim']))+L['js']
   js+='\nconst quizData='+json.dumps(qs)+';const lessonKey='+json.dumps(folder+'/'+slug)+';'+'''
 let attemptsHistory=[];
-const capture=()=>({lesson:lessonKey,exported_at:new Date().toISOString(),answers:quizData.map((q,i)=>document.querySelector(`input[name="q${i}"]:checked`)?.value??null),recall:$('recall').value,rationale:$('rationale').value,boundary:$('boundaryAnswer').value,attempts:attemptsHistory});
+const capture=()=>({lesson:lessonKey,exported_at:new Date().toISOString(),answers:quizData.map((q,i)=>document.querySelector(`input[name="q${i}"]:checked`)?.value??null),recall:$('recall').value,rationale:$('rationale').value,boundary:$('boundaryAnswer').value,attempts:attemptsHistory,...(typeof productCapture==='function'?{product_assessment:productCapture()}:{})});
 $('grade').onclick=()=>{let score=0;const answers=capture().answers;if(answers.some(a=>a===null)){ $('score').textContent='Answer all three questions before checking.';return;}quizData.forEach((q,i)=>{const ok=Number(answers[i])===q[2];score+=ok?1:0;$('feedback'+i).textContent=(ok?'Correct. ':'Revisit. ')+q[3]});attemptsHistory.push({at:new Date().toISOString(),answers,score});$('score').textContent=`${score}/3 — ${score===3?'now explain your reasoning in your own words.':'revisit the example, then retake.'}`};
 $('save').onclick=()=>{try{localStorage.setItem('study:'+lessonKey,JSON.stringify(capture()));$('saved').textContent='Saved in this browser.'}catch{$('saved').textContent='Local storage unavailable. Use Export answers.'}};
 try{const s=JSON.parse(localStorage.getItem('study:'+lessonKey)||'null');if(s){['recall','rationale'].forEach(k=>$(k).value=s[k]||'');$('boundaryAnswer').value=s.boundary||'';s.answers.forEach((a,i)=>{if(a!==null){const el=document.querySelector(`input[name="q${i}"][value="${a}"]`);if(el)el.checked=true}});attemptsHistory=s.attempts||[]}}catch{}
@@ -82,6 +101,7 @@ $('export').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(
   if L.get('walkthrough'):js+=walkthrough.javascript(L)
   if L.get('written_questions'):
    body=body.replace('Explain one design decision to a skeptical engineer.',esc(L['written_questions'][0])).replace('Change one assumption. What breaks, and how would you detect it?',esc(L['written_questions'][1]))
+  js+=products.javascript(L)
   (R/folder/f'{slug}.html').write_text(page(L['title'],body,js))
   plain=lambda s:html.unescape(re.sub('<[^>]+>','',re.sub(r'</(?:p|pre|h2)>', '\n\n', s)))
   md=f"# {L['title']}\n\n{L['track']} · {folder} · 15 minutes\n\n{L['goal']}\n\n## Recall (2 minutes)\n\n{review}\n\n## Understand (4 minutes)\n\n{plain(L['concept'])}\n\n{plain(L['example'])}\n\n## Explore (5 minutes)\n\n{L['practice']}\n\nOpen {slug}.html for the executable model.\n\nModel limits: {L['boundary']}\n\n## Quiz (4 minutes)\n\n"
@@ -91,11 +111,19 @@ $('export').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(
   if use_md:md=md.replace('## Explore (5 minutes)',use_md+'## Explore (5 minutes)',1)
   if L.get('walkthrough'):md=md.replace('## Explore (5 minutes)',walkthrough.markdown(L)+'## Explore (remaining exploration time)')
   if L.get('written_questions'):md=md.replace('Explain one design decision to a skeptical engineer.',L['written_questions'][0]).replace('Change one assumption. What breaks, and how would you detect it?',L['written_questions'][1])
+  if minutes==30:
+   md=md.replace(' · 15 minutes',' · 30 minutes',1)
+   if use_md:md=md.replace(use_md,'',1)
+   marker='## Read the visual' if '## Read the visual' in md else '## Step through the code'
+   a=md.index(marker);b=md.index('## Quiz (4 minutes)')
+   md=md[:a]+use_md+'<details><summary>Optional: original concept code replay and lab</summary>\n\n'+md[a:b]+'\n</details>\n\n'+products.markdown(L,product_review)+md[b:]
+   md=md.replace(L['goal']+'\n',L['goal']+'\n\nBudget: 6 minutes concept/recall, 9 Databricks, 9 Snowflake, 6 comparison/quiz.\n',1)
   (R/folder/f'{slug}.md').write_text(md)
- cards=''.join(f'<article class="card"><p class="eyebrow">{esc(l["track"])}</p><h2><a href="{l["slug"]}.html">{esc(l["title"])}</a></h2><p>{esc(l["goal"])}</p><span class="pill">15 minutes</span></article>' for l in lessons)
+ cards=''.join(f'<article class="card"><p class="eyebrow">{esc(l["track"])}</p><h2><a href="{l["slug"]}.html">{esc(l["title"])}</a></h2><p>{esc(l["goal"])}</p><span class="pill">{lesson_minutes(manifest,day,l["track"])} minutes</span></article>' for l in lessons)
+ timing_description='Data engineering: 30 minutes; other six lessons: 15 minutes each.' if total_minutes==120 else '15 minutes each.'
  prepared=('<p>Prepared in advance at your request for '+esc(day['date'])+'.</p>') if day.get('prepared_in_advance_at_user_request') else ''
- (R/folder/'index.html').write_text(page(folder,f'<nav><a href="../index.html">← All days</a></nav><header><p class="eyebrow">Engineering field notes / {day["date"]}</p><h1>{folder}: see the idea, then follow the code.</h1><p class="lead">{lesson_count} lessons. 15 minutes each. Read a plain-language example, follow the code as values change, then explore and quiz yourself. Deeper sections are optional.</p><p>{total_minutes} minutes total. Each lesson includes its own recall and quiz time.</p>{prepared}</header><div class="grid">{cards}</div><section><h2>Make it stick</h2><p>Review intervals: 1, 3, 7, 14, and 30 days after delivery. Future lessons include due questions and refreshers. Export answers and upload them in ChatGPT to target weak areas. Generation does not imply completion.</p></section>'))
+ (R/folder/'index.html').write_text(page(folder,f'<nav><a href="../index.html">← All days</a></nav><header><p class="eyebrow">Engineering field notes / {day["date"]}</p><h1>{folder}: see the idea, then follow the code.</h1><p class="lead">{lesson_count} lessons. {timing_description} Read a plain-language example, follow the code as values change, then explore and quiz yourself. Deeper sections are optional.</p><p>{total_minutes} minutes total. Each lesson includes its own recall and quiz time.</p>{prepared}</header><div class="grid">{cards}</div><section><h2>Make it stick</h2><p>Review intervals: 1, 3, 7, 14, and 30 days after delivery. Future lessons include due questions and refreshers. Export answers and upload them in ChatGPT to target weak areas. Generation does not imply completion.</p></section>'))
  (R/'study-state.json').write_text(json.dumps(manifest,indent=2)+'\n')
- cards=''.join(f'<article class="card"><h2><a href="{d["folder"]}/index.html">{d["folder"]}</a></h2><p>{d["date"]} · {day_count(manifest,d)} lessons · {day_count(manifest,d)*manifest["minutes_per_lesson"]} minutes</p></article>' for d in reversed(manifest['days']))
+ cards=''.join(f'<article class="card"><h2><a href="{d["folder"]}/index.html">{d["folder"]}</a></h2><p>{d["date"]} · {day_count(manifest,d)} lessons · {day_minutes(manifest,d)} minutes</p></article>' for d in reversed(manifest['days']))
  (R/'index.html').write_text(page('Engineering field notes',f'<header><p class="eyebrow">Daily study / seven tracks from Day11</p><h1>Engineering field notes.</h1><p class="lead">A daily practice in systems, software, technical judgment, AI engineering, emerging research, CI/CD, and APIs.</p><p>New material is scheduled for 6:50 PM America/New_York. Open any day below. All lessons work offline once downloaded.</p></header><div class="grid">{cards}</div>'))
 if __name__=='__main__':render(sys.argv[1] if len(sys.argv)>1 else 'Day1')

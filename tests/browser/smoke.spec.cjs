@@ -108,14 +108,18 @@ for (const file of pages) {
     const details = page.locator('details');
     expect(await details.count()).toBeGreaterThan(0);
     for (const disclosure of await details.all()) {
+      for(const parent of await disclosure.locator('xpath=ancestor::details').all())
+        if(await parent.getAttribute('open')===null) await parent.locator(':scope > summary').click();
       await expect(disclosure).not.toHaveAttribute('open', '');
-      await disclosure.locator('summary').click();
+      await disclosure.locator(':scope > summary').click();
       await expect(disclosure).toHaveAttribute('open', '');
       await expect(disclosure.locator('p').first()).toBeVisible();
-      await disclosure.locator('summary').click();
+      await disclosure.locator(':scope > summary').click();
       await expect(disclosure).not.toHaveAttribute('open', '');
     }
 
+    const extension=page.locator('#coreExtension');
+    if(await extension.count() && await extension.getAttribute('open')===null) await extension.locator(':scope > summary').click();
     if (lesson.walkthrough) await checkWalkthrough(page, lesson.walkthrough);
 
     // Exercise actual controls with keyboard/click input, without invoking handlers.
