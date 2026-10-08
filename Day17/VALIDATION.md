@@ -1,5 +1,13 @@
 # Day17 validation — 2026-10-07
 
+## Visual teaching revision — 2026-10-08
+
+Three specialist subagents revised all seven lessons, followed by an independent teaching review. Repeated fact-card diagrams were replaced by representations of the mechanism: temporary/durable checkpoint state through a crash; hash arrows and bit ownership; cumulative effort curves; task-by-trial aggregation; separate charge and energy ledgers; simultaneous queue-policy transitions; and row positions versus a tuple cursor.
+
+Visuals are computed from the live JavaScript toy state. The checkpoint lab now requires save, crash, restore, and individual replay actions, and contrasts both valid snapshot strategies with the deliberately broken one. The evaluation matrix allows changing one trial to expose the ANY/ALL difference. Quantitative diagrams label units and denominators, with text equivalents in Markdown. Existing source/check dates, quiz questions, use cases, captured Python/Java executions, review keys, and generation state are unchanged.
+
+Observed locally after revision: all 99 replay/quiz/save/export/link checks, 15 bundle-policy tests, and seven Day17 mechanism checks passed. Native Chromium installation failed because the downloaded archive was invalid. The new bounded `tests/browser/day17-visuals.spec.cjs` adds seven meaningful visual-state checks at both desktop and mobile viewports and captures diagrams for inspection in CI. The Browser smoke result and screenshot artifacts for the revision commit provide native-browser evidence; this pre-commit note does not claim those checks have already run.
+
 Seven lessons, 15 minutes each, 105 minutes total. The 2/4/5/4-minute structure includes spaced recall, use cases, code replay, live model, and quiz. No completion or mastery was inferred.
 
 ## Observed before commit

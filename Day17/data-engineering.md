@@ -16,12 +16,6 @@ A streaming operator has the same problem. Its saved state might contain a runni
 
 An unaligned checkpoint records in-flight data as well as operator state. Checkpoint markers can overtake buffered records. Recovery restores the saved state and processes the saved records. This trades less waiting on busy channels for more checkpoint data.
 
-Already processedTotal = 10
-
-Still in flightRecord A = 2; record B = 3
-
-Recover both10 + 2 + 3 = 15
-
 
 
 Our snapshot stores state=10 and channel=[2,3]. After a crash, replaying that channel produces 15. Saving only 10 loses the waiting records in this deliberately broken recovery model. Saving 15 and replaying the same two records would count them twice. The snapshot must describe a consistent cut through the work.
@@ -29,6 +23,10 @@ Our snapshot stores state=10 and channel=[2,3]. After a crash, replaying that ch
 Flink coordinates that cut across operators and channels. This example isolates the accounting; it does not implement the distributed protocol.
 
 
+
+## Read the visual
+
+The dashed worker area is temporary memory. The solid snapshot area survives a crash. With two +2 records, the unaligned-style snapshot holds total 10 plus two waiting records; recovery replays them to reach 14. The aligned-style toy drains those records before saving, so the snapshot holds total 14 and an empty channel. Both account for every record exactly once. The deliberately broken option holds 10 and no channel, losing 4. It is NOT an aligned checkpoint. This is single-channel accounting, not Flink barrier coordination.
 
 ## Use case: when to use this
 
@@ -77,7 +75,7 @@ Limits: Executed Python accounting, not Flink. The lab uses repeated +2 records 
 
 ## Explore (remaining exploration time)
 
-Predict the restored total. Switch between saving the whole snapshot and forgetting its channel. Change the waiting-record count; see which records recovery can find.
+Predict what survives a crash. Save, crash, restore, then replay one record per click. Compare saving the queue with draining it first. Both should reach the same total. Finally try the deliberately broken state-only snapshot.
 
 Open data-engineering.html for the executable model.
 

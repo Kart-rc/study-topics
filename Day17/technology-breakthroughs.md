@@ -16,19 +16,17 @@ Charge is measured here in ampere-hours (Ah). Energy in watt-hours (Wh) depends 
 
 A September 30 Nature Communications paper reports an alkaline iron-chromium flow cell using a ligand: a molecule that binds metal ions and changes their chemical behavior. The authors report 99.0% coulombic efficiency but 75.8% energy efficiency at 100 mA/cm² and 80% state of charge, with stability over 500 cycles. These efficiencies answer different questions.
 
-Synthetic charging10 Ah × 1.4 V = 14 Wh in
-
-Synthetic discharging9.9 Ah × 1.1 V = 10.89 Wh out
-
-Different scores99% charge; 77.8% energy
-
-
+1. How much charge comes back?In: 10 AhOut: 9.9 Ah9.9 / 10 = 99% of charge returned2. How much energy comes back?In: 10 Ah × 1.4 V = 14 WhReturned: 9.9 × 1.1 = 10.89 WhNot returned: 3.11 WhSynthetic teaching example—not paper measurements. The top two bars compare charge on a 10 Ah scale. The bottom bar divides 14 Wh of input energy into useful output (green) and energy not returned (amber). Lower discharge voltage means less energy per Ah, even when almost all charge comes back.
 
 Our numbers are invented for teaching, not a reconstruction of that experiment. Put in 10 Ah at an average 1.4 V. Get back 9.9 Ah at an average 1.1 V. Charge efficiency is 99%. Energy efficiency is 10.89/14 ≈ 77.8%. The remaining 3.11 Wh is not useful output.
 
 The paper changes metal chemistry to improve reaction behavior. It is a laboratory result, not evidence that a whole storage plant delivers the same efficiency or cost.
 
 
+
+## Read the visual
+
+Two separate ledgers prevent confusing charge with energy. The charge bars compare 10 Ah in with 9.9 Ah out and remain fixed as voltage changes. The energy bar partitions total input into useful output, cell input not returned, and extra auxiliary input, all on one fixed 0–18 Wh scale. Lower discharge voltage shortens useful output and enlarges the cell-loss segment. Extra auxiliary input extends the total bar without changing useful output or the cell score: system efficiency has the larger denominator. All values in this diagram are synthetic, not measurements from the paper.
 
 ## Use case: when to use this
 
@@ -79,7 +77,7 @@ Limits: Executed Python arithmetic, not chemistry. Average voltages stand in for
 
 ## Explore (remaining exploration time)
 
-Keep charge return at 99% and lower discharge voltage. Predict energy returned. Add auxiliary consumption to see why a cell measurement differs from a system measurement.
+Predict which bars change when you lower discharge voltage from 1.1 to 0.7 V. Charge stays 9.9 Ah; useful energy shrinks. Then add 2 Wh of auxiliary input: does cell efficiency change, or only the system denominator?
 
 Open technology-breakthroughs.html for the executable model.
 

@@ -14,12 +14,6 @@ A receptionist keeps a short checklist of initials. If your initials are absent,
 
 A Bloom filter is a compact set of bits. Adding an ID turns on positions chosen by hash functions. A lookup checks those positions: one zero means absent from the inserted set; all ones mean possibly present. Different IDs can share positions.
 
-Insert ID 1Turn on bits 1 and 4
-
-Insert ID 2Turn on bits 2 and 7
-
-Query ID 9Also checks 1 and 4: maybe!
-
 
 
 Our eight-bit toy uses x % 8 and (3*x+1) % 8. Inserting 1 and 2 produces [0,1,1,0,1,0,0,1]. Query 9 finds two ones, although it was never inserted: a false positive. Query 3 checks positions 3 and 2. Position 3 is zero, so 3 is absent.
@@ -27,6 +21,10 @@ Our eight-bit toy uses x % 8 and (3*x+1) % 8. Inserting 1 and 2 produces [0,1,1,
 The safe read path is: a negative skips the expensive lookup; a positive goes to the authoritative database. A positive must never mean “discard this payment because it was already processed.”
 
 
+
+## Read the visual
+
+The arrows connect the query’s two hash calculations to the exact bit positions they inspect. Labels below each set bit show which inserted ID set it. ID 9 and ID 1 point to the same two bits, even though only ID 1 is in the catalog. ID 3 points to bit 3, which is zero: that single zero stops the lookup. A MAYBE continues to the exact catalog unless the broken shortcut bypasses it.
 
 ## Use case: when to use this
 
@@ -75,7 +73,7 @@ Limits: Executed Java BitSet example with teaching hashes; no Redis or database 
 
 ## Explore (remaining exploration time)
 
-Try IDs 1, 9, and 3. Predict the checked positions and whether a database read is needed. Then trust every “maybe” and see the wrong answer for 9.
+Follow the two arrows from query 9 to bits 1 and 4. Who switched those bits on? Compare 9 with 1, then try 3. Turn on the broken shortcut to see where a false positive becomes a wrong answer.
 
 Open software-engineering.html for the executable model.
 

@@ -18,10 +18,14 @@ for(const L of lessons){
   extend(ctx,nodes,h);vm.createContext(ctx);vm.runInContext(h.match(/<script>([\s\S]*)<\/script>/)[1],ctx);
   const text=id=>nodes[id].textContent;
   if(L.slug==='data-engineering'){
+    assert(text('world').includes('Stage: Working'));
+    const recover=()=>{for(let i=0;i<10&&!nodes.checkpointNext.disabled;i++)nodes.checkpointNext.onclick();};
+    recover();
     assert(text('world').includes('Restored total: 14')&&text('world').includes('Lost contribution: 0'));
     nodes.checkpointMode.value='broken';nodes.checkpointMode.onchange();
+    recover();
     assert(text('world').includes('Restored total: 10')&&text('world').includes('Lost contribution: 4'));
-    nodes.bufferCount.value='0';nodes.bufferCount.oninput();assert(text('world').includes('Lost contribution: 0'));
+    nodes.bufferCount.value='0';nodes.bufferCount.oninput();recover();assert(text('world').includes('Lost contribution: 0'));
   }
   if(L.slug==='software-engineering'){
     assert(text('world').includes('Filter: MAYBE')&&text('world').includes('Database read: true')&&text('world').includes('Returned present: false'));
@@ -36,6 +40,7 @@ for(const L of lessons){
   }
   if(L.slug==='genai-engineering'){
     assert(text('world').includes('At least one pass: 3/4 = 75%')&&text('world').includes('All three pass: 1/4 = 25%')&&text('world').includes('Individual passes: 7/12'));
+    nodes.flipTrial.onclick();assert(text('world').includes('At least one pass: 3/4 = 75%')&&text('world').includes('All three pass: 2/4 = 50%'));
     nodes.trialFixture.value='improved';nodes.trialFixture.onchange();assert(text('world').includes('At least one pass: 3/4 = 75%')&&text('world').includes('All three pass: 3/4 = 75%'));
     nodes.trialFixture.value='failed';nodes.trialFixture.onchange();assert(text('world').includes('All three pass: 0/4 = 0%')&&text('world').includes('Model/API calls: 0'));
   }

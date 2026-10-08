@@ -12,13 +12,9 @@ Read repeated-trial evaluations without hiding failures behind the best attempt.
 
 A driver reaches your house once in three attempts. That proves the route is possible. It does not prove tomorrow’s delivery will work. Agents also vary across attempts.
 
-Two questions need different summaries: did a task succeed at least once across k attempts (pass@k), or in every attempt (pass^k)? The second asks for consistency. Do not present the first as if it answered the second.
+Look across one task’s row before counting tasks. “Any” asks whether that row contains a success. “All” asks whether it contains a failure. One failure knocks the task out of the all-success count, even when two attempts succeeded.
 
-Task APass, pass, fail: at least once only
-
-Task CPass, pass, pass: both measures
-
-Task DFail, fail, fail: neither measure
+Read one row two ways: Task ATry 1Try 2Try 3Any?All?PassPassFailYes: ≥1 passNo: 1 failSame evidence, different question. Task A counts once toward “any”; zero times toward “all.” It never counts twice just because two trials passed.Across many tasks, summarize the fraction that succeeded at least once in k attempts (pass@k) or in every attempt (pass^k). The second asks for consistency. Do not present the first as if it answered the second.
 
 
 
@@ -27,6 +23,10 @@ Our four synthetic tasks each have three clean trials: A = PPF, B = PFP, C = PPP
 Reset files, database fixtures, and tool state before each trial. Otherwise a previous attempt may leave the answer behind or exhaust a resource. The harness must preserve comparability, not merely call the model again.
 
 
+
+## Read the visual
+
+The visual reads each task horizontally, converting its three pass/fail cells into two answers: Any and All. Then it counts those answers vertically, displaying four labeled task blocks for each denominator. In the mixed fixture, A/B/C count for Any; only C counts for All. Changing A’s third cell from Fail to Pass leaves Any at 3/4 and increases All to 2/4. The separate 7/12 trial total counts cells instead of task rows. This makes the denominator difference and the hidden intermittent failures visible.
 
 ## Use case: when to use this
 
@@ -75,7 +75,7 @@ Limits: Executed Python aggregation of synthetic results, not an agent benchmark
 
 ## Explore (remaining exploration time)
 
-Compare the mixed fixture with one where A and B are repaired. Predict which score changes. Notice that any-success can stay flat while repeatability improves.
+First read across Task A, then down the two result columns. Predict what happens if its failed third trial becomes a pass. Click “Change A’s third trial,” and watch which count moves. Then choose the repaired fixture: why can all-success rise while any-success stays at 75%?
 
 Open genai-engineering.html for the executable model.
 

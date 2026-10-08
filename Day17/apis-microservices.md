@@ -14,12 +14,6 @@ You bookmark a book with “after the paragraph about B.” Someone inserts a pa
 
 Offset pagination counts positions. Keyset pagination remembers the last row’s ordering values and asks for rows after them. Use a unique order: here (created_at, id). The ID breaks ties between equal timestamps.
 
-Page 1(10,A), (10,B); cursor=(10,B)
-
-An earlier row arrivesX at time 5 shifts A and B forward
-
-Page 2Offset 2: B,C; after (10,B): C,D
-
 
 
 Start with A,B,C,D. Page 1 returns A,B. Insert X before them. Skipping two rows now repeats B. Seeking after (10,B) returns C,D.
@@ -32,6 +26,10 @@ LIMIT 2;
 For this non-null ascending order, a matching composite index supports the seek. The SQL is a reference snippet; the Python replay executes equivalent tuple comparisons on a list.
 
 
+
+## Read the visual
+
+The row table keeps each event’s identity visible while showing its old and new position. Inserting X changes B from position 2 to position 3. OFFSET 2 skips positions 1 and 2, so it returns B again. The cursor line stays after the same tuple (10,B), so seeking returns C,D. With a one-row first page, (10,B) is after (10,A), although its timestamp is equal: a time-only test incorrectly skips B.
 
 ## Use case: when to use this
 
@@ -79,7 +77,7 @@ Limits: Executed Python list example, not PostgreSQL. Non-null values, ascending
 
 ## Explore (remaining exploration time)
 
-Insert X between page requests and compare methods. Then use a one-row first page to see why a timestamp-only cursor skips B.
+Compare each row’s old and new position. Find B: why does OFFSET return it twice after X arrives? Then switch to a one-row first page and locate the row skipped by a timestamp-only cursor.
 
 Open apis-microservices.html for the executable model.
 

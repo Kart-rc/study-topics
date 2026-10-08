@@ -87,6 +87,7 @@ $('export').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(
   md=f"# {L['title']}\n\n{L['track']} · {folder} · 15 minutes\n\n{L['goal']}\n\n## Recall (2 minutes)\n\n{review}\n\n## Understand (4 minutes)\n\n{plain(L['concept'])}\n\n{plain(L['example'])}\n\n## Explore (5 minutes)\n\n{L['practice']}\n\nOpen {slug}.html for the executable model.\n\nModel limits: {L['boundary']}\n\n## Quiz (4 minutes)\n\n"
   for i,(q,options,a,why) in enumerate(qs):md+=f'{i+1}. {q}\n'+''.join(f'   - {o}\n' for o in options)+'\n'
   md+='4. Explain one design decision to a skeptical engineer.\n5. Change one assumption. What breaks, and how would you detect it?\n\n<details><summary>Answer key — attempt first</summary>\n\n'+ '\n\n'.join(f'{i+1}. {o[a]}. {w}' for i,(q,o,a,w) in enumerate(qs))+'\n\n</details>\n\n## Sources\n\n'+''.join(f'- [{t}]({u}) — {d}; checked {checked}.\n' for t,u,d in L['sources'])
+  if L.get('visual_explanation'):md=md.replace('## Explore (5 minutes)','## Read the visual\n\n'+L['visual_explanation']+'\n\n## Explore (5 minutes)',1)
   if use_md:md=md.replace('## Explore (5 minutes)',use_md+'## Explore (5 minutes)',1)
   if L.get('walkthrough'):md=md.replace('## Explore (5 minutes)',walkthrough.markdown(L)+'## Explore (remaining exploration time)')
   if L.get('written_questions'):md=md.replace('Explain one design decision to a skeptical engineer.',L['written_questions'][0]).replace('Change one assumption. What breaks, and how would you detect it?',L['written_questions'][1])

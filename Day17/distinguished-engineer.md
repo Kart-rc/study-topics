@@ -14,19 +14,17 @@ You can wash dishes by hand or spend time installing a dishwasher. The machine s
 
 Toil is recurring operational work that leaves little lasting improvement. Measure one unit of work. Compare manual effort with residual human effort plus maintenance. A script that constantly breaks can move the work rather than remove it.
 
-Manual weekly20 requests × 15 min = 5 h
-
-Automated weekly20 × 3 min + 1 h upkeep = 2 h
-
-Net saving3 h/week; 24 h build pays back in 8 weeks
-
-
+Total hours spent6030004812Weeks24 h build costWeek 8: both 40 hSolid blue: manual, +5 h/week.Dashed brown: automated, +2 h/week.The automation line starts higher because you build first. Its slower rise repays that head start. After the crossing, automation has used fewer total hours.
 
 For 20 standard access requests weekly, a self-service path reduces review from 15 to 3 minutes each. Weekly maintenance takes one hour. At week 4, manual handling has cost 20 hours. Automation has cost 24 build hours plus 8 operating hours: 32. At week 8 both total 40. At week 12, automation has saved 12 hours.
 
 This original estimate is not a universal funding rule. Expose assumptions, assign an owner, and measure the result after launch.
 
 
+
+## Read the visual
+
+The cumulative-effort chart starts manual work at 0 hours and automation at its 24-hour build cost. Line slope is weekly work: 5 manual hours versus 2 ongoing automated hours at the default. The lines cross at week 8 and 40 hours; the vertical gap after the crossing is saved work. At 5 requests and 1 upkeep hour the slopes are equal, so the lines never meet. The live chart recalculates line slopes, crossing, and axis scale from the controls; its 12-week window is explicit.
 
 ## Use case: when to use this
 
@@ -80,7 +78,7 @@ Limits: Executed Python decision arithmetic. Inputs are estimates, not measured 
 
 ## Explore (remaining exploration time)
 
-Predict when total effort becomes equal. Reduce weekly volume to 5, then increase upkeep. Inspect the week-by-week comparison and revisit the decision.
+Predict which line will be lower at week 12. Lower requests to 5: the lines become parallel. Why does the 24-hour build cost never get repaid? Then raise upkeep to 6 and explain why the gap grows.
 
 Open distinguished-engineer.html for the executable model.
 

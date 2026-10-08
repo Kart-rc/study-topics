@@ -10,17 +10,11 @@ Choose whether a newer deployment replaces a waiting one or preserves it.
 
 ## Understand (4 minutes)
 
-A building has one loading bay. One truck unloads; others wait. You need two rules: how many can unload together, and which waiting trucks keep their place.
+A building has one loading bay. One truck unloads; others wait. Two rules matter: how many trucks can unload together, and what happens to trucks already waiting when another arrives.
 
-A GitHub Actions concurrency group permits one running job or workflow at a time. By default it keeps one pending run. A newer arrival replaces the pending run. Setting cancel-in-progress: false protects the running job, but does not keep every waiting job.
+A GitHub Actions concurrency group permits one running job or workflow at a time. By default it keeps one pending run. A newer arrival replaces the pending run. cancel-in-progress: false protects the running job, but does not keep every waiting job.
 
-The newer queue: max option can keep up to 100 pending jobs or runs. Combining it with cancel-in-progress: true is invalid.
-
-R1 runningContinues under both policies
-
-R2 waitingDefault: canceled when R3 arrives
-
-R3 arrivingDefault: sole pending; max: after R2
+R1 is running. R2 waits. Now R3 arrives.What changes?Default single pending slotqueue: maxRunningR1 → still R1R1 → still R1WaitingR2 → R3R2 → R2, then R3RemovedR2 canceledNo oneThe pending area changes; the running area does not. That is why protecting R1 does not protect R2.queue: max can keep up to 100 pending jobs or runs. Combining it with cancel-in-progress: true is invalid.
 
 
 
@@ -34,6 +28,10 @@ concurrency:
 This YAML fragment is not executed by this page. The Python replay executes queue bookkeeping.
 
 
+
+## Read the visual
+
+Two stacked queue diagrams receive the same arrival and completion events. Each separates a single running deployment target, the pending area, a canceled tray, and completed runs. After R2 then R3 arrive, the default lane moves R2 to the canceled tray and retains R3. The max lane retains R2 then R3. Finishing R1 visibly moves R3 into one target and R2 into the other. The distinction is pending-job retention, not a change to the one-running-job limit. Panels compare hypothetical policies; they are not two live deployment groups.
 
 ## Use case: when to use this
 
@@ -86,7 +84,7 @@ Limits: Executed Python bookkeeping, not a GitHub workflow. No external deployme
 
 ## Explore (remaining exploration time)
 
-Enqueue R2 then R3. Predict whether R2 survives. Finish the running job and see who goes next. Change the policy to reset and compare.
+Both lanes receive the same arrival. Click “Next arrival” once: R2 waits. Before the second click, predict which lane will keep R2. Click again and point to where R2 went in each lane. Then finish R1: why do different jobs enter the deployment target?
 
 Open ci-cd-github-actions.html for the executable model.
 
