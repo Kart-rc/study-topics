@@ -1,0 +1,1040 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "A table grant is only one key: follow the access path",
+    "goal": "Diagnose a blocked read without giving an analyst administrator access.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A visitor has a key to a filing cabinet, but cannot enter the building. Giving them a bigger cabinet key will not help. Reading a governed table has the same shape: permission to reach its containers and permission to read its data are separate.</p><p>Today, analyst Maya needs the <code>orders</code> table, not <code>payroll</code>. We will find the missing permission, add only that permission, then prove payroll still stays closed. <strong>Least privilege</strong> means granting the access needed for the task, with no unrelated powers.</p>",
+    "example": "<p>Our synthetic database has two orders, worth 20 and 30. The intended query returns 50. An access denial returns no result; it does not mean the sum is zero. The important question is not “Does Maya have SELECT somewhere?” It is “Does her effective identity have every required permission on this path?”</p><p>Use the product diagrams below to watch that path open one gate at a time. The access checks are simplified conjunctions, not a claim about the order in which either engine reports errors.</p>",
+    "use_case": {
+      "when": "Use this when a new analyst or pipeline can see an object name but cannot query it, or an access request proposes a broad administrator role.",
+      "example": "A finance analyst needs read-only sales totals in a shared data platform. The platform team grants a named group or role access to the orders table and its containers.",
+      "decision": "Start with a dedicated reader identity and inspect its effective grants. Avoid adding all privileges to cure one missing container grant. Validate both the allowed query and a denied neighboring table."
+    },
+    "practice": "Predict whether SELECT alone is enough. Add the container permission, then switch the requested table to payroll. Explain why it should remain blocked.",
+    "boundary": "This browser model runs JavaScript, not a database. It assumes authentication, compute access and the outer container are already available; it omits ownership, inherited grants, row policies and network rules.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:18px}#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}.mechanism table{width:100%;border-collapse:collapse;font-size:.95rem}.mechanism th,.mechanism td{border:1px solid #b6c7bd;padding:8px;text-align:left;overflow-wrap:anywhere}select{font:inherit;max-width:100%;padding:8px}.grantbox{border:3px solid #447d70;padding:14px;margin:8px 0;border-radius:12px}.blocked{border-color:#ae533f;background:#fff0e6}.open{background:#e4f3cf}.barrow{margin:14px 0}.bartrack{display:flex;height:32px;width:100%;background:#eee}.barpart{height:100%;border:1px solid white}.product-lesson pre span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.product-lesson .active{background:#d6f4b5;border-left:4px solid #1d715f}.slotrow{display:flex;flex-wrap:wrap;gap:8px}.slot{border:2px solid #426d61;border-radius:10px;padding:15px;min-width:80px;text-align:center}.slot.busy{background:#ffd6b6}.slot.free{background:#d6f4b5}.stepcaption{font-weight:650}</style><label for=\"gateMode\">Permission on the parent container</label><select id=\"gateMode\"><option value=\"missing\">Missing</option><option value=\"granted\">Granted</option></select><label for=\"tableChoice\">Requested table</label><select id=\"tableChoice\"><option value=\"orders\">Orders: SELECT granted</option><option value=\"payroll\">Payroll: no SELECT grant</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function core(){const parent=gateMode.value==='granted',read=tableChoice.value==='orders',ok=parent&&read;world.innerHTML=`<div class=\"grantbox ${parent?'open':'blocked'}\">Parent container: ${parent?'OPEN':'BLOCKED'}<div class=\"grantbox ${read?'open':'blocked'}\">${tableChoice.value}: SELECT ${read?'yes':'no'}</div></div><p>Query: ${ok?'allowed; sum 50':'denied; no result'}</p>`;}gateMode.onchange=core;tableChoice.onchange=core;core();",
+    "questions": [
+      [
+        "Maya has SELECT on orders but lacks its required container permission. What happens?",
+        [
+          "The read is denied",
+          "The result is zero",
+          "The read succeeds"
+        ],
+        0,
+        "SELECT protects the table operation; it does not replace required container access. A denied query is not an empty result."
+      ],
+      [
+        "Which is the best repair for the missing container grant?",
+        [
+          "Give administrator access",
+          "Grant the required container permission to the intended reader",
+          "Grant write access to orders"
+        ],
+        1,
+        "The narrow missing permission repairs this case. Admin access adds unrelated powers; write access does not open a parent container."
+      ],
+      [
+        "The modeled query works. What have you proved?",
+        [
+          "Every user can query it",
+          "Production security is complete",
+          "Only this modeled identity and access path succeed"
+        ],
+        2,
+        "A small positive test does not prove all identities or policies are correct. Add negative tests and inspect real effective grants."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "grants = {\"container\": False, \"orders_select\": True}\nresult = None",
+          "note": "The table grant exists, but the parent gate is closed."
+        },
+        {
+          "code": "allowed = all(grants.values())",
+          "note": "Both permissions are required; the result remains absent."
+        },
+        {
+          "code": "grants[\"container\"] = True\nallowed = all(grants.values())\nresult = 20 + 30 if allowed else None",
+          "note": "Grant the missing permission. The original orders now sum to 50."
+        }
+      ],
+      "expect": {
+        "allowed": true,
+        "result": 50
+      },
+      "limit": "Original Python truth-table example; neither vendor authorization engine is called.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "grants": {
+              "container": false,
+              "orders_select": true
+            },
+            "result": null
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "grants": {
+              "container": false,
+              "orders_select": true
+            },
+            "result": null,
+            "allowed": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "grants": {
+              "container": true,
+              "orders_select": true
+            },
+            "result": 50,
+            "allowed": true
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Unity Catalog privilege reference",
+        "https://docs.databricks.com/aws/en/data-governance/unity-catalog/access-control/privileges-reference",
+        "Updated 2026-10-08; privilege model 1.0"
+      ],
+      [
+        "Snowflake: configuring access control",
+        "https://docs.snowflake.com/en/user-guide/security-access-control-configure",
+        "Living documentation; publication date not stated"
+      ]
+    ],
+    "visual_explanation": "Nested boundaries show that a table grant can exist inside a closed parent. The requested table changes independently of the parent gate.",
+    "written_questions": [
+      "Describe a positive and a negative access test for Maya.",
+      "What inherited privilege could make your negative test unexpectedly succeed?"
+    ],
+    "source_checked_on": "2026-10-08",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: open the catalog, schema and table gates",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Maya belongs to the account group <code>orders_readers</code>. She needs one managed Unity Catalog table for a sales report. She does not need to create tables or read payroll.</p><p><strong>Before a real lab:</strong> use an authorized sandbox with a Unity Catalog-enabled workspace, a pre-existing catalog <code>study18</code>, schema <code>sales</code>, and tables <code>orders(amount)</code> and <code>payroll</code>. An owner prepares orders with two synthetic rows, 20 and 30. Use a dedicated reader with no other effective data grants; owners and broad group grants would invalidate the denial test. The reader also needs workspace access and permission to run queries on the chosen SQL warehouse, such as CAN USE. That compute permission is separate from the three data grants below. Warehouse use can incur charges.</p><p><strong>9-minute route:</strong> first minute: recall or predict whether SELECT alone suffices; next three: follow the nested boundaries; next three: step through the SQL and test the missing-grant case; final two: explain the payroll denial and remaining assumptions.</p><p>The SQL is <strong>not executed in Databricks</strong>. The buttons execute a local JavaScript authorization model. Statements 1–3 represent an authorized grant administrator. Statement 4 is run in a separate reader session as Maya; the model does not impersonate a real account.</p><label for=\"dbMissing\">Failure branch</label><select id=\"dbMissing\"><option value=\"none\">Grant all three data permissions</option><option value=\"schema\">Leave USE SCHEMA missing</option></select><pre><code><span id=\"dbLine0\">GRANT SELECT ON TABLE study18.sales.orders TO `orders_readers`;</span><span id=\"dbLine1\">GRANT USE CATALOG ON CATALOG study18 TO `orders_readers`;</span><span id=\"dbLine2\">GRANT USE SCHEMA ON SCHEMA study18.sales TO `orders_readers`;</span><span id=\"dbLine3\">SELECT SUM(amount) FROM study18.sales.orders;</span></code></pre><button id=\"dbNext\">Apply next modeled statement</button><button id=\"dbReset\">Reset data grants</button><div id=\"dbMap\" class=\"mechanism\"></div><p id=\"dbState\" aria-live=\"polite\"></p><p><strong>Failure and fix.</strong> SELECT alone leaves two closed container gates. Add the narrow USE grants. In the model all three gates are open after statement 3; statement 4 produces the sum. The SQL engine’s actual error-reporting order is not represented.</p><p><strong>Boundary.</strong> USE CATALOG and USE SCHEMA allow reaching the table; neither grants its SELECT. Revoking one direct table grant may not remove effective access if another group or inherited grant supplies it. Use an isolated reader for this demonstration and inspect real effective grants before drawing conclusions.</p><details><summary>Optional: why the grant’s scope matters</summary><p>Unity Catalog can inherit applicable privileges from a catalog or schema. A schema-wide SELECT can reach more tables than the one-table need here. That may be intentional for a curated data product; it is broader than this request. This lesson does not cover ownership transfer, row filters, masks or external-location permissions.</p></details>",
+        "markdown": "Use case. Maya belongs to the account group orders_readers. She needs one managed Unity Catalog table for a sales report. She does not need to create tables or read payroll.\n\nBefore a real lab: use an authorized sandbox with a Unity Catalog-enabled workspace, a pre-existing catalog study18, schema sales, and tables orders(amount) and payroll. An owner prepares orders with two synthetic rows, 20 and 30. Use a dedicated reader with no other effective data grants; owners and broad group grants would invalidate the denial test. The reader also needs workspace access and permission to run queries on the chosen SQL warehouse, such as CAN USE. That compute permission is separate from the three data grants below. Warehouse use can incur charges.\n\n9-minute route: first minute: recall or predict whether SELECT alone suffices; next three: follow the nested boundaries; next three: step through the SQL and test the missing-grant case; final two: explain the payroll denial and remaining assumptions.\n\nThe SQL is not executed in Databricks. The buttons execute a local JavaScript authorization model. Statements 1–3 represent an authorized grant administrator. Statement 4 is run in a separate reader session as Maya; the model does not impersonate a real account.\n\n\n```sql\nGRANT SELECT ON TABLE study18.sales.orders TO `orders_readers`;\nGRANT USE CATALOG ON CATALOG study18 TO `orders_readers`;\nGRANT USE SCHEMA ON SCHEMA study18.sales TO `orders_readers`;\nSELECT SUM(amount) FROM study18.sales.orders;\n```\n\nStep outcomes: SELECT only → blocked; add USE CATALOG → still blocked; add USE SCHEMA → path open; reader SELECT → expected sum 50. Omit USE SCHEMA and the read stays denied. These are local-model predictions, not vendor execution results.\n\nFailure and fix. SELECT alone leaves two closed container gates. Add the narrow USE grants. In the model all three gates are open after statement 3; statement 4 produces the sum. The SQL engine’s actual error-reporting order is not represented.\n\nBoundary. USE CATALOG and USE SCHEMA allow reaching the table; neither grants its SELECT. Revoking one direct table grant may not remove effective access if another group or inherited grant supplies it. Use an isolated reader for this demonstration and inspect real effective grants before drawing conclusions.\n\nOptional: why the grant’s scope mattersUnity Catalog can inherit applicable privileges from a catalog or schema. A schema-wide SELECT can reach more tables than the one-table need here. That may be intentional for a curated data product; it is broader than this request. This lesson does not cover ownership transfer, row filters, masks or external-location permissions.\n\n",
+        "javascript": "const dbNext=$('dbNext'),dbReset=$('dbReset'),dbMissing=$('dbMissing');let dbStep=-1;function dbPaint(){const select=dbStep>=0,cat=dbStep>=1,schema=dbStep>=2&&dbMissing.value!=='schema',allowed=select&&cat&&schema;for(let i=0;i<4;i++)$('dbLine'+i).classList.toggle('active',i===dbStep);$('dbMap').innerHTML=`<p>Identity: Maya in orders_readers</p><div class=\"grantbox ${cat?'open':'blocked'}\">Catalog study18<br>USE CATALOG: ${cat?'yes':'no'}<div class=\"grantbox ${schema?'open':'blocked'}\">Schema sales<br>USE SCHEMA: ${schema?'yes':'no'}<div class=\"grantbox ${select?'open':'blocked'}\">orders<br>SELECT: ${select?'yes':'no'}</div><div class=\"grantbox blocked\">payroll<br>SELECT: no</div></div></div><p>Compute access assumed available separately.</p>`;$('dbState').textContent=`Step ${dbStep+1}/4. Orders path: ${allowed?'open':'blocked'}. `+(dbStep===3?(allowed?'Reader query: sum 50.':'Reader query: denied; no result.'):'Reader query: not run yet.')+' Payroll path: blocked.';dbNext.disabled=dbStep===3;}dbNext.onclick=()=>{dbStep=Math.min(3,dbStep+1);dbPaint();};function dbStart(){dbStep=-1;dbPaint();}dbReset.onclick=dbStart;dbMissing.onchange=dbStart;dbPaint();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: give the active role both data and compute access",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> The same analyst needs the same two-row sales total. Here privileges are granted to a Snowflake account role, <code>orders_reader</code>. The user must be able to activate that role; simply creating a role is not enough.</p><p><strong>Before a real lab:</strong> an authorized sandbox owner creates database <code>study18</code>, schema <code>sales</code>, tables <code>orders(amount)</code> and <code>payroll</code>, and puts 20 and 30 in orders. An authorized administrator creates <code>orders_reader</code>, grants it to the test user, and makes an existing <code>study_wh</code> available. Use no inherited or PUBLIC privileges that bypass the intended denial test. This example relies on ordinary tables and a virtual warehouse, not edition-specific masking. A resumed warehouse consumes credits; use an agreed small sandbox with cost controls.</p><p><strong>9-minute route:</strong> first minute: predict which role and warehouse are used; next three: inspect the permission matrix; next three: advance the SQL and remove the warehouse grant; final two: compare the failure with the Databricks case.</p><p>The SQL is <strong>not executed in Snowflake</strong>. Buttons run a local JavaScript teaching model. Steps 1–4 are grant-administrator actions. Step 5 starts the reader session: activate the already assigned role, disable secondary roles for this isolated test, and select its warehouse. Step 6 reads the table.</p><label for=\"sfMissing\">Failure branch</label><select id=\"sfMissing\"><option value=\"none\">Grant all four permissions</option><option value=\"warehouse\">Leave warehouse USAGE missing</option></select><pre><code><span id=\"sfLine0\">GRANT SELECT ON TABLE study18.sales.orders TO ROLE orders_reader;</span><span id=\"sfLine1\">GRANT USAGE ON DATABASE study18 TO ROLE orders_reader;</span><span id=\"sfLine2\">GRANT USAGE ON SCHEMA study18.sales TO ROLE orders_reader;</span><span id=\"sfLine3\">GRANT USAGE ON WAREHOUSE study_wh TO ROLE orders_reader;</span><span id=\"sfLine4\">USE ROLE orders_reader;\nUSE SECONDARY ROLES NONE;\nUSE WAREHOUSE study_wh;</span><span id=\"sfLine5\">SELECT SUM(amount) FROM study18.sales.orders;</span></code></pre><button id=\"sfNext\">Apply next modeled statement</button><button id=\"sfReset\">Reset role grants</button><div id=\"sfMap\" class=\"mechanism\"></div><p id=\"sfState\" aria-live=\"polite\"></p><p><strong>Failure and fix.</strong> A table SELECT plus database and schema USAGE still does not provide warehouse access for this fresh table query. Add warehouse USAGE to the intended role and activate it in the reader session. In the missing-warehouse branch, <code>USE WAREHOUSE</code> itself may fail; the model shows the unmet requirement, not an exact vendor error string.</p><p><strong>Boundary.</strong> We choose USAGE as the narrow container permission for this reader. Real Snowflake access can include role inheritance, secondary roles, ownership and other qualifying container privileges. A database role cannot hold warehouse privileges in the way this account-role example does. This is not a complete policy evaluator.</p><details><summary>Optional: objects and compute are separate</summary><p>The warehouse executes the query; it does not contain the database. Our matrix deliberately gives warehouse access its own row rather than drawing the table inside the warehouse. Increasing warehouse size does not repair a missing table grant.</p></details>",
+        "markdown": "Use case. The same analyst needs the same two-row sales total. Here privileges are granted to a Snowflake account role, orders_reader. The user must be able to activate that role; simply creating a role is not enough.\n\nBefore a real lab: an authorized sandbox owner creates database study18, schema sales, tables orders(amount) and payroll, and puts 20 and 30 in orders. An authorized administrator creates orders_reader, grants it to the test user, and makes an existing study_wh available. Use no inherited or PUBLIC privileges that bypass the intended denial test. This example relies on ordinary tables and a virtual warehouse, not edition-specific masking. A resumed warehouse consumes credits; use an agreed small sandbox with cost controls.\n\n9-minute route: first minute: predict which role and warehouse are used; next three: inspect the permission matrix; next three: advance the SQL and remove the warehouse grant; final two: compare the failure with the Databricks case.\n\nThe SQL is not executed in Snowflake. Buttons run a local JavaScript teaching model. Steps 1–4 are grant-administrator actions. Step 5 starts the reader session: activate the already assigned role, disable secondary roles for this isolated test, and select its warehouse. Step 6 reads the table.\n\n\n```sql\nGRANT SELECT ON TABLE study18.sales.orders TO ROLE orders_reader;\nGRANT USAGE ON DATABASE study18 TO ROLE orders_reader;\nGRANT USAGE ON SCHEMA study18.sales TO ROLE orders_reader;\nGRANT USAGE ON WAREHOUSE study_wh TO ROLE orders_reader;\nUSE ROLE orders_reader;\nUSE SECONDARY ROLES NONE;\nUSE WAREHOUSE study_wh;\nSELECT SUM(amount) FROM study18.sales.orders;\n```\n\nStep outcomes: table grant → missing containers; database/schema grants → missing compute; warehouse grant → role can use compute; activate role and warehouse → prerequisites ready; reader SELECT → expected sum 50. Omit warehouse USAGE and the reader cannot use it. These are local-model predictions, not vendor execution results.\n\nFailure and fix. A table SELECT plus database and schema USAGE still does not provide warehouse access for this fresh table query. Add warehouse USAGE to the intended role and activate it in the reader session. In the missing-warehouse branch, USE WAREHOUSE itself may fail; the model shows the unmet requirement, not an exact vendor error string.\n\nBoundary. We choose USAGE as the narrow container permission for this reader. Real Snowflake access can include role inheritance, secondary roles, ownership and other qualifying container privileges. A database role cannot hold warehouse privileges in the way this account-role example does. This is not a complete policy evaluator.\n\nOptional: objects and compute are separateThe warehouse executes the query; it does not contain the database. Our matrix deliberately gives warehouse access its own row rather than drawing the table inside the warehouse. Increasing warehouse size does not repair a missing table grant.\n\n",
+        "javascript": "const sfNext=$('sfNext'),sfReset=$('sfReset'),sfMissing=$('sfMissing');let sfStep=-1;function sfPaint(){const grants=[sfStep>=0,sfStep>=1,sfStep>=2,sfStep>=3&&sfMissing.value!=='warehouse'];const active=sfStep>=4,allowed=active&&grants.every(Boolean);for(let i=0;i<6;i++)$('sfLine'+i).classList.toggle('active',i===sfStep);$('sfMap').innerHTML=`<table><caption>Role orders_reader: independent requirements</caption><thead><tr><th>Object</th><th>Privilege</th><th>Granted?</th></tr></thead><tbody>${[['orders','SELECT'],['study18','USAGE'],['sales','USAGE'],['study_wh','USAGE']].map((x,i)=>`<tr style=\"background:${grants[i]?'#e4f3cf':'#fff0e6'}\"><td>${x[0]}</td><td>${x[1]}</td><td>${grants[i]?'yes':'no'}</td></tr>`).join('')}</tbody></table><div class=\"grantbox ${active?'open':'blocked'}\">Reader session: ${active?'orders_reader active':'role not activated in this model'}<br>Secondary roles: ${active?'NONE':'not set yet'}</div><p>Data containers and warehouse are separate objects.</p>`;$('sfState').textContent=`Step ${sfStep+1}/6. Query prerequisites: ${allowed?'ready':'incomplete'}. `+(sfStep===5?(allowed?'Reader query: sum 50.':'Reader query: blocked; warehouse unavailable to role.'):'Reader query: not run yet.')+' Payroll SELECT: absent.';sfNext.disabled=sfStep===5;}sfNext.onclick=()=>{sfStep=Math.min(5,sfStep+1);sfPaint();};function sfStart(){sfStep=-1;sfPaint();}sfReset.onclick=sfStart;sfMissing.onchange=sfStart;sfPaint();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<p>Both products separate reaching an object from reading it. The names and identity models differ.</p><table><thead><tr><th>Question</th><th>Databricks example</th><th>Snowflake example</th></tr></thead><tbody><tr><td>Who receives grants?</td><td>Account group orders_readers</td><td>Account role orders_reader</td></tr><tr><td>Container access</td><td>USE CATALOG + USE SCHEMA</td><td>USAGE on database + schema</td></tr><tr><td>Data operation</td><td>SELECT on orders</td><td>SELECT on orders</td></tr><tr><td>Compute access</td><td>SQL warehouse ACL; assumed available</td><td>Warehouse USAGE; modeled explicitly</td></tr></tbody></table><p>Neither table grant is cloud IAM permission. Product mechanisms are related, not interchangeable SQL dialects. Predict before checking:</p>",
+      "markdown": "| Requirement | Databricks | Snowflake |\n|---|---|---|\n| Reader identity | Account group | Active account role |\n| Containers | USE CATALOG, USE SCHEMA | Database and schema USAGE |\n| Table | SELECT | SELECT |\n| Compute | SQL warehouse ACL, assumed available | Warehouse USAGE, modeled |\n\nThe same business need does not imply identical identity or compute permission mechanisms."
+    },
+    "product_questions": [
+      [
+        "Databricks: SELECT and USE CATALOG exist, but USE SCHEMA is absent. What repairs the modeled read?",
+        [
+          "Grant USE SCHEMA on study18.sales to orders_readers",
+          "Increase warehouse size",
+          "Grant SELECT on payroll"
+        ],
+        0,
+        "The schema gate is missing. Compute size and an unrelated table grant do not supply it. Other effective grants are intentionally excluded in this fixture."
+      ],
+      [
+        "Snowflake: the active role has table and container grants but lacks warehouse USAGE. What is the narrow repair?",
+        [
+          "Activate an unrelated administrator role",
+          "Grant USAGE on study_wh to orders_reader",
+          "Increase the table retention period"
+        ],
+        1,
+        "This fresh table query needs usable compute. Warehouse USAGE supplies the missing permission; admin access is unnecessarily broad and retention is unrelated."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Unity Catalog privileges",
+        "https://docs.databricks.com/aws/en/data-governance/unity-catalog/access-control/privileges-reference",
+        "Privilege model 1.0; updated 2026-10-08"
+      ],
+      [
+        "Databricks SQL warehouse ACLs",
+        "https://docs.databricks.com/aws/en/security/auth/access-control/",
+        "Living reference; checked 2026-10-08"
+      ],
+      [
+        "Snowflake access-control configuration",
+        "https://docs.snowflake.com/en/user-guide/security-access-control-configure",
+        "Living reference; no publication date stated"
+      ],
+      [
+        "Snowflake access-control overview",
+        "https://docs.snowflake.com/en/user-guide/security-access-control-overview",
+        "Living reference; no publication date stated"
+      ],
+      [
+        "Databricks: manage privileges",
+        "https://docs.databricks.com/aws/en/data-governance/unity-catalog/manage-privileges/",
+        "Living reference; checked 2026-10-08"
+      ],
+      [
+        "Snowflake: USE SECONDARY ROLES",
+        "https://docs.snowflake.com/en/sql-reference/sql/use-secondary-roles",
+        "Living reference; checked 2026-10-08"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-08",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "governance_security"
+        ],
+        "scope": "Focused governance/security practice: table-read grants, required container privileges and compute separation. Guide version May 4, 2026; not full domain coverage."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "domains": [
+          "account_warehouse_access"
+        ],
+        "scope": "Focused account/warehouse/access planning group: active account role and narrow data/compute grants. Full C03 objective IDs and weights remain unverified; this is not a complete blueprint mapping."
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Two slots, no waiting room: cap in-flight work with a semaphore",
+    "goal": "Protect a scarce downstream resource by refusing excess concurrent work.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A small repair shop has two workbenches. Taking a third bicycle does not create a third bench; it creates a pile. A semaphore is a counter of available slots. A request takes one slot before entering the scarce operation and returns it when that operation ends.</p><p>Use <code>tryAcquire()</code> when an immediate “busy” result is better than more waiting. The slot covers the downstream operation, not merely the moment the request is accepted. This is a concurrency limit: it does not promise a fixed requests-per-second rate.</p>",
+    "example": "<p>Three report requests arrive while no work completes. A and B occupy the two slots. C is refused before touching the database. A then finishes; D can take its slot. If A throws an exception and forgets to return its slot, the service slowly loses capacity even though the database is idle.</p><pre><code>// Java pattern; read-only snippet, not executed in-browser\nif (!slots.tryAcquire()) return busy();\ntry { return queryDatabase(); }\nfinally { slots.release(); }</code></pre><p>The recorded example below uses the real Java semaphore, but synthetic request labels and no threads or database. Only release a permit after a successful acquisition; Java does not enforce ownership for you.</p>",
+    "use_case": {
+      "when": "Use this when concurrent calls exhaust a database connection budget or a slow dependency occupies too many request handlers.",
+      "example": "Give a report endpoint two synthetic permits in this lesson; in production choose a measured budget per dependency and account for all service replicas.",
+      "decision": "Use admission control before the expensive work. A queue may be appropriate for durable batch jobs, but bound its size and waiting time separately."
+    },
+    "practice": "Send A, B and C before completing any request. Predict which reaches the database. Complete one, send D, then try the permit-leak failure.",
+    "boundary": "Actual browser JavaScript models one process with two slots and FIFO completion chosen for illustration. It does not simulate threads, rate limiting, distributed limits or real query latency.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:18px}#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}.mechanism table{width:100%;border-collapse:collapse;font-size:.95rem}.mechanism th,.mechanism td{border:1px solid #b6c7bd;padding:8px;text-align:left;overflow-wrap:anywhere}select{font:inherit;max-width:100%;padding:8px}.grantbox{border:3px solid #447d70;padding:14px;margin:8px 0;border-radius:12px}.blocked{border-color:#ae533f;background:#fff0e6}.open{background:#e4f3cf}.barrow{margin:14px 0}.bartrack{display:flex;height:32px;width:100%;background:#eee}.barpart{height:100%;border:1px solid white}.product-lesson pre span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.product-lesson .active{background:#d6f4b5;border-left:4px solid #1d715f}.slotrow{display:flex;flex-wrap:wrap;gap:8px}.slot{border:2px solid #426d61;border-radius:10px;padding:15px;min-width:80px;text-align:center}.slot.busy{background:#ffd6b6}.slot.free{background:#d6f4b5}.stepcaption{font-weight:650}</style><label for=\"releasePolicy\">When a request finishes</label><select id=\"releasePolicy\"><option value=\"safe\">Return its permit</option><option value=\"leak\">Bug: forget its permit</option></select><button id=\"sendRequest\">Send request</button><button id=\"finishRequest\">Finish oldest active request</button><button id=\"resetSlots\">Reset</button><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "let activeRequests=[],freeSlots=2,rejectedRequests=[],lostSlots=0,nextRequest=1;function slotsPaint(){world.innerHTML=`<p>Available permits: ${freeSlots}; leaked: ${lostSlots}</p><div class=\"slotrow\">${activeRequests.map(x=>`<div class=\"slot busy\">${x}<br>working</div>`).join('')}${Array.from({length:freeSlots},()=>'<div class=\"slot free\">free</div>').join('')}${Array.from({length:lostSlots},()=>'<div class=\"slot busy\">lost<br>idle capacity</div>').join('')}</div><p>Refused before DB: ${rejectedRequests.join(',')||'none'}</p>`;}sendRequest.onclick=()=>{const id='R'+nextRequest++;if(freeSlots){freeSlots--;activeRequests.push(id);}else rejectedRequests.push(id);slotsPaint();};finishRequest.onclick=()=>{if(activeRequests.length){activeRequests.shift();if(releasePolicy.value==='safe')freeSlots++;else lostSlots++;}slotsPaint();};function slotsReset(){activeRequests=[];freeSlots=2;rejectedRequests=[];lostSlots=0;nextRequest=1;slotsPaint();}releasePolicy.onchange=slotsReset;resetSlots.onclick=slotsReset;slotsPaint();",
+    "questions": [
+      [
+        "A and B occupy both slots. C calls tryAcquire(). What happens?",
+        [
+          "C waits forever",
+          "C fails to acquire and should avoid the DB call",
+          "The semaphore creates a slot"
+        ],
+        1,
+        "tryAcquire returns false when no permit is available. The application must turn that into its chosen busy response; it is not an automatic HTTP response."
+      ],
+      [
+        "Why release in finally after acquiring?",
+        [
+          "To return capacity even when work throws",
+          "To undo a committed DB transaction",
+          "To guarantee FIFO admission"
+        ],
+        0,
+        "finally handles normal completion and exceptions. It does not roll back database work or establish fairness."
+      ],
+      [
+        "Ten replicas each have two permits. Is the fleet limited to two calls?",
+        [
+          "Yes",
+          "Only if requests are fast",
+          "No; up to twenty modeled concurrent calls"
+        ],
+        2,
+        "A local semaphore protects one process. Fleet-wide budgets require sizing or coordination across replicas."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var slots = new java.util.concurrent.Semaphore(2);\nboolean a = slots.tryAcquire();\nint free = slots.availablePermits();",
+          "note": "A takes the first real Java permit."
+        },
+        {
+          "code": "boolean b = slots.tryAcquire();\nboolean c = slots.tryAcquire();\nfree = slots.availablePermits();",
+          "note": "B takes the second; C cannot acquire."
+        },
+        {
+          "code": "slots.release();\nboolean d = slots.tryAcquire();\nfree = slots.availablePermits();",
+          "note": "A completes and returns one permit; D acquires it."
+        }
+      ],
+      "expect": {
+        "c": "false",
+        "d": "true",
+        "free": "0"
+      },
+      "limit": "Executed Java 17 semaphore calls in one thread. No real dependency, contention or waiting-time measurements.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "slots": "java.util.concurrent.Semaphore@1198b989[Permits = 1]",
+            "a": "true",
+            "free": "1"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "slots": "java.util.concurrent.Semaphore@1198b989[Permits = 0]",
+            "a": "true",
+            "free": "0",
+            "b": "true",
+            "c": "false"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "slots": "java.util.concurrent.Semaphore@1198b989[Permits = 0]",
+            "a": "true",
+            "free": "0",
+            "b": "true",
+            "c": "false",
+            "d": "true"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java 17 Semaphore API",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/Semaphore.html",
+        "Java SE 17 API; living reference"
+      ]
+    ],
+    "visual_explanation": "Two physical slots fill with request IDs. A refused request stays outside; a leaked permit becomes visibly unusable capacity.",
+    "written_questions": [
+      "Where would you acquire and release a permit around an asynchronous client call?",
+      "What metrics distinguish full healthy capacity from leaked permits?"
+    ],
+    "source_checked_on": "2026-10-08"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Keep the reason, not just the verdict: architecture decision records",
+    "goal": "Make an architectural choice reviewable when its assumptions change.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A team once chose a small van because deliveries fit in it. A year later, someone remembers only “we always use the van.” An architecture decision record (ADR) keeps the reason, alternatives and consequences beside the choice. A new engineer can understand what was true when the team decided.</p><p>Today’s original decision is to run a nightly report in one region because the business accepts a 24-hour delay. A new contract later requires results within 15 minutes. That is evidence to revisit the decision, not proof that any particular replacement is correct.</p>",
+    "example": "<p>ADR-7 records the 24-hour assumption, a single-region batch design, lower operating cost, and slower freshness. We add an explicit review trigger: a freshness requirement below 24 hours. This trigger is a teaching convention, not a universal ADR standard.</p><p>When a new design is evaluated and accepted, ADR-8 can replace ADR-7. Keep ADR-7 and mark it superseded; deleting it erases why the original design was reasonable. A proposed replacement does not become accepted merely because the old assumption changed.</p>",
+    "use_case": {
+      "when": "Use this for consequential choices with alternatives, tradeoffs or constraints that another team will need to understand later.",
+      "example": "Record why a platform selected nightly batch rather than continuous ingestion, including the freshness promise and cost evidence.",
+      "decision": "Write one short record per significant decision. For a local reversible refactor, a code comment may suffice. Revisit records on evidence, not just on a calendar ritual."
+    },
+    "practice": "Change the freshness requirement from 24 hours to 15 minutes. Does that immediately supersede ADR-7? Then accept the proposed replacement and inspect the history.",
+    "boundary": "This JavaScript decision-state model uses an invented review threshold. It does not evaluate architecture quality, prescribe streaming as the solution or automatically authorize a migration.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:18px}#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}.mechanism table{width:100%;border-collapse:collapse;font-size:.95rem}.mechanism th,.mechanism td{border:1px solid #b6c7bd;padding:8px;text-align:left;overflow-wrap:anywhere}select{font:inherit;max-width:100%;padding:8px}.grantbox{border:3px solid #447d70;padding:14px;margin:8px 0;border-radius:12px}.blocked{border-color:#ae533f;background:#fff0e6}.open{background:#e4f3cf}.barrow{margin:14px 0}.bartrack{display:flex;height:32px;width:100%;background:#eee}.barpart{height:100%;border:1px solid white}.product-lesson pre span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.product-lesson .active{background:#d6f4b5;border-left:4px solid #1d715f}.slotrow{display:flex;flex-wrap:wrap;gap:8px}.slot{border:2px solid #426d61;border-radius:10px;padding:15px;min-width:80px;text-align:center}.slot.busy{background:#ffd6b6}.slot.free{background:#d6f4b5}.stepcaption{font-weight:650}</style><label for=\"freshness\">New business freshness requirement</label><select id=\"freshness\"><option value=\"24\">24 hours</option><option value=\"0.25\">15 minutes</option></select><button id=\"acceptDecision\">Accept reviewed ADR-8</button><button id=\"resetDecision\">Reset decision history</button><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "let replacementAccepted=false;function adrPaint(){const changed=Number(freshness.value)<24;world.innerHTML=`<svg viewBox=\"0 0 360 300\" role=\"img\" aria-label=\"Decision history and review branch\"><path d=\"M180 72 V111 M180 183 V219\" stroke=\"#386957\" stroke-width=\"3\"/><rect x=\"20\" y=\"10\" width=\"320\" height=\"62\" rx=\"8\" fill=\"#d6f4b5\"/><text x=\"180\" y=\"35\" text-anchor=\"middle\">ADR-7: ${replacementAccepted?'superseded':'accepted'}</text><text x=\"180\" y=\"57\" text-anchor=\"middle\">Reason: 24h freshness</text><path d=\"M180 105 L320 145 L180 190 L40 145 Z\" fill=\"#ffe0b2\" stroke=\"#386957\"/><text x=\"180\" y=\"140\" text-anchor=\"middle\">Assumption changed?</text><text x=\"180\" y=\"162\" text-anchor=\"middle\">${changed?'Yes: review needed':'No: monitor'}</text><rect x=\"20\" y=\"221\" width=\"320\" height=\"64\" rx=\"8\" fill=\"#d8e8f4\"/><text x=\"180\" y=\"247\" text-anchor=\"middle\">ADR-8: ${replacementAccepted?'accepted':changed?'proposed':'not needed yet'}</text><text x=\"180\" y=\"270\" text-anchor=\"middle\">${replacementAccepted?'ADR-7 stays in the history':'Trigger ≠ approval'}</text></svg><p>Review needed: ${changed}; replacement accepted: ${replacementAccepted}.</p>`;acceptDecision.disabled=!changed||replacementAccepted;}freshness.onchange=()=>{replacementAccepted=false;adrPaint();};acceptDecision.onclick=()=>{if(Number(freshness.value)<24)replacementAccepted=true;adrPaint();};resetDecision.onclick=()=>{replacementAccepted=false;freshness.value='24';adrPaint();};adrPaint();",
+    "questions": [
+      [
+        "The requirement changes to 15 minutes. What follows immediately?",
+        [
+          "Delete ADR-7",
+          "Start a review; ADR-8 is not accepted yet",
+          "Streaming is automatically approved"
+        ],
+        1,
+        "An assumption change is evidence for review. It neither evaluates alternatives nor accepts a replacement."
+      ],
+      [
+        "Why keep superseded ADR-7?",
+        [
+          "To preserve the original context and tradeoff",
+          "To require its design forever",
+          "To hide the new choice"
+        ],
+        0,
+        "The old record explains what was reasonable then. Superseded means a newer accepted decision replaces it."
+      ],
+      [
+        "Which belongs in this decision record?",
+        [
+          "Every source-code line",
+          "A guarantee the system never fails",
+          "Freshness assumption, alternatives, decision and consequences"
+        ],
+        2,
+        "The record preserves decision reasoning at architectural scope. Code listings and blanket guarantees do not supply that reasoning."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "adr7 = \"accepted\"\nrequired_hours = 24\nadr8 = \"absent\"",
+          "note": "The original assumption supports the recorded choice."
+        },
+        {
+          "code": "required_hours = 0.25\nreview_needed = required_hours < 24\nadr8 = \"proposed\"",
+          "note": "The changed requirement triggers review, not acceptance."
+        },
+        {
+          "code": "review_approved = True\nadr8 = \"accepted\" if review_approved else \"proposed\"\nadr7 = \"superseded\" if review_approved else \"accepted\"\nhistory = [\"ADR-7\", \"ADR-8\"]",
+          "note": "Only an explicit reviewed acceptance replaces the decision. Both records remain."
+        }
+      ],
+      "expect": {
+        "adr7": "superseded",
+        "history": [
+          "ADR-7",
+          "ADR-8"
+        ]
+      },
+      "limit": "Python decision trace with synthetic review approval, not an architecture recommendation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "adr7": "accepted",
+            "required_hours": 24,
+            "adr8": "absent"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "adr7": "accepted",
+            "required_hours": 0.25,
+            "adr8": "proposed",
+            "review_needed": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "adr7": "superseded",
+            "required_hours": 0.25,
+            "adr8": "accepted",
+            "review_needed": true,
+            "review_approved": true,
+            "history": [
+              "ADR-7",
+              "ADR-8"
+            ]
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS: ADR process",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/architectural-decision-records/adr-process.html",
+        "Living guidance; publication date not stated"
+      ],
+      [
+        "AWS: ADR best practices",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/architectural-decision-records/best-practices.html",
+        "Living guidance; publication date not stated"
+      ]
+    ],
+    "visual_explanation": "The diagram separates evidence of a changed assumption from acceptance of a replacement. The old record remains visible after its status changes.",
+    "written_questions": [
+      "Write one assumption and a measurable review trigger for a platform decision.",
+      "What evidence would you require before accepting ADR-8?"
+    ],
+    "source_checked_on": "2026-10-08"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Reset the world between trials: isolate agent evaluations",
+    "goal": "Prevent a previous trial from making the next agent look better than it is.",
+    "tag": "Harness engineering · controlled experiment",
+    "concept": "<p>A cooking test is unfair if one candidate finds the previous candidate’s finished meal in the oven. Agent evaluations have the same problem: files, database rows or cached results can survive from an earlier run. Starting a new chat does not necessarily clear the tools’ environment.</p><p>An evaluation harness should give each trial a known starting state. Here the task is “create report.csv from orders.csv.” The grader checks whether the correct report exists. Trial A creates it. Trial B is a no-op agent: it does nothing. Reusing A’s directory lets B pass without doing the task.</p>",
+    "example": "<p>Our fixture contains only orders.csv with values 20 and 30. A writes report.csv with 50. B writes nothing. A clean copy before B means the report is absent and B fails. A reused directory means the correct report remains and the naive outcome grader passes B.</p><p>The failure is in the experiment, not in the arithmetic. Reset both visible files and hidden tool state that can affect outcomes. A separate output directory per trial is a start; also consider database namespaces, caches, environment variables and external side effects.</p>",
+    "use_case": {
+      "when": "Use this whenever agent trials can read or modify a filesystem, database or service fixture.",
+      "example": "Compare two report-writing harness versions on identical synthetic order files, with separate workspace IDs and a reset manifest.",
+      "decision": "Use fresh fixtures and verify the starting state. If a shared external service cannot be reset, namespace resources and record that remaining limitation."
+    },
+    "practice": "Predict the no-op agent’s result after A. Switch from a reused workspace to a fresh copy and inspect which file survives.",
+    "boundary": "The browser executes a two-dictionary JavaScript fixture model. The Python replay is also synthetic. No LLM runs, no actual sandbox is provisioned, and the example does not measure real agent capability.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:18px}#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}.mechanism table{width:100%;border-collapse:collapse;font-size:.95rem}.mechanism th,.mechanism td{border:1px solid #b6c7bd;padding:8px;text-align:left;overflow-wrap:anywhere}select{font:inherit;max-width:100%;padding:8px}.grantbox{border:3px solid #447d70;padding:14px;margin:8px 0;border-radius:12px}.blocked{border-color:#ae533f;background:#fff0e6}.open{background:#e4f3cf}.barrow{margin:14px 0}.bartrack{display:flex;height:32px;width:100%;background:#eee}.barpart{height:100%;border:1px solid white}.product-lesson pre span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.product-lesson .active{background:#d6f4b5;border-left:4px solid #1d715f}.slotrow{display:flex;flex-wrap:wrap;gap:8px}.slot{border:2px solid #426d61;border-radius:10px;padding:15px;min-width:80px;text-align:center}.slot.busy{background:#ffd6b6}.slot.free{background:#d6f4b5}.stepcaption{font-weight:650}</style><label for=\"workspaceMode\">Trial B starts from</label><select id=\"workspaceMode\"><option value=\"reused\">A’s used workspace</option><option value=\"fresh\">Fresh fixture</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function evalPaint(){const dirty=workspaceMode.value==='reused';world.innerHTML=`<table><caption>Same task, different starting state</caption><thead><tr><th>Trial</th><th>Files before</th><th>Action</th><th>Outcome grader</th></tr></thead><tbody><tr><td>A</td><td>orders.csv</td><td>Write report.csv = 50</td><td>PASS</td></tr><tr><td>B</td><td>orders.csv${dirty?'<br><strong>report.csv = 50 (from A)</strong>':''}</td><td>No-op</td><td>${dirty?'PASS — inherited result':'FAIL — report absent'}</td></tr></tbody></table><p>Reported passes: ${dirty?'2/2':'1/2'}. No-op B created a report: false.</p><p>${dirty?'The inherited file crosses the trial boundary.':'A fresh fixture removes the inherited answer.'}</p>`;}workspaceMode.onchange=evalPaint;evalPaint();",
+    "questions": [
+      [
+        "B does nothing but inherits A’s correct report. What does the naive grader say?",
+        [
+          "Pass",
+          "Fail because it knows who wrote it",
+          "No trial ran"
+        ],
+        0,
+        "An existence/content-only grader sees the old correct file and passes. It has no provenance information."
+      ],
+      [
+        "Which fixes this specific contamination?",
+        [
+          "Start a new chat only",
+          "Create a verified fresh tool workspace for B",
+          "Raise the score threshold"
+        ],
+        1,
+        "The contaminated state is in the tool workspace. A new conversation or threshold does not remove the file."
+      ],
+      [
+        "Fresh local directories alone prove what?",
+        [
+          "All remote side effects are isolated",
+          "The model is production-ready",
+          "Only that local directory reuse is addressed"
+        ],
+        2,
+        "Remote services, shared caches and databases may still leak state. Validate each stateful boundary."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "fixture = {\"orders.csv\": [20, 30]}\nworkspace_a = dict(fixture)",
+          "note": "A receives the baseline fixture; no report exists."
+        },
+        {
+          "code": "workspace_a[\"report.csv\"] = sum(workspace_a[\"orders.csv\"])\nreused_b = dict(workspace_a)\nreused_pass = reused_b.get(\"report.csv\") == 50",
+          "note": "A writes the answer. A no-op B passes if it inherits this state."
+        },
+        {
+          "code": "fresh_b = dict(fixture)\nfresh_pass = fresh_b.get(\"report.csv\") == 50",
+          "note": "A fresh B has no report and correctly fails this outcome check."
+        }
+      ],
+      "expect": {
+        "reused_pass": true,
+        "fresh_pass": false
+      },
+      "limit": "Executed Python dictionaries model file names and values; no model calls or actual filesystem sandbox. Nested fixture data is never mutated in this example.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "fixture": {
+              "orders.csv": [
+                20,
+                30
+              ]
+            },
+            "workspace_a": {
+              "orders.csv": [
+                20,
+                30
+              ]
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "fixture": {
+              "orders.csv": [
+                20,
+                30
+              ]
+            },
+            "workspace_a": {
+              "orders.csv": [
+                20,
+                30
+              ],
+              "report.csv": 50
+            },
+            "reused_b": {
+              "orders.csv": [
+                20,
+                30
+              ],
+              "report.csv": 50
+            },
+            "reused_pass": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "fixture": {
+              "orders.csv": [
+                20,
+                30
+              ]
+            },
+            "workspace_a": {
+              "orders.csv": [
+                20,
+                30
+              ],
+              "report.csv": 50
+            },
+            "reused_b": {
+              "orders.csv": [
+                20,
+                30
+              ],
+              "report.csv": 50
+            },
+            "reused_pass": true,
+            "fresh_b": {
+              "orders.csv": [
+                20,
+                30
+              ]
+            },
+            "fresh_pass": false
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "Anthropic: demystifying evals for AI agents",
+        "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+        "2026-01-09"
+      ]
+    ],
+    "visual_explanation": "The trial matrix keeps the task and no-op action fixed while changing only the initial files. The inherited report explains the false pass.",
+    "written_questions": [
+      "Name three stateful tool surfaces your harness must reset or namespace.",
+      "How would you detect a contaminated starting fixture before invoking the agent?"
+    ],
+    "source_checked_on": "2026-10-08"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Speculative decoding: keep the speed, correct the guesses",
+    "goal": "See why accepting every draft token changes a model’s output distribution.",
+    "tag": "Research deep dive · 2023 foundation",
+    "concept": "<p>A junior editor drafts quickly; a senior editor checks. Faster drafting helps only if the checking process preserves the senior editor’s standards. Speculative decoding uses a cheaper model to propose tokens and a target model to verify them.</p><p>This is a <strong>foundational research deep dive into the 2023 paper</strong>, not a newly announced October breakthrough. We isolate one probability correction rather than simulate a full language model. In the paper’s method, accepting or correcting draft tokens preserves the target distribution under its algorithmic assumptions.</p>",
+    "example": "<p>Use a tiny vocabulary: A or B. The target wants A 60% of the time and B 40%. The draft proposes A 80% and B 20%. Accept a proposed A with probability 0.6/0.8 = 0.75; always accept a proposed B. Accepted probability mass is A: 0.6, B: 0.2. The remaining 0.2 comes from rejected A proposals and is reassigned to B by the residual distribution.</p><p>Final output is A: 0.6, B: 0.4. Accepting every guess would produce 0.8/0.2 instead. These are exact probability masses for the toy, not observed benchmark frequencies. Drafting and verification overhead can erase the speed benefit.</p>",
+    "use_case": {
+      "when": "Use this when studying inference acceleration and asking which optimizations preserve output probabilities.",
+      "example": "A serving team evaluating a speculative decoder should measure end-to-end latency and acceptance rates on its own target/draft pair.",
+      "decision": "This lesson explains a correctness mechanism. Use an implemented, validated decoder for production; the two-token toy gives no latency or quality benchmark."
+    },
+    "practice": "Compare draft and target bars. Switch on the correction, then make the draft underpredict A. Explain where rejected probability mass goes.",
+    "boundary": "JavaScript calculates one-step categorical probability masses exactly. It has no transformer, KV cache, parallel verification, sampling implementation or timing. Distribution preservation is not identical token-by-token output for every random seed.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:18px}#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}.mechanism table{width:100%;border-collapse:collapse;font-size:.95rem}.mechanism th,.mechanism td{border:1px solid #b6c7bd;padding:8px;text-align:left;overflow-wrap:anywhere}select{font:inherit;max-width:100%;padding:8px}.grantbox{border:3px solid #447d70;padding:14px;margin:8px 0;border-radius:12px}.blocked{border-color:#ae533f;background:#fff0e6}.open{background:#e4f3cf}.barrow{margin:14px 0}.bartrack{display:flex;height:32px;width:100%;background:#eee}.barpart{height:100%;border:1px solid white}.product-lesson pre span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.product-lesson .active{background:#d6f4b5;border-left:4px solid #1d715f}.slotrow{display:flex;flex-wrap:wrap;gap:8px}.slot{border:2px solid #426d61;border-radius:10px;padding:15px;min-width:80px;text-align:center}.slot.busy{background:#ffd6b6}.slot.free{background:#d6f4b5}.stepcaption{font-weight:650}</style><label for=\"draftShape\">Draft probability of A</label><select id=\"draftShape\"><option value=\"0.8\">80% — overpredict A</option><option value=\"0.4\">40% — underpredict A</option></select><label for=\"correction\">Verifier policy</label><select id=\"correction\"><option value=\"correct\">Accept/reject + residual correction</option><option value=\"blind\">Accept every draft</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function specPaint(){const p=.6,q=Number(draftShape.value),a=Math.min(p,q),b=Math.min(1-p,1-q),rejected=1-a-b;const outA=correction.value==='correct'?p:q;const bar=(name,v)=>`<div class=\"barrow\"><strong>${name}: A ${(v*100).toFixed(0)}%, B ${((1-v)*100).toFixed(0)}%</strong><div class=\"bartrack\"><div class=\"barpart\" style=\"width:${v*100}%;background:#237a68\"></div><div class=\"barpart\" style=\"width:${(1-v)*100}%;background:#daaa57\"></div></div></div>`;world.innerHTML=bar('Target',p)+bar('Draft',q)+bar('Final output',outA)+`<p>Green = A; gold = B. All bars represent 100% probability.</p><p>Accepted mass before correction: A ${a.toFixed(2)}, B ${b.toFixed(2)}. Rejected mass: ${rejected.toFixed(2)}, reassigned to ${q>p?'B':'A'}.</p><p>Matches target: ${correction.value==='correct'}. Measured speedup: not measured.</p>`;}draftShape.onchange=specPaint;correction.onchange=specPaint;specPaint();",
+    "questions": [
+      [
+        "Draft A probability is 0.8; target A is 0.6. What is A’s acceptance probability?",
+        [
+          "0.6",
+          "0.75",
+          "1.0"
+        ],
+        1,
+        "0.6/0.8 = 0.75. Multiplying by proposal probability 0.8 gives accepted A mass 0.6."
+      ],
+      [
+        "Where does the rejected 0.2 probability mass go in this example?",
+        [
+          "To B, which the draft underrepresents",
+          "It disappears",
+          "Back to A unconditionally"
+        ],
+        0,
+        "The residual favors the target’s deficit: B. Discarding mass or restoring it to A would not yield 0.6/0.4."
+      ],
+      [
+        "The toy matches target probabilities. Does that establish speedup?",
+        [
+          "Yes, always 3×",
+          "Yes, on every GPU",
+          "No; measure draft and verification overhead"
+        ],
+        2,
+        "The model proves a small probability calculation. Actual latency depends on architecture, hardware, acceptance and workload."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "target = {\"A\": 0.6, \"B\": 0.4}\ndraft = {\"A\": 0.8, \"B\": 0.2}",
+          "note": "Define the desired and proposal distributions."
+        },
+        {
+          "code": "accepted = {k: min(target[k], draft[k]) for k in target}\nrejected = round(1 - sum(accepted.values()), 10)",
+          "note": "Accept the overlapping probability mass; 0.2 remains."
+        },
+        {
+          "code": "residual = {k: max(0, target[k] - draft[k]) for k in target}\nnormalizer = sum(residual.values())\noutput = {k: round(accepted[k] + rejected * residual[k] / normalizer, 10) for k in target}",
+          "note": "Normalize the positive deficit. Here all rejected mass becomes B."
+        }
+      ],
+      "expect": {
+        "output": {
+          "A": 0.6,
+          "B": 0.4
+        }
+      },
+      "limit": "Executed arithmetic for a two-token vocabulary and unequal distributions. A full implementation must handle zero residual when all mass is accepted.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "target": {
+              "A": 0.6,
+              "B": 0.4
+            },
+            "draft": {
+              "A": 0.8,
+              "B": 0.2
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "target": {
+              "A": 0.6,
+              "B": 0.4
+            },
+            "draft": {
+              "A": 0.8,
+              "B": 0.2
+            },
+            "accepted": {
+              "A": 0.6,
+              "B": 0.2
+            },
+            "rejected": 0.2
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "target": {
+              "A": 0.6,
+              "B": 0.4
+            },
+            "draft": {
+              "A": 0.8,
+              "B": 0.2
+            },
+            "accepted": {
+              "A": 0.6,
+              "B": 0.2
+            },
+            "rejected": 0.2,
+            "residual": {
+              "A": 0,
+              "B": 0.2
+            },
+            "normalizer": 0.2,
+            "output": {
+              "A": 0.6,
+              "B": 0.4
+            }
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Leviathan et al.: Fast Inference from Transformers via Speculative Decoding",
+        "https://proceedings.mlr.press/v202/leviathan23a.html",
+        "ICML 2023; 2023-07-23–29"
+      ],
+      [
+        "Google Research: looking back at speculative decoding",
+        "https://research.google/blog/looking-back-at-speculative-decoding/",
+        "2024-12-06 retrospective; original preprint 2022, ICML paper 2023"
+      ]
+    ],
+    "visual_explanation": "Three aligned probability bars use the same 0–100% scale. Correction makes final output match the target even when the draft favors the opposite token.",
+    "written_questions": [
+      "Explain why blind acceptance would change the target distribution.",
+      "What end-to-end measurements would you collect before enabling this in serving?"
+    ],
+    "source_checked_on": "2026-10-08"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "One failed matrix job: cancel siblings or collect evidence?",
+    "goal": "Separate fail-fast cancellation from an experimental job’s allowed failure.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A school tests a recipe in three ovens. If a required oven fails, the cook can stop the rest to save time, or finish every test to learn all the problems. A GitHub Actions matrix creates job variations. <code>strategy.fail-fast</code> controls cancellation of sibling matrix jobs when a non-tolerated job fails.</p><p><code>continue-on-error</code> answers another question: is this job’s failure allowed? An experimental variation can fail without triggering fail-fast cancellation of the required variations. Turning fail-fast off gathers more results; it does not make a required failure acceptable.</p>",
+    "example": "<p>Our three synthetic jobs are J17 (required), J21 (required), and Next (experimental). We make one job fail while the others are pending or running. The visual fixes that order so the policy difference is visible; GitHub does not promise this order.</p><pre><code># Job fragment: application setup and test steps omitted\ncontinue-on-error: ${{ matrix.experimental }}\nstrategy:\n  fail-fast: true\n  matrix:\n    include:\n      - { lane: J17, experimental: false }\n      - { lane: J21, experimental: false }\n      - { lane: Next, experimental: true }</code></pre>",
+    "use_case": {
+      "when": "Use this for runtime or operating-system compatibility matrices where some lanes are required and others are exploratory.",
+      "example": "A Java library must support J17/J21 but probes a future runtime in a separately labeled experimental lane.",
+      "decision": "Keep required lanes strict. Disable fail-fast temporarily when a full compatibility picture is worth extra runner time. Do not make all lanes experimental to obtain a green badge."
+    },
+    "practice": "First fail the experimental lane with fail-fast on. Then fail a required lane. Finally turn fail-fast off and compare sibling states, not just the failed job.",
+    "boundary": "The JavaScript model fixes completion order and assumes sibling jobs have not finished. Real cancellation races with completion. This is not a workflow run and does not model branch-protection rules or downstream deployment gates.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:18px}#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}.mechanism table{width:100%;border-collapse:collapse;font-size:.95rem}.mechanism th,.mechanism td{border:1px solid #b6c7bd;padding:8px;text-align:left;overflow-wrap:anywhere}select{font:inherit;max-width:100%;padding:8px}.grantbox{border:3px solid #447d70;padding:14px;margin:8px 0;border-radius:12px}.blocked{border-color:#ae533f;background:#fff0e6}.open{background:#e4f3cf}.barrow{margin:14px 0}.bartrack{display:flex;height:32px;width:100%;background:#eee}.barpart{height:100%;border:1px solid white}.product-lesson pre span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.product-lesson .active{background:#d6f4b5;border-left:4px solid #1d715f}.slotrow{display:flex;flex-wrap:wrap;gap:8px}.slot{border:2px solid #426d61;border-radius:10px;padding:15px;min-width:80px;text-align:center}.slot.busy{background:#ffd6b6}.slot.free{background:#d6f4b5}.stepcaption{font-weight:650}</style><label for=\"failedLane\">Which job fails?</label><select id=\"failedLane\"><option value=\"Next\">Next (experimental)</option><option value=\"J17\">J17 (required)</option></select><label for=\"failFast\">Cancel on a non-tolerated failure?</label><select id=\"failFast\"><option value=\"true\">fail-fast: true</option><option value=\"false\">fail-fast: false</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function matrixPaint(){const exp=failedLane.value==='Next',cancel=!exp&&failFast.value==='true';world.innerHTML=`<table><caption>Fixture: one failure before unfinished siblings complete</caption><thead><tr><th>Lane</th><th>Required?</th><th>Outcome</th></tr></thead><tbody>${['J17','J21','Next'].map(n=>`<tr><td>${n}</td><td>${n==='Next'?'no':'yes'}</td><td>${n===failedLane.value?'FAILED'+(exp?' (tolerated)':' (required)'):cancel?'CANCELED':'CONTINUES → fixture PASS'}</td></tr>`).join('')}</tbody></table><p>Sibling cancellation: ${cancel}. Required failure present: ${!exp}.</p><p>${exp?'Experimental failure does not trigger fail-fast.':cancel?'Stop unfinished siblings; required failure remains.':'Collect remaining evidence; required failure remains.'}</p>`;}failedLane.onchange=matrixPaint;failFast.onchange=matrixPaint;matrixPaint();",
+    "questions": [
+      [
+        "Next is experimental with continue-on-error true. It fails with fail-fast true. What happens to siblings?",
+        [
+          "They must be canceled",
+          "They are not canceled by this tolerated failure",
+          "They all become experimental"
+        ],
+        1,
+        "The tolerated failure does not trigger fail-fast cancellation. Each job keeps its own policy."
+      ],
+      [
+        "J17 fails with fail-fast false. Is the required failure erased?",
+        [
+          "No; other jobs can finish but the failure remains",
+          "Yes",
+          "Only if J21 passes"
+        ],
+        0,
+        "fail-fast governs cancellation, not whether a required failure is acceptable."
+      ],
+      [
+        "Why might you temporarily disable fail-fast?",
+        [
+          "To guarantee deployment",
+          "To serialize every job",
+          "To see all compatibility failures in one run"
+        ],
+        2,
+        "Completing the matrix can reveal multiple independent failures, at additional runner cost. It does not authorize deployment or serialize jobs."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "jobs = {\"J17\": \"running\", \"J21\": \"queued\", \"Next\": \"queued\"}\nfail_fast = True",
+          "note": "All three variations exist; none has completed."
+        },
+        {
+          "code": "jobs[\"J17\"] = \"failed\"\nexperimental = False\ncancel_siblings = fail_fast and not experimental",
+          "note": "This failure belongs to a required lane."
+        },
+        {
+          "code": "jobs = {name: (\"canceled\" if cancel_siblings and state in [\"running\", \"queued\"] else state) for name, state in jobs.items()}",
+          "note": "Cancel unfinished siblings, while retaining the original failure."
+        }
+      ],
+      "expect": {
+        "jobs": {
+          "J17": "failed",
+          "J21": "canceled",
+          "Next": "canceled"
+        }
+      },
+      "limit": "Executed Python policy fixture, not a GitHub workflow scheduler. Real timing can leave already completed siblings unaffected.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "jobs": {
+              "J17": "running",
+              "J21": "queued",
+              "Next": "queued"
+            },
+            "fail_fast": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "jobs": {
+              "J17": "failed",
+              "J21": "queued",
+              "Next": "queued"
+            },
+            "fail_fast": true,
+            "experimental": false,
+            "cancel_siblings": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "jobs": {
+              "J17": "failed",
+              "J21": "canceled",
+              "Next": "canceled"
+            },
+            "fail_fast": true,
+            "experimental": false,
+            "cancel_siblings": true
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions: running variations of jobs",
+        "https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations",
+        "Living documentation; publication date not stated"
+      ]
+    ],
+    "visual_explanation": "A matrix table keeps every lane visible. Changing the failing lane changes whether sibling cells become canceled; fail-fast does not alter the original failure.",
+    "written_questions": [
+      "Which lanes would be required in your compatibility matrix and why?",
+      "How would you prevent tolerated experimental failures from hiding a required deployment gate?"
+    ],
+    "source_checked_on": "2026-10-08"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "202 means accepted: give long-running work a status resource",
+    "goal": "Distinguish accepting a request from successfully finishing its work.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A dry cleaner gives you a receipt when you drop off a coat. The receipt means the coat was accepted, not that it is clean. An HTTP <code>202 Accepted</code> response has the same limit: processing is incomplete and may later fail.</p><p>For an export that takes minutes, our API returns a job ID and a status URL. The client checks that resource. The status resource can return HTTP 200 because reading the status succeeded while its body says the export failed. Transport status and job state answer different questions.</p>",
+    "example": "<pre><code>POST /exports\n→ 202 Accepted\nLocation: /jobs/J42\n{\"id\":\"J42\",\"state\":\"queued\",\"statusUrl\":\"/jobs/J42\"}\n\nGET /jobs/J42\n→ 200 OK\n{\"id\":\"J42\",\"state\":\"failed\",\"error\":\"source_unavailable\"}</code></pre><p>The Location header and JSON shape are our API convention, not a universal 202 schema. A 202 response should help the client find a monitor, but HTTP cannot later turn that original response into a success or failure. The client needs another observation.</p>",
+    "use_case": {
+      "when": "Use this when work takes longer than a comfortable synchronous request and the user can wait for a result.",
+      "example": "A data platform starts a large CSV export, returns J42, and later exposes a completed download or a durable failure reason.",
+      "decision": "Prefer a normal synchronous response for fast bounded work. For asynchronous work define status retention, access checks, retry behavior and polling limits as part of the contract."
+    },
+    "practice": "Watch J42 move from queued to running. Choose success or failure before advancing again. Compare the GET HTTP status with the job state.",
+    "boundary": "The browser runs a local state machine with no server, durable queue or worker. It omits authentication, polling backoff, cancellation and idempotency. Retrying POST may create another job unless the API separately defines deduplication.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:18px}#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}.mechanism table{width:100%;border-collapse:collapse;font-size:.95rem}.mechanism th,.mechanism td{border:1px solid #b6c7bd;padding:8px;text-align:left;overflow-wrap:anywhere}select{font:inherit;max-width:100%;padding:8px}.grantbox{border:3px solid #447d70;padding:14px;margin:8px 0;border-radius:12px}.blocked{border-color:#ae533f;background:#fff0e6}.open{background:#e4f3cf}.barrow{margin:14px 0}.bartrack{display:flex;height:32px;width:100%;background:#eee}.barpart{height:100%;border:1px solid white}.product-lesson pre span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.product-lesson .active{background:#d6f4b5;border-left:4px solid #1d715f}.slotrow{display:flex;flex-wrap:wrap;gap:8px}.slot{border:2px solid #426d61;border-radius:10px;padding:15px;min-width:80px;text-align:center}.slot.busy{background:#ffd6b6}.slot.free{background:#d6f4b5}.stepcaption{font-weight:650}</style><label for=\"jobOutcome\">Worker outcome</label><select id=\"jobOutcome\"><option value=\"failed\">Source unavailable</option><option value=\"succeeded\">Export completed</option></select><button id=\"jobNext\">Advance worker</button><button id=\"jobReset\">Create fresh demonstration</button><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "let jobStep=0;function jobPaint(){const state=jobStep===0?'queued':jobStep===1?'running':jobOutcome.value;const box=(x,y,t,on)=>`<rect x=\"${x}\" y=\"${y}\" width=\"140\" height=\"46\" rx=\"9\" fill=\"${on?'#d6f4b5':'#e1e8e5'}\" stroke=\"#386957\"/><text x=\"${x+70}\" y=\"${y+29}\" text-anchor=\"middle\">${t}</text>`;world.innerHTML=`<svg viewBox=\"0 0 340 240\" role=\"img\" aria-label=\"Export lifecycle; current state ${state}\"><path d=\"M170 55 V85 M170 135 L85 175 M170 135 L255 175\" fill=\"none\" stroke=\"#386957\" stroke-width=\"3\"/>${box(100,10,'queued',state==='queued')}${box(100,87,'running',state==='running')}${box(10,178,'succeeded',state==='succeeded')}${box(190,178,'failed',state==='failed')}</svg><p>Original POST: 202 Accepted (unchanged).</p><p>GET /jobs/J42: HTTP 200; job state: ${state}.</p><p>${state==='failed'?'No download: source_unavailable':state==='succeeded'?'Download ready: /exports/J42.csv':'No download yet'}</p>`;jobNext.disabled=jobStep===2;}jobNext.onclick=()=>{jobStep=Math.min(2,jobStep+1);jobPaint();};jobOutcome.onchange=()=>{jobStep=0;jobPaint();};jobReset.onclick=()=>{jobStep=0;jobPaint();};jobPaint();",
+    "questions": [
+      [
+        "POST returns 202. What may the client conclude?",
+        [
+          "The CSV exists",
+          "The request was accepted; processing is incomplete",
+          "The job cannot fail"
+        ],
+        1,
+        "202 is not a completion guarantee. The client needs a status observation to know the eventual outcome."
+      ],
+      [
+        "GET /jobs/J42 returns 200 with state failed. Is that contradictory?",
+        [
+          "No; fetching status succeeded while the job failed",
+          "Yes, 200 always means the export succeeded",
+          "Yes, failures must erase the job"
+        ],
+        0,
+        "The GET operation and the background export are distinct. A readable failure status is useful API data."
+      ],
+      [
+        "A POST response is lost and the client retries. Does 202 itself deduplicate requests?",
+        [
+          "Always",
+          "Only with a Location header",
+          "No; deduplication requires a separate API contract"
+        ],
+        2,
+        "202 defines response semantics, not idempotency. The API needs a separate identity and replay policy to avoid duplicate jobs."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "job = {\"id\": \"J42\", \"state\": \"queued\"}\npost_status = 202",
+          "note": "Acceptance creates a job receipt; the result is not ready."
+        },
+        {
+          "code": "job[\"state\"] = \"running\"\nget_status = 200",
+          "note": "Reading the monitor succeeds while work remains incomplete."
+        },
+        {
+          "code": "job[\"state\"] = \"failed\"\njob[\"error\"] = \"source_unavailable\"\nget_status = 200",
+          "note": "The monitor remains readable and explains the failure. The original POST status stays 202."
+        }
+      ],
+      "expect": {
+        "post_status": 202,
+        "get_status": 200,
+        "job": {
+          "id": "J42",
+          "state": "failed",
+          "error": "source_unavailable"
+        }
+      },
+      "limit": "Executed Python state dictionary, not an HTTP server. Header and body design are an original illustrative convention.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "job": {
+              "id": "J42",
+              "state": "queued"
+            },
+            "post_status": 202
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "job": {
+              "id": "J42",
+              "state": "running"
+            },
+            "post_status": 202,
+            "get_status": 200
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "job": {
+              "id": "J42",
+              "state": "failed",
+              "error": "source_unavailable"
+            },
+            "post_status": 202,
+            "get_status": 200
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "RFC 9110: HTTP Semantics, section 15.3.3",
+        "https://www.rfc-editor.org/rfc/rfc9110.html#section-15.3.3",
+        "2022-06"
+      ]
+    ],
+    "visual_explanation": "The lifecycle branches into success and failure while the original acceptance response remains fixed. Status retrieval and job outcome are displayed separately.",
+    "written_questions": [
+      "Design a status response that lets the client distinguish retryable failure from completion.",
+      "How would you prevent another user from reading J42’s status or download?"
+    ],
+    "source_checked_on": "2026-10-08"
+  }
+]

@@ -87,7 +87,7 @@ def render(folder):
    body=body.replace('<div class="timing"><span>2 min · Recall</span><span>4 min · Understand</span><span>5 min · Explore</span><span>4 min · Quiz</span></div>','<div class="timing"><span>6 min · Concept + recall</span><span>9 min · Databricks</span><span>9 min · Snowflake</span><span>6 min · Compare + quiz</span></div><p>30 minutes total. Existing concept code replay and lab below are optional deeper exploration.</p>')
    a=body.index(walk_html) if walk_html else body.index('<section class="lab">')
    b=body.index('<section><h2>Check understanding')
-   body=body[:a]+'<details id="coreExtension"><summary>Optional: original concept code replay and checkpoint lab</summary>'+body[a:b]+'</details>'+products.block(L,product_review)+body[b:]
+   body=body[:a]+'<details id="coreExtension"><summary>Optional: original concept code replay and interactive lab</summary>'+body[a:b]+'</details>'+products.block(L,product_review)+body[b:]
    body=body.replace('keep this to 15 minutes','complete the 30-minute lesson')
   js='''const $=id=>document.getElementById(id);'''+''.join(f'const {id}=$({json.dumps(id)});' for id in re.findall(r'id="([\w]+)"',L['sim']))+L['js']
   js+='\nconst quizData='+json.dumps(qs)+';const lessonKey='+json.dumps(folder+'/'+slug)+';'+'''

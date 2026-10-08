@@ -51,6 +51,35 @@
       ],
       "depth": "supporting recovery mechanism, not complete domain coverage",
       "product_lab_execution": "not_run"
+    },
+    {
+      "lesson": "Day18/data-engineering",
+      "product_material_added_on": "2026-10-08",
+      "session_type": "focused",
+      "cycle_position": 2,
+      "cycle_origin": "Day17",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "governance_security"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Full objective IDs and weights unverified; planning group only",
+      "snowflake_planning_groups": [
+        "account_warehouse_access"
+      ],
+      "source_checked_on": "2026-10-08",
+      "source_versions": {
+        "databricks_privilege_model": "1.0; docs updated 2026-10-08",
+        "snowflake_access_control": "Living documentation checked 2026-10-08"
+      },
+      "depth": "Focused table-read authorization path and narrow grant repair; not complete governance or access-control domain coverage",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -72,5 +101,19 @@
   "first_exam_window": [
     "2026-11-30",
     "2026-12-13"
-  ]
+  ],
+  "bundle_cycle_policy": {
+    "origin_day": 17,
+    "positions": {
+      "1": "focused",
+      "2": "focused",
+      "3": "focused",
+      "4": "focused",
+      "5": "focused",
+      "6": "consolidation_case",
+      "7": "retrieval_gap"
+    },
+    "next_consolidation_day": 22,
+    "next_retrieval_day": 23
+  }
 }

@@ -21,7 +21,7 @@
     30
   ],
   "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
-  "last_generated_day": 17,
+  "last_generated_day": 18,
   "days": [
     {
       "number": 1,
@@ -383,6 +383,30 @@
         "apis-microservices"
       ],
       "validation": "Executed traces, seven mechanisms, quizzes, save/export, local links and track-aware reviews checked. Native browser verification runs in repository Browser smoke; see Day17/VALIDATION.md for boundaries."
+    },
+    {
+      "number": 18,
+      "folder": "Day18",
+      "date": "2026-10-08",
+      "generation_key": "2026-10-08",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day11+7",
+        "Day15+3",
+        "Day3+14",
+        "Day9+7"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs",
+        "ci-cd-github-actions",
+        "apis-microservices"
+      ],
+      "validation": "Recorded examples and local functional checks; native browser verification runs in repository Browser smoke. Product SQL not executed. See Day18/VALIDATION.md."
     }
   ],
   "submitted_assessments": [],
