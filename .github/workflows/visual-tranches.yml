@@ -56,7 +56,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
         timeout-minutes: 4
       - name: Check every revised lesson in the tranche
-        run: npx playwright test historical-visuals.spec.cjs
+        run: npx playwright test historical-visuals.spec.cjs --max-failures=0
         timeout-minutes: 6
       - name: Preserve synthetic visual evidence
         if: ${{ !cancelled() }}
