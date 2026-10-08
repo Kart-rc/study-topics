@@ -14,11 +14,17 @@ An agent says “quarantine completed.” That sentence does not prove the right
 
 A grader checks the result against the task’s rules. Exact state needs exact checks. Explanation quality can be assessed separately, but a convincing explanation should not compensate for an unauthorized change.
 
+Watch the visual: Which evidence invalidates a confident success message?
+
 
 
 All four fixtures below claim success. Only the second has approval, exactly one marker, and only demo-orders modified. The real result is one pass, not four.
 
 
+
+## Read the visual
+
+Four fixtures form rows of an evidence matrix. All claim success, but only one has the correct target, exactly one marker, and approval together. Switching from claim-only to contract grading changes the decision column while leaving the underlying evidence unchanged.
 
 
 ## Step through the code (within the 5-minute exploration)

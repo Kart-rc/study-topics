@@ -14,11 +14,17 @@ A token intended for a storage API arrives at a catalog tool server. Even if the
 
 The audience says which service a token is intended for. Each server must check that boundary and the requested permission. When the catalog calls storage, it should use an appropriately scoped upstream credential rather than blindly forwarding the client token.
 
+Watch the visual: Which token belongs at each service boundary?
+
 
 
 The first token names storage.api and is rejected by catalog.example. The corrected token names catalog.example. The catalog’s separate upstream credential names storage.api and allows read access only.
 
 
+
+## Read the visual
+
+The client token is checked against the catalog audience at the first boundary. With strict validation, a storage-audience token stops there; an accepted catalog token leads to a separate scoped storage credential. Without validation, the same token crosses both boundaries, exposing the passthrough risk.
 
 
 ## Step through the code (within the 5-minute exploration)

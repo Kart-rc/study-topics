@@ -14,11 +14,17 @@ Most tasks in a join finish quickly, but one task reads a much larger partition.
 
 Skew means work is unevenly distributed. Spark’s adaptive query execution, or AQE, can use runtime sizes to split eligible oversized join partitions. A partition must be large compared with both its peers and an absolute threshold. Splitting reduces the largest unit of work; it does not remove all overhead.
 
+Watch the visual: Which large task sets the job’s finishing time?
+
 
 
 For sizes 40, 42, 43, 44, 45, and 900 MB, the median is 43.5 MB. Five times that is 217.5 MB. The 900 MB partition also exceeds 256 MB. Dividing it toward a 64 MB target gives 15 pieces of about 60 MB.
 
 
+
+## Read the visual
+
+Before and after bars use one fixed 0–1200 MB ruler. The oversized partition splits only when it exceeds both boundaries. Its pieces then appear as equal small task bars. This shows smaller maximum input, not a promised wall-clock speedup or an exact Spark partition layout.
 
 
 ## Step through the code (within the 5-minute exploration)

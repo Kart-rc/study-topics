@@ -20,6 +20,10 @@ With node positions 20, 50, and 80, keys 25 and 45 belong to B. Add D at 40: key
 
 
 
+## Read the visual
+
+The ring puts each node at its fixed hash slot; the sample table follows identical hashes before and after expansion. D at slot 10 takes only the interval (0,10] from B. E at 31 takes (21,31] from C. Modulo routing changes the divisor instead, so keys can move between existing nodes.
+
 
 ## Step through the code (within the 5-minute exploration)
 

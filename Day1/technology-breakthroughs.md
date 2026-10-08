@@ -14,11 +14,17 @@ A training example asks an assistant to repair a pipeline, but its tools can onl
 
 ToolGrad explores building tool-use examples from an executable path first. Start with what the tools can actually do, connect their inputs and outputs, then write a matching request. A valid path is useful training material, but it may overrepresent easy tasks.
 
+Watch the visual: Why can’t the explanation tool run first?
+
 
 
 Our incident assistant can list datasets, fetch freshness for one returned ID, and explain the result. It cannot repair a job. Watch the dataset ID move through this small chain before deciding which user request the chain supports.
 
 
+
+## Read the visual
+
+Each tool produces the input needed by the next. listDatasets produces demo-orders; fetchFreshness consumes that ID and produces an 18-minute measurement; explainDelay consumes the measurement. Missing inputs stop the path before the next tool. This is a hand-written dependency model, not execution of ToolGrad.
 
 ## Use case: when to use this
 

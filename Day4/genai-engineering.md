@@ -20,6 +20,10 @@ Two checkpoints are recorded outside the sandbox. The sandbox is then replaced. 
 
 
 
+## Read the visual
+
+The dashed area contains replaceable brain and sandbox runtimes. Only decoupled mode writes checkpoint events to the separate solid session box. After a failure, Resume reads that box; a coupled runtime loses its local progress. External side effects still need reconciliation.
+
 
 ## Step through the code (within the 5-minute exploration)
 

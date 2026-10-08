@@ -20,6 +20,10 @@ Tag 3 carries classification. The toy binary relay keeps it; the known-fields-on
 
 
 
+## Read the visual
+
+Each table row follows one field number through the relay. Tag 3 is either carried unchanged or dropped by a known-fields-only rebuild. Reusing tag 2 changes the meaning at the old relay even when the value survives.
+
 
 ## Step through the code (within the 5-minute exploration)
 

@@ -20,6 +20,10 @@ The toy table has one 24-hour file on Day 6 and hourly files on Day 10. A two-ho
 
 
 
+## Read the visual
+
+The 24 hour cells mark the requested event-time range. A daily file encloses all 24 hours, so any overlap selects that whole file. Hourly files allow only matching hour files to be selected. Days before 8 keep their daily file even when evolution is enabled.
+
 
 ## Step through the code (within the 5-minute exploration)
 

@@ -14,11 +14,17 @@ A failed request can trigger a second request. If every service in a call chain 
 
 Count total attempts, including the first call. Three layers allowing three attempts each can produce 3 × 3 × 3 = 27 attempts at the deepest service. Waiting between attempts helps timing; it does not reduce this worst-case count. Choose a retry owner and a total budget.
 
+Watch the visual: Where do the extra requests multiply?
+
 
 
 For 100 user requests, the nested policy can produce 2,700 catalog calls. If only one layer retries three times and the others try once, the same worst-case calculation gives 300. Both are upper bounds, not predictions of everyday traffic.
 
 
+
+## Read the visual
+
+One original request enters the call chain. Each retrying layer multiplies the number of attempts reaching the next layer. With three layers and three attempts each, the counts are 1, 3, 9, 27. With one retry owner, the count reaches 3 once and stays 3.
 
 ## Use case: when to use this
 

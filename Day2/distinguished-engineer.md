@@ -14,11 +14,17 @@ A new library fails on nested arrays but works on simple records. Sending it onl
 
 A canary is a small release used to gather evidence before wider rollout. Compare its results with a control serving a similar mix of requests. The whole-service average can hide a severe failure in a small canary.
 
+Watch the visual: How can the total look healthy while the canary fails?
+
 
 
 At 1% exposure, a canary failing 4% of its requests is mixed with a control failing 0.1%. The overall rate is only 0.139%, below a 0.2% warning threshold. Comparing the two groups reveals the problem sooner.
 
 
+
+## Read the visual
+
+Control and canary failure rates use the same 0–4% scale. A separate traffic-share strip shows how little the canary contributes to the global average. At 1% exposure, a 4% canary failure rate mixes into only 0.139% overall. Easy-only traffic removes the failing path from the test; it does not fix it.
 
 
 ## Step through the code (within the 5-minute exploration)

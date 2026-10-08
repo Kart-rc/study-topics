@@ -20,6 +20,10 @@ The important rule is “preserve old partition readers.” The toy handoff reta
 
 
 
+## Read the visual
+
+Each row shows greedy packing in order: segment size, keep or skip, and remaining token budget. At 8,000 tokens, the newest-output policy spends the entire budget on raw tool output; the structured policy retains goal, decisions, open tasks, and evidence pointers in 5,500 tokens. The four readiness labels show what the next agent would be missing.
+
 
 ## Step through the code (within the 5-minute exploration)
 

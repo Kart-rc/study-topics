@@ -20,6 +20,10 @@ Policy reads need about 4 × 0.2 = 0.8 concurrent slots. Enrichment at six reque
 
 
 
+## Read the visual
+
+Arrival rate times service time gives required concurrent slots. A shared ten-slot bar fills with policy and enrichment demand; when overloaded the toy proportionally reduces both. A physical divider into four policy and six enrichment slots keeps policy demand at 0.8 slots while limiting enrichment. Labels show fractional average occupancy, not individual requests.
+
 
 ## Step through the code (within the 5-minute exploration)
 

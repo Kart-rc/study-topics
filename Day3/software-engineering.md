@@ -14,11 +14,17 @@ Worker A pauses for a long time. Its lease expires, so worker B takes over. When
 
 A fencing token is a number that increases when a new owner is granted access. The storage boundary remembers the newest accepted token and rejects older ones. The resource performing the write must enforce the rule; an expired worker may not know it lost ownership.
 
+Watch the visual: Where is a stale worker’s write actually stopped?
+
 
 
 A has token 1. B has token 2 and saves a corrected snapshot. A’s late token-1 write is rejected, leaving B’s value intact.
 
 
+
+## Read the visual
+
+A lease ledger and the storage boundary remember different facts. A may retain token 1 after its lease expires. Once B writes with token 2, storage remembers 2. A’s delayed token-1 write is rejected at storage when fencing is enabled; disabling fencing lets stale data replace B’s value.
 
 
 ## Step through the code (within the 5-minute exploration)

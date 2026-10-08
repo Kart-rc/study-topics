@@ -14,11 +14,17 @@ A volume forecast based only on yesterday’s traffic misses tomorrow’s planne
 
 A covariate is an extra input that may help explain the value being forecast. TimesFM-3 research describes using related series and such inputs. A future-known input must really have been available when the forecast was made; using later measurements would leak the answer.
 
+Watch the visual: What changes when tomorrow’s backfill is already known today?
+
 
 
 Our synthetic baseline predicts 100 units on each of seven days. Two known backfill days add 40 each, taking the total from 700 to 780. This is a teaching rule, not a TimesFM implementation.
 
 
+
+## Read the visual
+
+Seven forecast columns align with seven known future backfill flags. Every column starts at the same historical mean; only flagged days gain the selected effect. Outlined baseline and filled forecast share a fixed 0–200 scale. This is an arithmetic illustration, not TimesFM-3 inference or calibrated uncertainty.
 
 
 ## Step through the code (within the 5-minute exploration)

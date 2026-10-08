@@ -20,6 +20,10 @@ The first attempt prepares an edge but aborts. The second prepares it again and 
 
 
 
+## Read the visual
+
+Attempt 1 crashes with bookmark still at input 10. In transactional mode E1 is aborted, and attempt 2 commits E2 plus bookmark 11. Only a committed-data reader hides E1. The diagram separates physical log attempts from reader-visible results.
+
 
 ## Step through the code (within the 5-minute exploration)
 

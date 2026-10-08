@@ -14,11 +14,17 @@ A payment arrives late. Should the running count still change? The stream needs 
 
 A watermark is a progress marker based on event timestamps, with an allowed delay subtracted. It helps decide when old state can be removed. It is not simply the current laptop time. A larger delay keeps more old state so more late events can still be included.
 
+Watch the visual: Which event-time windows can still change?
+
 
 
 Before the third batch, the largest observed timestamp is minute 12. With a five-minute delay, the toy watermark is 7. The window ending at minute 5 is retired. Event 3 can no longer update it, while the window for event 8 is still retained.
 
 
+
+## Read the visual
+
+Five adjacent boxes represent five-minute event-time windows. The watermark is positioned on the same event-time ruler. A window retires only when its end is strictly below the watermark in this toy model. Incoming events point to their timestamp’s window, even if they arrive in a later batch.
 
 
 ## Step through the code (within the 5-minute exploration)

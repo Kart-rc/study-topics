@@ -20,6 +20,10 @@ Our defensive example permits a report in /workspace/reports. A proposed write t
 
 
 
+## Read the visual
+
+The vertical path marks every gate PASS, STOP, or NOT REACHED. Only the first failed gate is responsible for stopping this request; later gates are never reached. The durable policy box changes only if all five gates pass. This is a defensive Boolean model, not a model run or an attack-success estimate.
+
 
 ## Step through the code (within the 5-minute exploration)
 

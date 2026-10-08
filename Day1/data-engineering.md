@@ -14,11 +14,17 @@ Two people edit the same table. Blue adds file C. Amber adds file D. If Amber sa
 
 An Iceberg snapshot is the list of files a reader should use. Publishing a new list must check that the starting version is still current. If it changed, refresh the list and check whether your change still makes sense. This is optimistic concurrency: prepare work first, then reject a stale save.
 
+Watch the visual: Why must Amber refresh before publishing?
+
 
 
 Start with A and B at version 0. Blue publishes A, B, C at version 1. Amber’s version-0 save fails. Amber reads version 1 and adds D to that list, producing A, B, C, D. This retry is safe for the independent append in our example; it is not a rule to retry every rewrite.
 
 
+
+## Read the visual
+
+Blue and Amber both start from version 0 with files A and B. Blue publishes A, B, C as version 1. Amber’s version-0 pointer cannot replace it. Refresh moves Amber’s base to version 1; the append then publishes A, B, C, D. The pinned reader remains on A, B.
 
 ## Use case: when to use this
 

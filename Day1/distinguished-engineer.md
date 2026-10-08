@@ -14,11 +14,17 @@ A dashboard says “99.5% reliable.” What should the team do with that number?
 
 A service-level objective, or SLO, is a target over a stated time window. The error budget is how many failures that target permits. It helps leaders agree when reliability work should take priority. Counting successful retries as extra deliveries would hide the original misses.
 
+Watch the visual: How much of the allowed failure budget is already spent?
+
 
 
 Of 10,000 scheduled deliveries, 99.5% must arrive on time and pass checks. That allows 50 bad deliveries. Thirty have failed, so 20 remain. Use the rate of new failures and their cause to decide the next action; this arithmetic alone does not mandate a release freeze.
 
 
+
+## Read the visual
+
+A fixed ruler shows 0 to 150 bad deliveries out of 10,000. The vertical budget mark moves with the SLO, while the filled bar ends at the actual bad-delivery count. Passing the mark means the agreed budget is exceeded, not that every delivery failed.
 
 ## Use case: when to use this
 

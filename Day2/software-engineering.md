@@ -14,11 +14,17 @@ A worker can finish 100 events each second, but producers send 120. A queue give
 
 Backlog grows by arrivals minus completed work. A bounded queue eventually rejects work if arrivals remain higher than service capacity. Backpressure means the producer actually slows down in response; rejection alone does not prove that happened.
 
+Watch the visual: Where does work go when arrival rate exceeds service?
+
 
 
 A 300-item queue fills in 15 seconds at a 20-item-per-second deficit. After arrivals drop to 80, only 20 slots per second are spare, so draining 300 items also takes 15 seconds.
 
 
+
+## Read the visual
+
+A bounded reservoir shows queued items on a fixed 300-item scale. For each elapsed second, completed work exits, excess waiting work fills the reservoir, and overflow becomes rejected work. With cooperation, excess offered work stays upstream instead. The conservation equation accounts for all offered items.
 
 
 ## Step through the code (within the 5-minute exploration)

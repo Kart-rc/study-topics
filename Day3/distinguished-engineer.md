@@ -14,11 +14,17 @@ A metadata platform serves 1,000 tenants. One bad deployment should not have to 
 
 A cell is a separately operated group of resources serving a subset of tenants. It limits the damage from failures inside that group. A shared dependency can still cross every boundary, so count dependencies as well as boxes.
 
+Watch the visual: Which failure can cross a cell boundary?
+
 
 
 Five equally sized cells place 200 tenants in each failure group. Ten cells reduce that to 100. But if all ten need one failed catalog, all 1,000 tenants can still be affected.
 
 
+
+## Read the visual
+
+Each outlined cell contains its own tenant allocation. A single-cell failure marks only the first cell. A shared-dependency failure marks every cell, showing why more boxes do not protect a common critical dependency. Tenant counts sum to 1,000 even when the division is uneven.
 
 
 ## Step through the code (within the 5-minute exploration)

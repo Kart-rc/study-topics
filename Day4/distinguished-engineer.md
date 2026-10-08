@@ -20,6 +20,10 @@ With three zones each able to carry 50% of demand, losing one leaves 100%. If ea
 
 
 
+## Read the visual
+
+The failed zone is crossed out. Remaining zones contribute to one capacity bar on a fixed scale with a 100% demand marker. If the bar falls short, the gap points to a provisioning gate; blocking that gate matters only when existing capacity is insufficient.
+
 
 ## Step through the code (within the 5-minute exploration)
 

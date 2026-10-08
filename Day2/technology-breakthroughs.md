@@ -14,11 +14,17 @@ An assistant retrieves three documents, but two repeat the same freshness eviden
 
 Retrieve-for-Train studies learning retrieval sets that work well together. Our small example uses a simpler rule: reward relevant items, then add a bonus for a kind of evidence not selected yet. This makes the difference between ranking one item and choosing a useful set visible.
 
+Watch the visual: Why can a slightly lower-ranked document complete a better set?
+
 
 
 After choosing freshness A, freshness B has relevance 0.89 and lineage has 0.75. A new-facet bonus of 0.20 raises lineage to 0.95. The second choice changes because freshness is already represented.
 
 
+
+## Read the visual
+
+Three selection rounds show each remaining document’s relevance plus any new-facet bonus. After freshness-A is selected, freshness-B loses the novelty bonus because that facet is already covered. With a 0.20 bonus, volume and lineage win the remaining slots. These are synthetic greedy scores, not trained Retrieve-for-Train outputs.
 
 
 ## Step through the code (within the 5-minute exploration)

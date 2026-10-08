@@ -14,11 +14,17 @@ An agent writes five pages, then loses its conversation context. A note saying â
 
 The harness is the code around the model that runs tools and records progress. Store a small handoff outside temporary conversation memory: what exists, what was checked, and what remains. A file being written and a file being verified are different states.
 
+Watch the visual: What survives when the conversation disappears?
+
 
 
 The record below survives the loss of the temporary session variable. Recovery sees five written files but no successful checks, so its next action is verification. Only observed checks justify marking the work verified.
 
 
+
+## Read the visual
+
+Temporary working memory and the durable record are drawn on opposite sides of a persistence boundary. Writing advances planned to written. Verification adds evidence and advances written to verified. A new session clears conversational context but reads the same durable status and evidence.
 
 ## Use case: when to use this
 

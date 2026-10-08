@@ -20,6 +20,10 @@ The target is 50% straightforward, 30% memory-efficient, and 20% parallel soluti
 
 
 
+## Read the visual
+
+For each solution style, observed and target bars share a 0–100% scale. At the start, straightforward solutions exceed the target by 35 percentage points; memory-efficient and parallel are short by 20 and 15. Moving the slider closes all three gaps; the displayed tradeoff is an objective calculation, not RL execution.
+
 
 ## Step through the code (within the 5-minute exploration)
 
