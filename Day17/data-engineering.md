@@ -111,6 +111,7 @@ SELECT SUM(amount) FROM sandbox.study17.receipts_copy; -- expected: 15
 # Use a dedicated path per query. Keep this path on subsequent runs.
 q = (spark.readStream.table("sandbox.study17.receipts")
      .writeStream
+     .format("delta")
      .option("checkpointLocation",
              "/Volumes/sandbox/study17/checkpoints/receipts_copy")
      .trigger(availableNow=True)
