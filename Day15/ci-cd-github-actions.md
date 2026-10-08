@@ -16,13 +16,7 @@ A contractor should receive a temporary badge for one building, not a copied mas
 GitHub Actions can request a signed OpenID Connect token for a job. AWS Security Token Service checks the token's audience and subject against an IAM trust policy, then returns short-lived credentials.
 
 
-Workflowrequests signed token
-
-AWS trustchecks aud + sub
-
-Temporary roleexpires automatically
-
-No long-lived AWS key stored in GitHub
+Visual question: Which token claim fails the AWS trust check?
 
 
 
@@ -42,6 +36,10 @@ repo:octo-org@123456/octo-repo@456789:environment:prod
 A copied workflow from another repository gets a different subject and should be denied. id-token: write permits requesting an OIDC token; it does not itself grant AWS access.
 
 
+
+## Read the visual
+
+Which token claim fails the AWS trust check? Each presented claim is compared with the exact expected value. A mismatch breaks the path to temporary credentials. Repository and environment are both part of the subject match; the audience match alone is insufficient.
 
 ## Use case: when to use this
 

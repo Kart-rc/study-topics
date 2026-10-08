@@ -15,13 +15,7 @@ A three-lane bridge carries 120 cars per minute. Each lane can carry 60. Today e
 Now close one lane. The same 120 cars must fit into two lanes: 60 each. The service has no operating margin for retries, uneven balancing, or a second small fault.
 
 
-Normal40 / 60 in each AZ
-
-Evacuate one AZ60 / 60 in each survivor
-
-80% targetneeds 75 capacity per AZ
-
-A green regional average does not prove the fleet can lose a zone.
+Visual question: Where does the lost zone’s traffic go?
 
 
 
@@ -32,6 +26,10 @@ For 120 requests/second across three zones, the failure load is 60. If the opera
 This is an N+1 question: can the system meet its useful-work target after losing one failure domain, without first depending on a stressed control plane to add capacity?
 
 
+
+## Read the visual
+
+Where does the lost zone’s traffic go? The same total requests are redistributed from three zones into two. Bars share one requests-per-second scale; the dashed line is each zone’s 80% operating target. Red overflow means demand exceeds hard capacity.
 
 ## Use case: when to use this
 

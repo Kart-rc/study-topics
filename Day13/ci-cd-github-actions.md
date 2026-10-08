@@ -14,14 +14,6 @@ A hotel cleans and resets a room between guests. If the same workspace is reused
 
 A persistent self-hosted runner can execute many jobs. A compromised or careless job may leave credentials, files, or background processes. An ephemeral runner is registered for one job, then GitHub de-registers it. Your automation destroys the machine or container and creates a clean one for the next job.
 
-Provisionclean image
-
-Run one jobworkspace changes
-
-Destroyno next job on this runner
-
-new job → new runner
-
 GitHub recommends ephemeral self-hosted runners for autoscaling. The one-job lifecycle limits exposure from previous jobs. It does not protect a secret deliberately given to the current job.
 
 
@@ -33,6 +25,10 @@ An untrusted build writes leftover_token.txt. On a persistent runner, the next d
 Runner lifecycle changes operational duties. Forward runner logs to external storage before destruction. Keep the base image patched, scope network and IAM permissions, and assume repository code executed in the job may be hostile.
 
 
+
+## Read the visual
+
+Which disk crosses from an untrusted job into a trusted job? The lifecycle boundary either destroys the backing environment or carries its files into the next job. A clean disk requires environment destruction in this model; deregistration alone would not erase residue.
 
 
 ## Step through the code (within the 5-minute exploration)

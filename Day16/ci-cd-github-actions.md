@@ -15,13 +15,7 @@ A bank vault does not hand over the production key just because someone reached 
 A GitHub Actions job can reference an environment such as production. Protection rules can restrict deployment branches, require a reviewer, or impose a wait timer. Environment secrets become available only after the protection rules pass.
 
 
-Build jobartifact ready
-
-Environment gatemain branch + approval
-
-Deploy jobsecret released here
-
-A queued deployment job does not receive the environment secret early.
+Visual question: Where does the production secret stay while a job waits?
 
 
 
@@ -38,6 +32,10 @@ jobs:
 If the branch is not allowed, the job is denied. If approval is required but missing, it waits. Only after the rules pass can the job start and read PROD_TOKEN.
 
 
+
+## Read the visual
+
+Where does the production secret stay while a job waits? The secret is drawn inside its environment boundary. It crosses to the deploy job only when the branch and approval gates both open. A queued or denied job never receives the secret in this model.
 
 ## Use case: when to use this
 

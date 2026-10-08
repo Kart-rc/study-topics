@@ -14,12 +14,6 @@ Alice and Bob open the same order note. Both see “address: A” and version "v
 
 An ETag is a server-provided identifier for a selected representation. The client sends its identifier back in If-Match: “apply my change only if the current version still matches what I read.”
 
-Both GETaddress AETag “v1”
-
-Alice PUTIf-Match “v1”address B → “v2”
-
-Bob PUTIf-Match “v1”412 · reread first
-
 The rejection prevents a lost update: one client accidentally overwriting another client’s parallel work.
 
 
@@ -36,6 +30,10 @@ The server compares "v1" with its current ETag. They match, so it stores Alice�
 Use a strong validator for If-Match comparison. Define whether your ETag represents the full resource or a specific representation variant.
 
 
+
+## Read the visual
+
+Does Bob’s read version still match the server? Bob holds the earlier snapshot on the left. The server’s current version is compared with Bob’s If-Match value before applying his whole-resource replacement. Disabling the gate allows Alice’s newer address to be erased.
 
 
 ## Step through the code (within the 5-minute exploration)

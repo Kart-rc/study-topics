@@ -16,14 +16,6 @@ A Kafka partition can use the same idea. Imagine three replicas: one leader and 
 
 With acks=all, every replica currently in the ISR must acknowledge. With min.insync.replicas=2, Kafka also refuses a write when fewer than two replicas remain in the ISR.
 
-LeaderHas order O42
-
-Follower ACopies O42
-
-Follower BLagging; outside ISR
-
-ISR size 2 · minimum 2 → producer receives success
-
 The replication factor says how many copies the partition is configured to have. The ISR says which copies are currently caught up. They are not the same number during a failure.
 
 
@@ -35,6 +27,10 @@ All three replicas are in sync. All three acknowledge O42. Success.Follower B fa
 This protects the producer-success contract. It does not mean data can never be lost under every configuration. Leader-election policy, rack placement, storage failures, retries, and producer idempotence still matter.
 
 
+
+## Read the visual
+
+How many replicas must acknowledge this write? The ISR membership boundary determines the required acknowledgers for acks=all. A two-replica minimum is an admission gate, not an instruction to stop after two acknowledgements when three replicas are in ISR.
 
 
 ## Step through the code (within the 5-minute exploration)

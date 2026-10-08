@@ -28,3 +28,9 @@ Generated for 2026-10-03 in America/New_York.
 No Chromium, Chrome, Firefox, or equivalent browser executable was available in the run environment. Therefore visual layout, focus behavior, native browser storage, and the browser's real download dialog were not directly observed. The simulated DOM validates application logic and export payload construction, not pixel layout or native browser behavior.
 
 External sources were checked during generation, but link availability can change later. The interactive worlds are intentionally simplified; each lesson states what its model does not represent.
+
+## Concept-specific visual revision — 2026-10-08
+
+Revised this historical bundle in the Days 11–16 tranche. Each interactive visual now represents the lesson’s actual mechanism, with a text explanation in the Markdown companion. Sources, source-check dates, quizzes, code replays, use cases, delivery dates, and study state are preserved.
+
+Local verification passed: protected-field comparison, actual model execution, replay/quiz/save/export serialization, and local links. Native Chromium desktop/mobile interaction, download, and layout checks are recorded by the **Historical visual tranches** GitHub Actions workflow for the publishing commit. Automated layout checks do not substitute for manual visual inspection.

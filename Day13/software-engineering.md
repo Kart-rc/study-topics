@@ -14,14 +14,6 @@ Three teammates each keep a copy of a shopping cart. A write updates two teammat
 
 If there are N=3 replicas, a successful write waits for W=2, and a read waits for R=2, the read set and write set must share at least one replica. Four seats cannot fit into three chairs without overlap.
 
-AWrite ✓
-
-BWrite ✓ · Read ✓
-
-CRead ✓
-
-Write {A,B} ∩ Read {B,C} = {B}
-
 The rule is R + W > N. It guarantees set intersection for strict quorums over the same replica set. The read still needs version comparison and reconciliation to choose the right value.
 
 
@@ -34,6 +26,10 @@ latest_is_reachable = bool(overlap)
 If R=1 and the read asks only C, it may see the old cart. If replicas accept concurrent writes, overlap does not erase the conflict. Dynamo used vector clocks and returned causally unrelated versions for reconciliation.
 
 
+
+## Read the visual
+
+Where must the read set meet the successful write set? Read and write membership share the same three node columns. Overlapping vertical columns identify replicas that hold the acknowledged write and participate in the read. Disjoint rows expose the stale-read possibility.
 
 
 ## Step through the code (within the 5-minute exploration)

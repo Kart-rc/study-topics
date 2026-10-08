@@ -14,12 +14,6 @@ A restaurant has a printed seating map. The manager updates the map; hosts use t
 
 The manager’s work is the control plane: create or change configuration. Seating guests is the data plane: do the daily work using that configuration.
 
-Control planePropose route changesValidate and publish
-
-Last good snapshotorders → cell-apayments → cell-b
-
-Data planeRoute every request locally
-
 The key is not merely two boxes. The serving path has a local, durable-enough copy of everything it needs. An outage can delay updates without stopping already-working routes.
 
 
@@ -34,6 +28,10 @@ publish(candidate)                    # change path
 This is a deeper static-stability installment: survive with pre-positioned state first; repair or change the state after the control plane recovers.
 
 
+
+## Read the visual
+
+Can requests still reach the cell when configuration publishing fails? The control path updates a locally stored route. The serving path uses that saved route. The broken option inserts a live control-plane lookup into every request and therefore inherits its outage.
 
 
 ## Step through the code (within the 5-minute exploration)

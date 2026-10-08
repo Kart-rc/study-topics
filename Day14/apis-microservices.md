@@ -14,13 +14,7 @@ A waiter does not walk to the kitchen separately for every item on one table’s
 
 GraphQL field resolvers run independently. If three posts each resolve an author by calling the database, you can get one query for posts plus three author queries. That is the N+1 problem.
 
-Posts query1 database call
-
-Three resolversu1, u2, u1
-
-Request loaderbatch [u1, u2] in 1 call
-
-Naive: 4 calls · batched: 2 calls
+Visual question: Where do three resolver calls become one author query?
 
 
 
@@ -34,6 +28,10 @@ resolve(post, _, ctx) {
 Create the loader per request. A long-lived cross-user cache can return stale data or leak information across authorization contexts.
 
 
+
+## Read the visual
+
+Where do three resolver calls become one author query? The upper lane sends every selected author request separately. The lower lane gathers the same keys, removes repeated u1 within this request, and sends one batch. The posts query is one extra call in both lanes.
 
 
 ## Step through the code (within the 5-minute exploration)

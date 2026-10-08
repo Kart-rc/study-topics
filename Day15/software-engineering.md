@@ -15,17 +15,7 @@ A shop closes its front door before counting the customers still inside. It lets
 
 A service should do the same:
 
-
-1 · StopReject new requests
-
-
-2 · DrainLet O42 finish
-
-
-3 · ForceCancel after the limit
-
-
-No new work → bounded wait → known recovery path
+Visual question: Does the grace period reach the end of in-flight work?
 
 
 Java's ExecutorService.shutdown() rejects new tasks but lets submitted tasks run. awaitTermination waits for a bound. Kubernetes normally sends a termination signal and later force-kills remaining processes when the grace period ends.
@@ -44,6 +34,10 @@ if (!pool.awaitTermination(10, SECONDS))
 If the grace period is only five seconds, the process is forced out with three seconds of work left. The operation needs an idempotency key or durable job record so a retry is safe.
 
 
+
+## Read the visual
+
+Does the grace period reach the end of in-flight work? The work bar always needs eight seconds. The vertical line is the hard stop; moving it left cuts unfinished work off. New work is blocked at time zero in both outcomes.
 
 ## Use case: when to use this
 

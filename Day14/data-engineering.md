@@ -14,13 +14,7 @@ Imagine photographing a departure board while new trains are being added. The ph
 
 Change data capture (CDC) does the same thing for a database. First it reads a consistent snapshot. It also records a source-log position. Then it streams changes from that position.
 
-Snapshot at 100O42 = queued
-
-BookmarkAfter LSN 100
-
-Live log101: O42 paid102: O43 queued
-
-Snapshot state + changes after 100 = current state
+Visual question: Which log changes belong after the snapshot?
 
 LSN means log sequence number: a position on the database change tape. The exact name varies by database.
 
@@ -35,6 +29,10 @@ for change in log.after(boundary):
 Starting after 101 creates a gap: the payment at 101 disappears. Starting after 99 replays the boundary record too. An idempotent upsert may hide that duplicate in one table, but an append-only downstream sink would still see it.
 
 
+
+## Read the visual
+
+Which log changes belong after the snapshot? The shaded snapshot ends at LSN 100. Moving the streaming boundary left repeats a captured change; moving it right leaves LSN 101 out. The two lanes must meet without a gap.
 
 
 ## Step through the code (within the 5-minute exploration)

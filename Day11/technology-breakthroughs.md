@@ -16,12 +16,6 @@ New research, not a production claim: a September 11, 2026 preprint by Ainley an
 
 The paper describes two distinct experiments: detecting phase errors in a small distributed repetition code, and actively correcting errors in a specific shared Bell state. A Bell state is a particular entangled two-qubit state. Protecting that known state is narrower than protecting arbitrary logical quantum information.
 
-Module AData qubit + network qubitLocal operations
-
-Between modulesEntanglement supports a shared checkClassical results guide the next action
-
-Module BData qubit + network qubitLocal operations
-
 The model below is a classical analogy for detection only. It is not a quantum simulation or a reproduction of either experiment.
 
 
@@ -33,6 +27,10 @@ Now flip both: the bits become 1 and 1. They agree, so there is no alarm, even t
 Our detector discards an alarmed attempt. It does not claim to repair it. The research matters because remote checks are a needed building block for modular quantum machines. It does not establish a general-purpose fault-tolerant quantum service.
 
 
+
+## Read the visual
+
+Can agreement detect which bit changed? The four possible classical states are mapped to only two check results. Highlighting 11 beside 00 shows why a no-alarm result cannot prove the original survived. This is a classical analogy, not quantum hardware.
 
 
 ## Step through the code (within the 5-minute exploration)

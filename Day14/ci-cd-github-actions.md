@@ -14,13 +14,7 @@ A restaurant can reuse one kitchen recipe while each table supplies an order sli
 
 A reusable GitHub Actions workflow is that shared recipe. It lives in .github/workflows, declares workflow_call, and defines the inputs and secrets a caller may pass.
 
-Caller workflowenvironment = staging
-
-Reusable workflowtyped input + named secret
-
-Deploy jobsame tested steps
-
-The caller chooses values; the callee owns the steps.
+Visual question: Which caller values fit the reusable workflow contract?
 
 
 
@@ -46,6 +40,10 @@ jobs:
 This creates a visible contract. It does not automatically make the shared workflow safe: pin trustworthy refs, keep permissions narrow, and understand that environment secrets have special behavior.
 
 
+
+## Read the visual
+
+Which caller values fit the reusable workflow contract? Read across each connector: caller input must fit the declared type and the required secret must arrive. Both connections are needed before the shared steps can start. Inherit works in this toy but exposes more secrets.
 
 
 ## Step through the code (within the 5-minute exploration)

@@ -14,12 +14,6 @@ A normal camera repeatedly sends the whole scene, even when nothing changes. An 
 
 The paper reports an organic mixed ionic–electronic photosensor that combines temporal-contrast detection and analogue amplitude control in one active layer. Fast electronic response produces a spike; ionic-mediated inhibition adjusts the spike amplitude.
 
-Light stays at 10No changeNo event
-
-Light jumps 10 → 40Change = 30Event produced
-
-Inhibition = 50%Toy amplitude30 → 15
-
 That last arithmetic is our analogy, not the paper’s device equation. It makes “change detection plus adjustable amplitude” visible without pretending to reproduce ionic and electronic transport.
 
 
@@ -33,6 +27,10 @@ amplitude = event * (1 - inhibition)
 The research article reports device measurements and device-informed simulations for neuromorphic vision. It does not establish a commercial camera, production energy guarantee, or general-purpose vision accuracy. Read the primary paper for materials, protocol, and benchmark details.
 
 
+
+## Read the visual
+
+How do threshold and inhibition shrink the same change signal? Three bars share a 0–100 scale: brightness change, amount beyond threshold, and remaining amplitude after inhibition. Repeating the same sample collapses the first bar because the previous value advances.
 
 
 ## Step through the code (within the 5-minute exploration)

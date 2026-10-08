@@ -16,13 +16,7 @@ Imagine putting a crane claw on the end of a strand about as thin as a hair. Lig
 Researchers reported a 3D optical-fibre gripper measuring 38 × 38 × 61 micrometres. It combines rigid photoresist claws with a soft, heat-responsive hydrogel containing silver nanoparticles.
 
 
-Light in fibredelivers energy
-
-Soft musclephotothermal actuation
-
-Rigid clawsgrip a micro-object
-
-Optical input → material response → mechanical motion
+Visual question: How does light-driven closing change the gap around a cell?
 
 
 
@@ -38,6 +32,10 @@ jaw_gap = max(0, open_gap − response × heat)
 More light narrows the toy jaw. A safe operating band matters because a living cell can be damaged even when the claw can physically close.
 
 
+
+## Read the visual
+
+How does light-driven closing change the gap around a cell? The blue shaft brings light to two jaws. Increasing the toy light input moves those jaws inward around a fixed-size synthetic cell. Once the gap gets too small, the overlap shows compression risk. This geometry is an illustrative linear rule.
 
 ## Use case: when to use this
 

@@ -15,13 +15,7 @@ A travel rehearsal does not wait for a real storm. It injects a known cancellati
 An agent harness can do the same. Instead of asking a live model what to do, give the runner a fixed script: call lookup_order, then call refund_order, then return the final message.
 
 
-Step 1lookup_order(O42)
-
-Step 2refund_order(O42)
-
-Step 3“Refund started”
-
-The test passes only when the application consumes the whole expected script.
+Visual question: At which script position does observed behavior diverge?
 
 
 
@@ -30,6 +24,10 @@ The OpenAI Agents SDK documents in-memory, provider-neutral test utilities such 
 Our tiny executable queue uses the same testing idea. Each application action must match the next expected step. If a refactor returns after the lookup and silently skips the refund, assert_complete() fails because one tool call and the final response remain unused.
 
 
+
+## Read the visual
+
+At which script position does observed behavior diverge? Read the aligned expected and actual rows from top to bottom. Matching operations connect straight across; the first mismatch breaks the script. A later matching final message does not repair the skipped or wrong tool call.
 
 ## Use case: when to use this
 

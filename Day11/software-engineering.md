@@ -16,12 +16,6 @@ This is a token bucket. Capacity controls the burst; refill rate controls sustai
 
 Our order service starts with three tickets and refills two per second. Five requests arrive at time zero. The first three enter. Two are refused. After half a second, one new ticket exists, so one more request can enter. Waiting ten seconds cannot grow the jar beyond three.
 
-Refill2 tickets per second0.5 seconds adds 1
-
-JarMaximum 3 ticketsUnused space is filled
-
-Door1 request takes 1 ticketNo ticket → refuse
-
 
 
 The Java trace follows the same five-request burst. It admits three, refuses two, waits half a second, and admits one more. Refused requests do not consume tickets. In the lab, an admitted request stays active until you explicitly finish it.
@@ -31,6 +25,10 @@ Try a slow backend: admit three, wait, then admit another three without finishin
 AWS API Gateway uses this family of throttling algorithms, but documents its throttles as best-effort targets. This exact toy is not an account quota guarantee. A distributed implementation also needs coordinated state or a deliberate allowance for local bursts.
 
 
+
+## Read the visual
+
+Why can requests stay active while the ticket jar refills? Ticket slots and active-work count are separate ledgers. Time refills only the jar; finishing work clears only the active requests.
 
 
 ## Step through the code (within the 5-minute exploration)

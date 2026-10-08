@@ -14,14 +14,6 @@ Imagine eight checkout workers. If every tenant can use all eight, one poisonous
 
 Instead, deal each tenant a small hand of workers. Tenant Rainbow gets workers 1 and 4. Tenant Rose gets 1 and 8. Their hands overlap at worker 1, but not at every worker. This is shuffle sharding.
 
-RainbowW1 · W4
-
-RoseW1 · W8
-
-SunflowerW3 · W6
-
-Rainbow overloads W1 and W4 → Rose can still try W8
-
 The architectural goal is not zero overlap. It is to avoid complete overlap, so one tenant's failure does not become everybody's failure.
 
 
@@ -34,6 +26,10 @@ healthy = [worker for worker in tenant_hand
 The Distinguished Engineer decision is larger than the assignment algorithm. You need deterministic placement, enough spare capacity inside each hand, Availability Zone diversity, retry limits, overload signals, and an escape plan for truly toxic tenants.
 
 
+
+## Read the visual
+
+Why does sharing one worker not mean sharing every failure? The tenant-to-worker matrix shows each two-worker hand. Crossed workers are failed, and each row retains service if any selected column is healthy. Full impact needs both workers in that tenant’s hand.
 
 
 ## Step through the code (within the 5-minute exploration)

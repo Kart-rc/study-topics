@@ -14,12 +14,6 @@ A calculator should still return 4 if you rename a local variable from x to tota
 
 Start with: “Every gold order needs review. O42 is gold. Therefore O42 needs review.” Now rename O42 to O77 everywhere. The wording changes, but the logic does not. The expected judgment should remain ENTAILS.
 
-Source caseGold(O42) → Review(O42)
-
-Safe transformRename O42 → O77 everywhere
-
-Required relationsame judgment
-
 This is a metamorphic test. Instead of needing a fresh answer label for every generated case, the harness checks a relation between outputs.
 
 
@@ -33,6 +27,10 @@ The important work is proving the transform preserves meaning. Replacing “gold
 The 2026 LGMT paper derives transformations from first-order-logic equivalences and reports experiments across six LLMs. Treat its measured findings as research claims from that evaluation, not universal production rates.
 
 
+
+## Read the visual
+
+What stays fixed when surface wording changes? Two logically equivalent premises converge on the same expected label. Changing an ID consistently or swapping premise order should leave that label unchanged. The comparison line exposes a synthetic candidate’s violation.
 
 
 ## Step through the code (within the 5-minute exploration)

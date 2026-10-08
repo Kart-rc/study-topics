@@ -16,12 +16,6 @@ A GitHub Actions workflow is an automation definition. It contains jobs, each wi
 
 Our delivery chain is test, package, deploy. Package needs test; deploy needs package. With the default success conditions, failed or skipped dependencies cause downstream jobs to be skipped. Listing deploy last is not the dependency. The needs links are.
 
-testRun checksFailure stops this path
-
-packageneeds: testOnly after successful checks
-
-deployneeds: packageOnly after successful packaging
-
 
 
 The YAML deliberately makes test fail. Package and deploy are skipped. Remove both needs lines and the two echo jobs no longer depend on test; they can run even though test fails. These are harmless demonstration commands, not a release pipeline.
@@ -51,6 +45,10 @@ The lab shows job states as you advance the scheduler. Fix the test result and k
 Download the harmless YAML demonstration. It is stored as lesson material, not installed as a repository workflow.
 
 
+
+## Read the visual
+
+Which successful job unlocks the next job? The dependency path shows both current state and the gate between jobs. Without needs, all three jobs are eligible together; with needs, a failure removes the downstream path.
 
 
 ## Step through the code (within the 5-minute exploration)

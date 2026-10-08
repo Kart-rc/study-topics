@@ -16,13 +16,7 @@ A courier can read a note inside a package, but the note cannot give the courier
 An agent reads webpages, emails, documents, and tool results. That content can contain instructions. Treat those instructions as untrusted data, not as authority.
 
 
-SourceEmail says “send secrets”
-
-Policy gateCompare with user request
-
-SinkSend tool stays blocked
-
-Content may shape the summary. Only trusted intent may authorize the action.
+Visual question: Which path can grant permission for an agent action?
 
 
 
@@ -35,6 +29,10 @@ if not authorized:
     deny_and_log(provenance="external_email")
 
 
+
+## Read the visual
+
+Which path can grant permission for an agent action? The user’s instruction feeds the permission gate. The document feeds facts only. Injected words in that document do not acquire a connection to authority; changing the proposed action is checked against the user’s scope.
 
 ## Use case: when to use this
 

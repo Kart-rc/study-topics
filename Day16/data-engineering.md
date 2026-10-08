@@ -19,13 +19,7 @@ A Spark shuffle does something similar. It writes buckets of data for the next s
 Adaptive Query Execution (AQE) waits for the map tasks to finish, reads the actual bucket sizes, and can combine neighboring small buckets into fewer tasks.
 
 
-Planned8 · 12 · 3 · 64 · 5 MB
-
-Observedreal map-output sizes
-
-Next stage23 · 64 · 5 MB
-
-AQE merges adjacent small partitions; it does not reshuffle their keys.
+Visual question: Which neighboring shuffle buckets fit into the same task?
 
 
 
@@ -34,6 +28,10 @@ Suppose a shuffle produces five partitions: [8, 12, 3, 64, 5] MB. Our toy target
 8 + 12 + 3 = 23 MB, so those neighbors become one task.Adding the next 64 MB partition would exceed the target, so 23 MB closes.The 64 MB partition stays alone. The final 5 MB partition also stays alone.The next stage starts three tasks instead of five. That reduces task-launch overhead. It does not fix the 64 MB partition; skew splitting is a separate AQE feature.
 
 
+
+## Read the visual
+
+Which neighboring shuffle buckets fit into the same task? Every colored segment is one original bucket; its width is proportional to MB. Task boundaries move as the target changes, but segment order and total width stay fixed. The 64 MB bucket is never split by this coalescing toy.
 
 ## Use case: when to use this
 

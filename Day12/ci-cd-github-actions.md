@@ -16,12 +16,6 @@ A CI cache is the pantry. It reuses dependencies or expensive intermediate files
 
 An artifact is the delivery box. It stores files produced by a job, such as a tested binary, report, or log. Another job can download that exact output.
 
-Cachenpm packagesKeyed by lockfileMiss → download again
-
-Build jobTests commit abc123Produces app.zip
-
-Artifactapp.zip from this runDeploy downloads it
-
 
 
 Run 1 has no dependency cache, so dependencies download. The build creates app-abc123.zip and uploads it as an artifact. Deploy downloads that artifact.
@@ -39,6 +33,10 @@ Run 2 with the same lockfile may hit the cache and install faster, but it still 
 Restored caches are untrusted input. Never put secrets in them; use precise keys and low-trust workflow restrictions.
 
 
+
+## Read the visual
+
+Which stored object speeds a build, and which allows deployment? Two storage paths leave the build: a reusable dependency cache and the specific tested artifact. A miss on the cache path triggers downloading; a missing artifact closes the deployment path.
 
 
 ## Step through the code (within the 5-minute exploration)

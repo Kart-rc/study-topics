@@ -16,13 +16,7 @@ A restaurant promises your meal in ten minutes. The kitchen should receive the t
 A gRPC deadline is the time after which the client no longer wants the response. When one service calls another, it should pass the remaining budget.
 
 
-Client500 ms total
-
-Profile serviceuses 120 ms
-
-Inventorygets 380 ms left
-
-500 − 120 = 380 ms, not a new 500 ms
+Visual question: Which child work happens after the client has stopped waiting?
 
 
 
@@ -38,6 +32,10 @@ inventory.getStock(child, request);
 gRPC implementations may propagate automatically or require configuration. Server application code must stop its own long-running work when cancellation is observed.
 
 
+
+## Read the visual
+
+Which child work happens after the client has stopped waiting? Both service bars share one clock. The first service consumes 120 ms; inventory starts there. The red deadline stays at 500 ms. Without propagation, the inventory bar can extend beyond it: that red portion is wasted for this client.
 
 ## Use case: when to use this
 

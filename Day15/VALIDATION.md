@@ -23,3 +23,9 @@ The Day15 mechanism verifier, all 92 repository lesson replay/quiz/save/export/l
 ## Verification limit
 
 The Node checks execute the page scripts against a simulated DOM. The Playwright package installed successfully, but the runtime had no Chromium executable. A bounded browser-install attempt returned truncated zero-byte archives, so native rendering, responsive layout, focus behavior, and real download behavior were not observed locally. The repository's browser-smoke workflow remains the native-browser gate after push. The pages contain no remote runtime dependencies and are designed to open from disk.
+
+## Concept-specific visual revision — 2026-10-08
+
+Revised this historical bundle in the Days 11–16 tranche. Each interactive visual now represents the lesson’s actual mechanism, with a text explanation in the Markdown companion. Sources, source-check dates, quizzes, code replays, use cases, delivery dates, and study state are preserved.
+
+Local verification passed: protected-field comparison, actual model execution, replay/quiz/save/export serialization, and local links. Native Chromium desktop/mobile interaction, download, and layout checks are recorded by the **Historical visual tranches** GitHub Actions workflow for the publishing commit. Automated layout checks do not substitute for manual visual inspection.

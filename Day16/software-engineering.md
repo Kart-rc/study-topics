@@ -15,13 +15,7 @@ Two doctors, Alice and Bob, are on call. The rule is simple: at least one doctor
 Alice and Bob each start a transaction at the same time. Each sees the same snapshot: both doctors are available. Each takes only their own name off the schedule. Because they update different rows, there is no direct row-write conflict.
 
 
-Alice’s snapshotAlice ✓ · Bob ✓
-
-Bob’s snapshotAlice ✓ · Bob ✓
-
-Both commitAlice ✗ · Bob ✗
-
-Two individually reasonable decisions create one impossible schedule.
+Visual question: How can two safe-looking reads produce an unsafe schedule?
 
 This is write skew: transactions write different rows, but their decisions depend on an overlapping set of rows.
 
@@ -32,6 +26,10 @@ Under PostgreSQL Repeatable Read, both transactions can keep their starting snap
 Under Serializable isolation, PostgreSQL tracks read/write dependencies. If both commits would produce a result impossible under any one-at-a-time order, one transaction fails with SQLSTATE 40001. The application must retry the whole transaction. On retry, the loser sees only one doctor left and stays on call.
 
 
+
+## Read the visual
+
+How can two safe-looking reads produce an unsafe schedule? Each transaction reads the other doctor as ON, then writes only its own row. The crossing dependencies form the conflict. Serializable mode aborts Bob’s illustrated attempt so a retry can read Alice’s change; the chosen victim is only this example.
 
 ## Use case: when to use this
 

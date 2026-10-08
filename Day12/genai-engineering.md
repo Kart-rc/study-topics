@@ -14,12 +14,6 @@ An order-support agent says “I could not answer.” A single success/failure l
 
 A trace is the whole journey of one run. A span is one timed step inside it. Give the agent invocation a parent span. Put model and tool operations underneath as child spans. Then the tree preserves order, duration, and error location.
 
-invoke_agent · 120 mstrace t-42parent: none
-
-chat · 45 msparent: agentchooses lookup
-
-execute_tool · ERRORparent: agenttimeout
-
 This is harness engineering: the run is observable without trusting the agent’s own summary. The trace does not prove the answer is correct; it tells you where to investigate and supplies data for evaluation.
 
 
@@ -33,6 +27,10 @@ tool.error_type = "timeout"
 Record low-cardinality error types and operational metadata. Treat prompts, outputs, tool arguments, and customer IDs as sensitive. The OpenTelemetry GenAI agent conventions are still marked Development, so pin the semantic-convention version and expect change.
 
 
+
+## Read the visual
+
+Which operation belongs to this agent run? A parent-child tree links chat and tool operations to their agent span. Removing the parent moves the tool to a separate root; an error label then loses its place in the run hierarchy.
 
 
 ## Step through the code (within the 5-minute exploration)

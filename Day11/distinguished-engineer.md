@@ -16,12 +16,6 @@ Make two promises explicit. RPO is the largest acceptable gap in recoverable dat
 
 Use the timestamp of the data you can really recover, not simply the timestamp when a backup job finished. Count recovery from the interruption until the service is usable, including detection, restore, validation and traffic routing in this example.
 
-11:55Latest recoverable order state5 minutes before failure
-
-12:00Service failsDowntime starts
-
-12:30Orders verified; traffic restored30 minutes downtime
-
 
 
 Our team promises at most five minutes of lost order history and at most thirty minutes of downtime. The baseline drill uses data through 11:55. Detection takes 3 minutes, restore takes 18, validation takes 7, and routing takes 2. Total: 30 minutes. The measured data gap is 5 minutes. Both targets are met, with no time margin.
@@ -31,6 +25,10 @@ Now the restored order table fails its integrity check. The clock may still read
 As the technical leader, ask for a representative drill with an owner and saved evidence: newest recoverable order time, sample order checks, dependency readiness, and an end-to-end order request. Review the gap with the service owner before declaring the recovery design adequate.
 
 
+
+## Read the visual
+
+How much data is missing, and how long is service unavailable? Two timelines have different meanings. The data-age bar looks backward from failure; the recovery segments look forward. The 30-minute line applies to total interruption, including checks and routing.
 
 
 ## Step through the code (within the 5-minute exploration)

@@ -14,13 +14,7 @@ A cashier does not treat every paper from the card terminal as “payment approv
 
 An agent harness needs the same discipline for tools. Before giving a result to the model, check four things: the call finished before its deadline, the protocol completed, isError is false, and structured data matches the declared schema.
 
-Tool resultsuccess, error, malformed, or timeout
-
-Harness gatedeadline + error flag + schema
-
-Agentuses only validated data
-
-Bad result → typed failure path, not invented success.
+Visual question: At which gate does the injected result stop?
 
 
 
@@ -33,6 +27,10 @@ validate(result.structured_content, schema)
 The test should assert the final outcome and the tool trace: no shipment promise was sent after a failed contract.
 
 
+
+## Read the visual
+
+At which gate does the injected result stop? A result travels downward only through checks it passes. The highlighted exit names the first failure; later checks cannot turn that failure into a success.
 
 
 ## Step through the code (within the 5-minute exploration)

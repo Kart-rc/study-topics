@@ -16,12 +16,6 @@ An OpenAPI document describes an HTTP API in a machine-readable format. A schema
 
 Two uses of required answer different questions. requestBody.required: true means a body must be present. The schema’s required: [sku, quantity] means those fields must exist inside the object. Declaring a field under properties alone does not require it.
 
-Incoming body{"sku":"MUG"}Body exists
-
-Contract checkquantity is requiredPresence check fails
-
-Service boundaryReject before order creationNo silent default
-
 
 
 This lesson deliberately uses OpenAPI 3.1.1, a stable published specification, without claiming it is the newest version. The order contract requires a nonempty SKU and an integer quantity of at least one. It also rejects unknown fields. The response codes below are our API design choice, not codes that OpenAPI automatically returns.
@@ -62,6 +56,10 @@ A well-shaped request still needs business checks: does the SKU exist, may this 
 Download the complete teaching OpenAPI document.
 
 
+
+## Read the visual
+
+Where does this request stop before business logic? A validation funnel checks body, required fields, types, range, and unknown fields. The rejected condition is named at the exit. Passing shape only opens the next gate; it does not create an order.
 
 
 ## Step through the code (within the 5-minute exploration)

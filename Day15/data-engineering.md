@@ -16,17 +16,7 @@ A whiteboard may show every status change for an order. A recovery copy only nee
 Kafka log compaction removes older records when a newer record has the same key. It keeps the newest known value for each key. It does not change record order or renumber offsets.
 
 
-
-20 · O42packed
-
-
-22 · O42shipped · keep
-
-
-23 · O17null · delete marker
-
-
-Same key → older value can go. Null value → delete this key.
+Visual question: What disappears during compaction—and what stays at its offset?
 
 
 A keyed record with a null value is a tombstone: a delete marker. Kafka retains it for a period so rebuilding consumers can observe the delete, then may clean the tombstone too.
@@ -47,6 +37,10 @@ After the tombstone retention period, 23 can disappear too. A new rebuild still 
 The cleaner works in the background. A consumer that is caught up can still see every new record before cleaning removes older copies.
 
 
+
+## Read the visual
+
+What disappears during compaction—and what stays at its offset? Each row keeps its original offset position. Struck-through records are removed; the key connectors explain why. The newest O42 survives. O17’s null deletes that key; later cleanup can remove the tombstone too.
 
 ## Use case: when to use this
 

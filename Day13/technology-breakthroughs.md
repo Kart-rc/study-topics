@@ -14,14 +14,6 @@ Polarized sunglasses reveal that light can behave differently by direction. In a
 
 The reported method uses an atomic-sized electron probe and electron energy-loss spectroscopy. It selects momentum transfer along two orthogonal directions. Comparing those signals produces electron linear dichroism at individual atomic columns.
 
-Direction Hsignal 62
-
-Same Mn columnatomic-sized probe
-
-Direction Vsignal 38
-
-directional difference: 62 − 38 = +24
-
 The difference is not “an image of an orbital” by itself. Geometry, scattering calculations, calibration, and the material model connect the measured signal to orbital occupation.
 
 
@@ -33,6 +25,10 @@ dichroism = horizontal_signal - vertical_signal
 Our numbers +24 and −18 only teach the sign flip. They do not reproduce the experiment. A News & Views article published on September 29 highlighted the May 12 research; the research date and the later coverage date are different.
 
 
+
+## Read the visual
+
+Does the difference come from H, V, or both? The two directional signals are drawn from zero on the same scale. A separate signed difference bar extends right for H greater than V and left for V greater than H. These synthetic signals do not reconstruct an orbital image.
 
 
 ## Step through the code (within the 5-minute exploration)

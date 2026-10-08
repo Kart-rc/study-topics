@@ -15,15 +15,7 @@ Imagine four laboratories building their own ultra-precise rulers. Comparing eac
 Optical clocks count extremely high-frequency atomic transitions. A 2026 experiment connected seven clocks at four national metrology institutes through Europe’s optical-fibre network for a two-month comparison campaign.
 
 
-INRIM · Italyclock ratios
-
-LNE-OP · Franceclock ratios
-
-NPL · UKYb⁺ E3
-
-PTB · GermanyYb⁺ E3
-
-Stabilized fibre links carry frequency comparisons—not a normal internet timestamp.
+Visual question: Is the difference large compared with the uncertainty?
 
 
 
@@ -32,6 +24,10 @@ The paper reports ratio uncertainties from 7.7 × 10⁻¹⁸ to 6.1 × 10⁻¹�
 Our toy uses synthetic normalized deviations. If clock A reads +2 units, clock B reads −1, and their comparison uncertainty is 7.7, their 3-unit difference is inside the uncertainty band.
 
 
+
+## Read the visual
+
+Is the difference large compared with the uncertainty? Clock A and B sit on the same synthetic deviation axis. The lower marker shows the absolute difference against a 0-to-U acceptance band. Moving both clocks equally changes their positions but not their difference. These are toy units, not measured frequency ratios.
 
 ## Use case: when to use this
 

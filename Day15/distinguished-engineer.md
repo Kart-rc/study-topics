@@ -16,13 +16,7 @@ A smoke alarm should react quickly to a real fire, but not page the fire departm
 An error-budget burn rate compares the current bad-event rate with the rate your SLO allows. For a 99.9% SLO, the allowed bad-event rate is 0.1%. A 1% error rate burns budget at 10×.
 
 
-Short windowDid harm spike now?
-
-Long windowIs harm sustained?
-
-PageOnly when both are high
-
-Fast signal AND sustained signal → actionable page
+Visual question: Why does a short spike differ from sustained budget burn?
 
 
 
@@ -36,6 +30,10 @@ page = short_burn >= 10 and long_burn >= 10
 The threshold and windows are policy choices. The useful leadership move is to tie them to a defined budget spend, test them against past incidents, and give every page an owner and action.
 
 
+
+## Read the visual
+
+Why does a short spike differ from sustained budget burn? Both bars use the same burn-rate scale. The dashed threshold applies to both windows, and paging requires BOTH bars to reach it. A tall five-minute bar alone is not this sustained-burn page.
 
 ## Use case: when to use this
 

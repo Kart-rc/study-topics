@@ -16,12 +16,6 @@ That reusable beginning is a prefix. An explicit cache boundary marks where it e
 
 A common harness mistake is to insert “current time” at the start. The time changes on every call, so the prefix changes too. Another mistake is marking the new user question as the boundary when only the policy should be reused. Put stable content first and the varying request after its boundary.
 
-Reusable beginningTools + policy version 1Cache boundary here
-
-New suffixCurrent time + order questionProcessed for this request
-
-New responseGenerated each timeNot a saved answer
-
 
 
 The walkthrough uses the small stand-in policy:v1. Request one writes that prefix. Request two asks about order 8 instead of order 7 and hits the same prefix. Request three puts a timestamp before the boundary and misses.
@@ -31,6 +25,10 @@ Real prompts must meet the provider’s model-specific cache-size rules; this ti
 In a harness, log the policy version and actual cache-read usage counters. Keep authorization, tool-result validation and outcome evaluation in place. A cache hit says something about reused input processing. It says nothing about whether the generated answer is true or an action is allowed.
 
 
+
+## Read the visual
+
+Which changed bytes invalidate reusable input work? Requests are split at the cache boundary. The saved-prefix list is compared with the new prefix, while time and order details after the boundary do not determine a hit. The diagram shows input reuse, never a cached answer.
 
 
 ## Step through the code (within the 5-minute exploration)

@@ -14,15 +14,7 @@ A store has shipped {"name":"Mug"} for years. The team now prefers display_name.
 
 Use three stages:
 
-Expand: add display_name, but keep populating name.Migrate: update clients and measure old-field use.Contract: remove name only behind a compatible version transition and deprecation plan.v1name
-
-bridgename + display_name
-
-new majordisplay_name
-
-old client works → clients migrate → old contract retires
-
-
+Expand: add display_name, but keep populating name.Migrate: update clients and measure old-field use.Contract: remove name only behind a compatible version transition and deprecation plan.
 
 During expansion the server returns both fields:
 
@@ -36,6 +28,10 @@ An old client reads name. A new client prefers display_name and can temporarily 
 Google's AIP-180 distinguishes source, wire, and semantic compatibility. Adding a component is generally compatible only when previous clients keep their old behavior. New required request fields, changed defaults, or changed meanings can still break them.
 
 
+
+## Read the visual
+
+Which client survives each server migration phase? A compatibility matrix evaluates both old and new clients against all server phases. The selected intersection explains the actual request. The only broken cell is an old client meeting a server that removed name.
 
 
 ## Step through the code (within the 5-minute exploration)

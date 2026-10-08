@@ -16,12 +16,6 @@ Parquet divides column data into pages. An optional page index stores small summ
 
 The important distinction: keep a possible match; skip only an impossible match. Order 45 fits the label 40–50, but the page might contain only 40, 42, and 50. It must still be read and filtered. If usable statistics are missing, the safe choice is to read.
 
-Page A10, 12, 20Label: 10–2042 cannot be here → skip
-
-Page B40, 42, 50Label: 40–5042 might be here → read
-
-Page C80, 90, 100Label: 80–10042 cannot be here → skip
-
 
 
 Our synthetic file has nine IDs across three pages. For order_id = 42, the labels select only B. Reading B finds exactly one match. For 45, B is still read, but zero rows match. A selected page is a candidate, not a result.
@@ -33,6 +27,10 @@ SELECT * FROM orders WHERE order_id = 42;
 The Python walkthrough executes the candidate-selection rule on lists. The browser lab runs that rule again with your chosen ID and page layout. Neither is a Parquet reader or a Spark benchmark.
 
 
+
+## Read the visual
+
+Which page ranges can possibly contain the requested ID? Each horizontal interval is a page minimum-to-maximum range on the same ID scale. The vertical target line intersects candidate pages; candidates still need row filtering.
 
 
 ## Step through the code (within the 5-minute exploration)

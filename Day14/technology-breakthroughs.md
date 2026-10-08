@@ -14,13 +14,7 @@ Shake letter tiles in a box designed so the correct sentence clicks together mor
 
 The reported Scaffolded DNA Computer (SDC) uses a long DNA scaffold with positions for competing tiles. Neighboring tile “colors” are molecular domains. Matching neighbors are energetically favored; mismatches carry a penalty and can be replaced.
 
-Input + program tilesCompete for scaffold positions
-
-MismatchEnergetic penalty
-
-Target arrangementAll neighbor colors match
-
-The intended output is designed to be the favored equilibrium state.
+Visual question: How does each input bit change the parity target?
 
 
 
@@ -33,6 +27,10 @@ for bit in "10100100":
 The paper demonstrates ten programs, including an 8-bit parity detector and addition of 25-bit numbers, described as a 100-bit computation. Our code below computes parity digitally; it is only a map for understanding the molecular experiment.
 
 
+
+## Read the visual
+
+How does each input bit change the parity target? Each site shows the running parity after its bit. A 1 flips parity; a 0 leaves it unchanged. The candidate is compared with the final target. This digital trace illustrates matching constraints, not DNA kinetics.
 
 
 ## Step through the code (within the 5-minute exploration)

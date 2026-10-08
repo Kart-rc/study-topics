@@ -14,13 +14,7 @@ Three spare house keys do not help if all three are inside the same locked bag. 
 
 Replicas improve availability only when important failures are independent. A bad fleet-wide configuration, shared DNS dependency, or simultaneous rollout can make many copies fail together. That is a correlated failure.
 
-Cell Aconfig v2
-
-Cell Bconfig v2
-
-Cell Cconfig v2
-
-One bad config → three failures. Replication did not create independence.
+Visual question: How can one bad rollout take down several copies?
 
 
 
@@ -33,6 +27,10 @@ continue_rollout = healthy >= required_healthy and error_rate
 The wave does not make the configuration correct. It limits exposure long enough for evidence to stop the change.
 
 
+
+## Read the visual
+
+How can one bad rollout take down several copies? The red lines are shared exposure to the same bad configuration. Increasing the first wave adds affected cells, not independent failures. The unexposed cells remain on v1.
 
 
 ## Step through the code (within the 5-minute exploration)

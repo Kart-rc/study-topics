@@ -14,13 +14,7 @@ A warehouse manager changes a shelf but first writes the change in a fireproof n
 
 A database calls that durable notebook a write-ahead log (WAL). “Ahead” is the rule: flush the log record before allowing the changed data page to reach durable storage.
 
-1 · WAL durableO42: stock 5 → 4
-
-2 · Commit successClient may continue
-
-3 · Data page laterStock page becomes 4
-
-Crash between 2 and 3? REDO reads WAL and writes 4.
+Visual question: What survives the crash and can rebuild the page?
 
 
 
@@ -34,6 +28,10 @@ write_page_later()
 If the server crashes after the flush but before the page write, recovery redoes stock=4. If it crashes before the WAL flush, the transaction was not durably committed and must not be acknowledged.
 
 
+
+## Read the visual
+
+What survives the crash and can rebuild the page? Follow the durable WAL record across the crash line to the recovered page. A changed page without that record has no demonstrated recovery path; a committed WAL can redo a page that still says 5.
 
 
 ## Step through the code (within the 5-minute exploration)

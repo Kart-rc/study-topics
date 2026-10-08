@@ -61,3 +61,9 @@ python3 scripts/render.py Day11
 ```
 
 Runnable Python examples are in `examples/`; run each with Python 3. The Java example can be run with a source-launch-capable JDK (Java 17 used here). To regenerate only this day's execution records, import `scripts/walkthrough.py`, call `execute('Day11', lesson)` for each lesson, save `lessons.json`, then render. `workflow-demo.yml` is lesson material and is not in `.github/workflows`.
+
+## Concept-specific visual revision — 2026-10-08
+
+Revised this historical bundle in the Days 11–16 tranche. Each interactive visual now represents the lesson’s actual mechanism, with a text explanation in the Markdown companion. Sources, source-check dates, quizzes, code replays, use cases, delivery dates, and study state are preserved.
+
+Local verification passed: protected-field comparison, actual model execution, replay/quiz/save/export serialization, and local links. Native Chromium desktop/mobile interaction, download, and layout checks are recorded by the **Historical visual tranches** GitHub Actions workflow for the publishing commit. Automated layout checks do not substitute for manual visual inspection.

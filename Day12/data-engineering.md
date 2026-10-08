@@ -14,12 +14,6 @@ A warehouse file contains three orders: O10, O11, and O12. You need to remove O1
 
 That note is a position delete. It identifies a row with two values: the data file path and the row’s position inside that file. Positions start at zero, so O11 is position 1. Readers combine the data file and its applicable delete records to produce the visible table.
 
-orders-A.parquet0 → O101 → O112 → O12
-
-Delete recordfile = orders-A.parquetposition = 1
-
-Visible rowsO10O11O12
-
 The file name matters. Position 1 in orders-B.parquet is a different row. The snapshot metadata tells a reader which data files and delete files belong together.
 
 
@@ -35,6 +29,10 @@ If the data file is rewritten, row positions can change. A maintenance operation
 Version boundary: Iceberg v2 introduced row-level delete files. In v3, new position delete files are prohibited in favor of deletion vectors, although existing position delete files remain valid after an upgrade.
 
 
+
+## Read the visual
+
+Why does position 1 in another file stay visible? The delete marker points to one file-and-position pair. Original rows remain in their file, while the reader output omits only that exact address. A rewrite would require valid markers for the new file.
 
 
 ## Step through the code (within the 5-minute exploration)

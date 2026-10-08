@@ -14,14 +14,6 @@ Three checkout requests ask for the same price at nearly the same time. If all t
 
 This is request coalescing, often called singleflight: one operation is in flight for a key at a time. Callers for a different key may run in parallel.
 
-Caller A · MUGStarts the catalog fetch
-
-Caller B · MUGWaits for A
-
-Caller C · PLATEStarts a separate fetch
-
-MUG → one shared result · PLATE → another result
-
 It is not a lasting cache. After the MUG fetch finishes and leaves the in-flight map, a later MUG request may call the catalog again.
 
 
@@ -33,6 +25,10 @@ value, error, shared = group.do(key, load)
 The result includes failures. If the leader times out, current waiters see that same error. Coalescing reduces duplicate load; it does not make an unreliable dependency reliable. Add appropriate deadlines, retry policy, and a real cache separately.
 
 
+
+## Read the visual
+
+Which callers join the same in-flight fetch? Lines merge callers with equal keys into one loader. Different keys have different loaders. A failed loader fans the same error back to its waiting callers; this is not a result cache.
 
 
 ## Step through the code (within the 5-minute exploration)
