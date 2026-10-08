@@ -14,9 +14,7 @@ You need to replace an order system, but a single cutover would move every custo
 
 This is the strangler fig pattern: the new system gradually takes over useful pieces of the old one. A route is a request path, such as /tracking. A facade is the stable entry point that hides which system serves it.
 
-Customers use the same entry point↓ Router chooses one owner per route
-
-Old system/orders · /returnsNew system/trackingStart with a narrow capability whose behavior you can compare. Keeping order writes in one place makes ownership easier to reason about while you move a read-only tracking page.
+Start with a narrow capability whose behavior you can compare. Keeping order writes in one place makes ownership easier to reason about while you move a read-only tracking page.
 
 
 
@@ -27,6 +25,10 @@ Once that evidence is acceptable, route /tracking to the new service. Keep /orde
 The leadership decision is not “is the new service deployed?” It is “who owns this route and its data, what evidence permits the move, and who can reverse it?”
 
 
+
+## Read the visual
+
+A route table maps each stable customer path to exactly one owner. Only /tracking changes owner. Each owner’s readiness is shown beside that path: the new service must be healthy; the old service must still read current data. Sending a request highlights its row and displays the actual result, so switching ownership is distinct from restoring compatibility.
 
 
 ## Step through the code (within the 5-minute exploration)

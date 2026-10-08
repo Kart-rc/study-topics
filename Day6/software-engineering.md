@@ -20,6 +20,10 @@ The original read takes 900 ms. Start the backup at 100 ms; it takes another 70 
 
 
 
+## Read the visual
+
+All six request timelines share a 1000 ms scale. An original starts at zero. Only requests unfinished at the hedge delay launch a backup. The finish marker is the first usable response; the other attempt is wasted or cancelled.
+
 
 ## Step through the code (within the 5-minute exploration)
 

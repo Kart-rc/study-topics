@@ -20,6 +20,10 @@ In a synthetic group of 10,000, 100 have the condition. At 70% sensitivity, 70 t
 
 
 
+## Read the visual
+
+A 10,000-person cohort splits into affected and unaffected groups. Sensitivity sends affected people into true positives; one minus specificity sends unaffected people into false positives. The final positive-result bar compares those two counts with the same denominator.
+
 
 ## Step through the code (within the 5-minute exploration)
 

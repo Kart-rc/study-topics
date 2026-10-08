@@ -14,7 +14,7 @@ Imagine a dimmer switch that remembers its setting after you remove the power us
 
 A September 2026 Nature Communications paper reports a material whose internal electric polarization can set lasting light-emission levels. Nonvolatile means the state persists without continuous power to keep it stored.
 
-WriteUse electrical pulses to set a levelHoldRemove programming power; keep the levelReadUse light and a detector to observe itThe authors report 16 levels, retention longer than 27 hours, and an 8 × 8 array demonstration. These are reported laboratory results. They do not establish indefinite retention or production-scale reliability.
+The authors report 16 levels, retention longer than 27 hours, and an 8 × 8 array demonstration. These are reported laboratory results. They do not establish indefinite retention or production-scale reliability.
 
 
 
@@ -25,6 +25,10 @@ Turn off programming power after saving level 10. The model remembers 10. Turn o
 The key distinction: no electrical standby power for retaining a state does not mean no energy for writing, illumination, detection, or computation. A useful engineering comparison needs the whole system energy budget.
 
 
+
+## Read the visual
+
+A 16-step ladder marks the requested level separately from the stored level. Moving the request does not move the stored marker until Program succeeds. The input, saved weight and optical output form a multiplication path. Removing writing power leaves the saved marker; removing reading light breaks the measurement path while leaving that marker. All levels are idealized equally spaced values.
 
 
 ## Step through the code (within the 5-minute exploration)

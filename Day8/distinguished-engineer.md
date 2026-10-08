@@ -20,6 +20,10 @@ The toy alarm needs two ten-second breaching periods, followed by eight seconds 
 
 
 
+## Read the visual
+
+A timeline separates collecting enough breaching metric periods from stop/recovery delay. The planned end can truncate the modeled window. The shaded exposure lasts until that end; an alarm does not erase the harm accumulated while detecting and recovering.
+
 
 ## Step through the code (within the 5-minute exploration)
 

@@ -14,10 +14,6 @@ Your checkout service calls a delivery-price service. That service is down. Ever
 
 A circuit breaker remembers recent failures. After enough failures, it stops forwarding calls for a short time. Checkout gets a quick “temporarily unavailable” response instead of another long wait.
 
-ClosedCalls pass throughOpenCalls are blockedHalf-openTry a small probeClosed → failures → Open → waiting period → Half-open
-
-Probe succeeds → Closed. Probe fails → Open again.
-
 The names come from an electrical switch: a closed circuit carries current. Here it means calls are allowed. “Open” means stop calling.
 
 
@@ -29,6 +25,10 @@ If that trial succeeds, normal calls resume. If it fails, wait again. These numb
 For checkout, a useful response might be “delivery quote unavailable; please try later.” Returning a made-up price would change the business meaning of the operation.
 
 
+
+## Read the visual
+
+The state diagram labels transitions between closed, open and half-open. The active state changes with calls and elapsed time. A second path shows whether a call reaches the service or ends at the breaker. Only forwarded calls can succeed or fail at the dependency; blocked calls do not repair the dependency. The countdown shows the earliest probe time.
 
 
 ## Step through the code (within the 5-minute exploration)

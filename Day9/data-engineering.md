@@ -20,6 +20,10 @@ Our deliberately contrasting models use 24 partitions and a two-second pause. St
 
 
 
+## Read the visual
+
+Each row is one consumer. Each numbered box is one of its partitions. In the global-barrier comparison every box waits; in the incremental comparison only partitions owned by affected consumers wait. Both use the same group size and pause duration. The total stopped partition-time is the number of waiting boxes multiplied by seconds, not elapsed rebalance latency.
+
 
 ## Step through the code (within the 5-minute exploration)
 

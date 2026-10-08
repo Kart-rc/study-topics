@@ -20,6 +20,10 @@ The toy starts with 35 passes out of 50 development cases. Ten iterations fix tw
 
 
 
+## Read the visual
+
+Each score bar has the same 0–100 percent scale. Development fixes extend the development bar while the untouched-case benchmark remains at 70 percent in this deliberately non-generalizing model. Tuning to holdout failures adds a feedback path from the holdout into prompt development: its rising score is then contaminated evidence, not a measured production improvement.
+
 
 ## Step through the code (within the 5-minute exploration)
 

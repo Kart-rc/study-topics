@@ -20,6 +20,10 @@ After 140 ms, 360 ms remain. The downstream operation needs 420 ms, so it cannot
 
 
 
+## Read the visual
+
+A shared timeline locates pre-work and downstream work against the original caller deadline. Passing the remaining budget ends the child at that deadline; a fresh timeout can extend the child beyond it. Pre-work that already exceeds the deadline is not recovered by propagation.
+
 
 ## Step through the code (within the 5-minute exploration)
 

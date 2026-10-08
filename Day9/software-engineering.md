@@ -20,6 +20,10 @@ The left half contains A and B in both replicas. The right half contains C and D
 
 
 
+## Read the visual
+
+The four-leaf illustration compares exact symbolic fingerprints. The root comparison branches to AB and CD. Matching halves are skipped; only the differing half is opened to its individual leaves. The selected A or D replacement moves the highlighted search path. The existing large-tree controls separately show a conservative comparison bound, not a count measured by this four-leaf traversal.
+
 
 ## Step through the code (within the 5-minute exploration)
 

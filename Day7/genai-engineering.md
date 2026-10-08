@@ -20,6 +20,10 @@ Eight tests initially fail. Fixing one each turn leaves three after five turns, 
 
 
 
+## Read the visual
+
+A stair-step ledger shows failing checks after each turn. Zero verified failures reaches MET. Two unchanged turns reach STALLED. Running out of turns leaves BUDGET_EXHAUSTED. Without an evaluator there is no checked trajectory, only an unverified self-report.
+
 
 ## Step through the code (within the 5-minute exploration)
 

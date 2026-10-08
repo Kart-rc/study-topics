@@ -20,6 +20,10 @@ Version 1 reads full_name. Version 2 adds given_name and family_name. Keeping fu
 
 
 
+## Read the visual
+
+The upper record always retains full_name. The changed record has split fields and retains full_name only if dual writing or backfill supplies it. Arrows lead both records into the old reader. The 1,000-record strip shares one scale: green records can be read, orange cannot. Making the old reader tolerant changes interpretation; it does not restore a removed field.
+
 
 ## Step through the code (within the 5-minute exploration)
 

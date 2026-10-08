@@ -20,6 +20,10 @@ The toy service accepts 60 critical units first. Forty units remain for 80 backg
 
 
 
+## Read the visual
+
+Two demand streams split at the admission gate into admitted and rejected amounts. Both tracks share a 200 units/s scale. Priority fills critical demand first; proportional sharing distributes loss. Their combined admitted rate never exceeds the safe capacity.
+
 
 ## Step through the code (within the 5-minute exploration)
 

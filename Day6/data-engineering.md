@@ -20,6 +20,10 @@ At 120 MiB per second, six hours with three local replicas is about 7.4 TiB. Sev
 
 
 
+## Read the visual
+
+The age ruler places recent segments on local disk, older retained segments in remote storage, and expired segments beyond the retention boundary. Moving the rewind marker changes which path a consumer must use. Local disk cannot resurrect an expired record.
+
 
 ## Step through the code (within the 5-minute exploration)
 

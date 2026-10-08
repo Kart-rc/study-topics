@@ -20,6 +20,10 @@ With a synthetic 100-microamp load, 3.5 mAh nominal capacity, and 80% usable cap
 
 
 
+## Read the visual
+
+A charge-versus-time line begins at the usable fraction of nominal capacity and drains at the chosen constant current. The capacity margin is excluded before discharge begins. The crossing at zero is an idealized runtime, while resorption and clinical safety belong to separate evidence questions.
+
 
 ## Step through the code (within the 5-minute exploration)
 

@@ -20,6 +20,10 @@ Four tasks at 8,000 events per second provide 32,000 events per second of toy ca
 
 
 
+## Read the visual
+
+The plan first passes an operator-support gate. Eligible work reaches task lanes, each with an assumed 8,000 events/s capacity. The flow compares incoming events with total capacity; shrinking a trigger interval changes the toy batching wait but cannot unlock stateful support or add capacity.
+
 
 ## Step through the code (within the 5-minute exploration)
 

@@ -16,10 +16,6 @@ A schema checks the shape of input: field names, types, and allowed ranges. It c
 
 The harness is the code around the model that checks and runs actions. It should compare the proposed action with trusted request details and current permissions before calling the tool.
 
-Proposal: A100, amount_cents = 25↓ Check three different questions
-
-ShapeIs it a positive integer?IntentIs it the requested $25?PermissionMay this user refund A100?Execute only when all three pass.
-
 
 
 The trusted request in this toy example is fixed: A100, $25, or 2,500 cents. The authorized account owns A100, which has 5,000 refundable cents.
@@ -29,6 +25,10 @@ Proposal A100/25 passes the integer check and account check, but fails the reque
 Use clear parameter names and examples in the tool description: amount_cents: 2500 means $25. Descriptions help the model propose good inputs. Checks still enforce the rules.
 
 
+
+## Read the visual
+
+The proposed amount and trusted 2,500-cent request are shown on the same 5,000-cent balance scale. A gate-by-gate path states each independent result and marks the first failing gate. The final connector reaches the ledger only when all gates pass and the approved action has not already run. Validation changes no balance; execution changes the balance once.
 
 
 ## Step through the code (within the 5-minute exploration)

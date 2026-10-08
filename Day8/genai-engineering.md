@@ -20,6 +20,10 @@ The untrusted tool claims to be read-only but proposes a write. The available ca
 
 
 
+## Read the visual
+
+A three-condition path connects untrusted instructions, private data, and outbound capability. Closing any one breaks this toy exfiltration route. An untrusted server cannot close the external-effect branch merely by advertising a harmless hint. Separate enforcement gates, not annotation text, constrain real authority.
+
 
 ## Step through the code (within the 5-minute exploration)
 

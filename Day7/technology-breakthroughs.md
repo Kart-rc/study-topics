@@ -20,6 +20,10 @@ Using the paper’s simulated infidelity only as an input, the toy assumes indep
 
 
 
+## Read the visual
+
+The research architecture separates memory and communication roles; this arithmetic visual asks a narrower question. A survival curve compounds the same independent per-gate failure probability across a sequence. Faster gate time shortens the duration axis label, while lower error raises the survival curve.
+
 
 ## Step through the code (within the 5-minute exploration)
 

@@ -20,6 +20,10 @@ The toy allowlist permits a service file and the agent-fix branch. A request for
 
 
 
+## Read the visual
+
+The attempted data path has separate file-read and network gates. The first denied gate stops the path. Credential isolation and a repository-scoped proxy constrain separate authority paths; neither closes a readable-file exfiltration path once outbound access is open.
+
 
 ## Step through the code (within the 5-minute exploration)
 

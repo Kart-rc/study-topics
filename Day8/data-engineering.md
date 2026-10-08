@@ -20,6 +20,10 @@ At 400 MB of changes per batch, twelve changelogs total 4.8 GB. The comparison p
 
 
 
+## Read the visual
+
+A batch strip marks completed base snapshots and the changes after the latest base. Recovery restores the latest base, then replays only the marked later deltas. A second comparison shows foreground upload volume on a common scale, keeping recovery work distinct from commit-path work.
+
 
 ## Step through the code (within the 5-minute exploration)
 

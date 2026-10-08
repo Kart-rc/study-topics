@@ -20,6 +20,10 @@ Both workers read version 7. A stores 9 at version 8. B’s version-7 attempt fa
 
 
 
+## Read the visual
+
+Workers all read the same quantity and version. Blind writes converge to the same quantity and erase earlier reservations. A compare-and-swap gate accepts one version-7 writer and rejects the others; each retry must reread, recompute, and revalidate stock before trying the next version.
+
 
 ## Step through the code (within the 5-minute exploration)
 

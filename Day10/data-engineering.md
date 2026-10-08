@@ -16,9 +16,7 @@ Think of a restaurant: the cashier records both the sale and a kitchen ticket. T
 
 Save the order and its outbox row in one transaction: the database saves both, or neither. A separate worker, called a relay, reads saved outbox rows and sends them to Kafka. After Kafka confirms the send, the relay marks the row sent.
 
-One database transactionOrder A100status: acceptedOutbox E7status: waiting↓ Relay sends the saved ticket
-
-Kafka → shipping consumerThe database remembers what still needs sending. Kafka remembers what it received. These are separate records. That gap is why a retry can send the same event twice.
+The database remembers what still needs sending. Kafka remembers what it received. These are separate records. That gap is why a retry can send the same event twice.
 
 
 
@@ -29,6 +27,10 @@ The shipping consumer must recognize event E7, not only its Kafka offset. It sav
 Try to predict: after that crash, does a pending outbox row mean “never sent”? No. It means “not yet recorded as sent.”
 
 
+
+## Read the visual
+
+The transaction boundary encloses the order and outbox rows, which appear together. Kafka copies are shown separately from the sent marker. A relay crash clears only the volatile acknowledgement. Delivery arrows show each E7 copy either creating a shipment or being skipped by the saved E7 marker. Retrying after send but before marking sent adds a copy, not a new event identity.
 
 
 ## Step through the code (within the 5-minute exploration)

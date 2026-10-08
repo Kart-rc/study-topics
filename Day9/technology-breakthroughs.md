@@ -20,6 +20,10 @@ Input frequencies of 30.0 and 20.5 THz differ by 9.5 THz. A separate toy power r
 
 
 
+## Read the visual
+
+Two input markers share a 0–40 THz ruler. The highlighted interval between them is their frequency difference. A second ruler places that output difference beside the paper’s reported 1–11 THz window. Moving either pump changes the gap; changing power changes only the separate toy output-power calculation. The interval is subtraction of frequencies, not a claim that subtracting optical intensities produces light.
+
 
 ## Step through the code (within the 5-minute exploration)
 

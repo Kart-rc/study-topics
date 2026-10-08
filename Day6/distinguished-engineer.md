@@ -20,6 +20,10 @@ The dashboard has a flag and unchanged stored data. The schema deletion lacks a 
 
 
 
+## Read the visual
+
+A decision ledger traces each risk input into the review path. A rehearsed reversal removes only the rollback penalty; it does not erase irreversible effects, broad scope, or uncertainty. The visual exposes the heuristic instead of treating its score as objective evidence.
+
 
 ## Step through the code (within the 5-minute exploration)
 
