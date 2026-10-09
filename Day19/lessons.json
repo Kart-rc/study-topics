@@ -1,0 +1,1030 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Skip the chunks that cannot contain day 42",
+    "goal": "Explain how min/max metadata and data layout reduce scan work without changing query results.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>Imagine looking for page 42 in six labeled boxes. If every box says “pages 1–60,” you must open all six. If the labels are 1–10, 11–20, and so on, only one box can contain page 42. Data engines use the same idea: metadata records value ranges for a file or micro-partition, then a filter can skip chunks whose ranges cannot match.</p><p>This is <strong>pruning</strong> or <strong>data skipping</strong>. It reduces bytes considered by the scan. It does not create an index lookup, guarantee a duration, or fix a query that lacks a useful filter.</p>",
+    "example": "<p>Our synthetic <code>orders</code> table has 60 days across six equal chunks. The query is <code>WHERE order_day = 42</code>. A scattered layout gives every chunk a 1–60 range, so all six are candidates. A clustered layout gives non-overlapping ten-day ranges, so only the 41–50 chunk is scanned.</p><p>The browser model calculates candidates from the displayed ranges. It does not estimate cloud latency or cost. The product sections show how Databricks and Snowflake maintain related metadata but reorganize data through different mechanisms.</p>",
+    "use_case": {
+      "when": "Use this when selective filters on a large table still scan many files or micro-partitions and query profiles show poor pruning.",
+      "example": "A daily sales table is repeatedly filtered by order_day for a narrow reporting window. The team compares scan candidates before and after changing physical layout.",
+      "decision": "First confirm the predicate and scan profile. Reorganize only when repeated savings justify rewrite or maintenance cost; a small table or broad scan may not benefit."
+    },
+    "practice": "Predict how many chunks can contain day 42. Switch the layout, then change to a function-wrapped predicate and explain why the toy cannot use its range labels.",
+    "boundary": "Local JavaScript uses six hand-authored ranges and one equality filter. Real engines use richer metadata, optimizer rules, caches and column pruning; candidate count is not billed bytes or elapsed time.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:17px}.cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:7px}.cell{border:2px solid #54786f;border-radius:8px;padding:10px;text-align:center}.scan{background:#ffd7b7}.skip{background:#dce8e1;color:#51635e}.keep{background:#d6f4b5}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.meter{height:28px;background:#d9e3de;display:flex}.meter span{display:block;height:100%}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"layoutMode\">Chunk layout</label><select id=\"layoutMode\"><option value=\"scattered\">Scattered: every range overlaps</option><option value=\"clustered\">Clustered: ten-day ranges</option></select><label for=\"predicateMode\">Predicate form</label><select id=\"predicateMode\"><option value=\"direct\">order_day = 42</option><option value=\"wrapped\">dayofmonth(order_day) = 11</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function prunePaint(){const clustered=layoutMode.value==='clustered',direct=predicateMode.value==='direct';const ranges=clustered?[[1,10],[11,20],[21,30],[31,40],[41,50],[51,60]]:Array.from({length:6},()=>[1,60]);const candidates=ranges.map(r=>direct?(r[0]<=42&&r[1]>=42):true);world.innerHTML=`<p><strong>Question:</strong> which chunks can be skipped before reading rows?</p><div class=\"cells\">${ranges.map((r,i)=>`<div class=\"cell ${candidates[i]?'scan':'skip'}\">C${i+1}<br>${r[0]}–${r[1]}<br>${candidates[i]?'SCAN':'SKIP'}</div>`).join('')}</div><p>Candidate chunks: ${candidates.filter(Boolean).length}/6. Result rows remain the same.</p><p>${direct?'The toy can compare 42 to min/max.':'The toy has no metadata for the transformed expression, so it scans all.'}</p>`;}layoutMode.onchange=prunePaint;predicateMode.onchange=prunePaint;prunePaint();",
+    "questions": [
+      [
+        "Every chunk has min 1 and max 60. What can the engine conclude for day 42?",
+        [
+          "Skip all chunks",
+          "Every chunk remains a candidate",
+          "Only chunk 4 is a candidate"
+        ],
+        1,
+        "Day 42 lies inside every recorded range, so min/max alone cannot exclude a chunk."
+      ],
+      [
+        "After clustering into ten-day ranges, which chunk is a candidate?",
+        [
+          "41–50 only",
+          "1–10 only",
+          "All six"
+        ],
+        0,
+        "Only 41–50 can contain 42. The query result is unchanged; less data is considered."
+      ],
+      [
+        "What does one candidate chunk prove?",
+        [
+          "The query will finish in one second",
+          "The result is correct without reading rows",
+          "Only that this toy can prune five chunks using its metadata"
+        ],
+        2,
+        "Pruning narrows scan candidates. It is not a latency promise and the remaining chunk still needs row evaluation."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "ranges = [(1,10),(11,20),(21,30),(31,40),(41,50),(51,60)]\ntarget = 42",
+          "note": "Define six chunk ranges and the target day."
+        },
+        {
+          "code": "candidates = [lo <= target <= hi for lo, hi in ranges]\nscanned = sum(candidates)",
+          "note": "Compare the target with each min/max label."
+        },
+        {
+          "code": "skipped = len(ranges) - scanned\nresult_total = 125",
+          "note": "Five chunks are excluded; the synthetic result remains 125."
+        }
+      ],
+      "expect": {
+        "scanned": 1,
+        "skipped": 5,
+        "result_total": 125
+      },
+      "limit": "Executed Python range checks. The result total is a fixed teaching value; no Parquet, Delta or Snowflake data is read.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "ranges": [
+              [
+                1,
+                10
+              ],
+              [
+                11,
+                20
+              ],
+              [
+                21,
+                30
+              ],
+              [
+                31,
+                40
+              ],
+              [
+                41,
+                50
+              ],
+              [
+                51,
+                60
+              ]
+            ],
+            "target": 42
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "ranges": [
+              [
+                1,
+                10
+              ],
+              [
+                11,
+                20
+              ],
+              [
+                21,
+                30
+              ],
+              [
+                31,
+                40
+              ],
+              [
+                41,
+                50
+              ],
+              [
+                51,
+                60
+              ]
+            ],
+            "target": 42,
+            "candidates": [
+              false,
+              false,
+              false,
+              false,
+              true,
+              false
+            ],
+            "scanned": 1
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "ranges": [
+              [
+                1,
+                10
+              ],
+              [
+                11,
+                20
+              ],
+              [
+                21,
+                30
+              ],
+              [
+                31,
+                40
+              ],
+              [
+                41,
+                50
+              ],
+              [
+                51,
+                60
+              ]
+            ],
+            "target": 42,
+            "candidates": [
+              false,
+              false,
+              false,
+              false,
+              true,
+              false
+            ],
+            "scanned": 1,
+            "skipped": 5,
+            "result_total": 125
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks data skipping",
+        "https://docs.databricks.com/aws/en/tables/data-skipping",
+        "Living docs; checked 2026-10-09"
+      ],
+      [
+        "Snowflake micro-partitions and clustering",
+        "https://docs.snowflake.com/en/user-guide/tables-clustering-micropartitions",
+        "Living docs; checked 2026-10-09"
+      ]
+    ],
+    "visual_explanation": "Six equally sized boxes use the same scale. Orange chunks remain candidates; gray chunks are eliminated by the filter and their min/max labels.",
+    "written_questions": [
+      "What query-profile evidence would justify reorganizing this table?",
+      "Give one predicate that would defeat this simplified min/max model."
+    ],
+    "source_checked_on": "2026-10-09",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: liquid clustering groups file ranges",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> A Unity Catalog managed Delta table is repeatedly filtered on <code>order_day</code>, and scan evidence shows overlapping file ranges.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production workspace, an existing unpartitioned Delta table <code>study19.sales.orders</code> with a top-level <code>order_day</code>, and a runtime that supports liquid clustering. <code>OPTIMIZE ... FULL</code> requires Databricks Runtime 16.4 LTS or above and can rewrite large amounts of data for hours. The operator needs privileges for ALTER/OPTIMIZE and compute; the reader needs SELECT. Compute and rewrite work can incur cost.</p><p><strong>9-minute route.</strong> First minute: recall the Day17 checkpoint and Day18 grant questions below. Next two: predict file candidates. Next four: step through SQL and ranges. Final two: explain when rewrite cost loses.</p><p>The SQL is <strong>not run on Databricks</strong>. Buttons execute a local JavaScript model. Predictive optimization can manage OPTIMIZE for eligible Unity Catalog managed tables; if enabled, Databricks recommends disabling scheduled OPTIMIZE jobs.</p><label for=\"dbLayout\">Modeled Delta file layout</label><select id=\"dbLayout\"><option value=\"overlap\">Before: six overlapping files</option><option value=\"clustered\">After: liquid-clustered ranges</option></select><pre class=\"codepanel\"><code><span id=\"dbLine0\">ALTER TABLE study19.sales.orders CLUSTER BY (order_day);</span><span id=\"dbLine1\">OPTIMIZE study19.sales.orders FULL;</span><span id=\"dbLine2\">SELECT SUM(amount) FROM study19.sales.orders WHERE order_day = 42;</span></code></pre><button id=\"dbNext\">Advance modeled statement</button><button id=\"dbReset\">Reset model</button><div id=\"dbWorld\" class=\"mechanism\"></div><p id=\"dbState\" aria-live=\"polite\"></p><p><strong>Boundary.</strong> Liquid clustering is incompatible with partitioning and ZORDER on the same table. Statistics availability, filter shape and newly written data affect skipping. FULL is an explicit expensive rewrite, not a daily reflex.</p>",
+        "markdown": "Use an authorized unpartitioned Delta sandbox. SQL is unexecuted.\n\n```sql\nALTER TABLE study19.sales.orders CLUSTER BY (order_day);\nOPTIMIZE study19.sales.orders FULL;\nSELECT SUM(amount) FROM study19.sales.orders WHERE order_day = 42;\n```\n\nThe local model changes six overlapping ranges to non-overlapping ranges. FULL requires DBR 16.4 LTS+ and can be expensive; predictive optimization may manage OPTIMIZE for eligible managed tables.",
+        "javascript": "const dbLayout=$('dbLayout'),dbNext=$('dbNext'),dbReset=$('dbReset');let dbStep=-1;function dbPaint(){const clustered=dbLayout.value==='clustered',ranges=clustered?[[1,10],[11,20],[21,30],[31,40],[41,50],[51,60]]:Array.from({length:6},()=>[1,60]),candidates=ranges.map(r=>r[0]<=42&&r[1]>=42);for(let i=0;i<3;i++)$('dbLine'+i).classList.toggle('active',i===dbStep);$('dbWorld').innerHTML=`<p>Delta files; per-file min/max statistics drive the toy.</p><div class=\"cells\">${ranges.map((r,i)=>`<div class=\"cell ${candidates[i]?'scan':'skip'}\">${r[0]}–${r[1]}<br>${candidates[i]?'SCAN':'SKIP'}</div>`).join('')}</div><p>Candidate chunks: ${candidates.filter(Boolean).length}/6. Expected sum: 125.</p>`;$('dbState').textContent=`Step ${dbStep+1}/3. `+(dbStep<0?'No vendor statement modeled yet.':dbStep===2?`Query prediction: scan ${candidates.filter(Boolean).length} chunk(s), result 125.`:'Layout or inspection statement selected; vendor completion is not simulated.');dbNext.disabled=dbStep===2;}dbNext.onclick=()=>{dbStep=Math.min(2,dbStep+1);dbPaint();};dbReset.onclick=()=>{dbStep=-1;dbLayout.value='overlap';dbPaint();};dbLayout.onchange=dbPaint;dbPaint();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: micro-partition pruning after clustering maintenance",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> A very large standard Snowflake table has repeated selective <code>order_day</code> filters and high micro-partition overlap.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production account with a standard table and a role that can inspect clustering information and alter the table. An active warehouse executes queries. Defining a clustering key enables Automatic Clustering maintenance; it consumes serverless credits and convergence is not immediate. Hybrid tables do not support clustering keys.</p><p><strong>9-minute route.</strong> First minute: recall the due product questions below. Next two: inspect overlap. Next four: define the key and observe the maintenance state. Final two: decide whether scan savings justify ongoing credits.</p><p>The SQL is <strong>not run on Snowflake</strong>. Buttons execute a local JavaScript model. The teaching ranges change immediately only to make the effect visible; real Automatic Clustering works asynchronously.</p><label for=\"sfLayout\">Modeled micro-partition state</label><select id=\"sfLayout\"><option value=\"overlap\">Before: overlapping micro-partitions</option><option value=\"clustered\">After maintenance: clustered ranges</option></select><pre class=\"codepanel\"><code><span id=\"sfLine0\">SELECT SYSTEM$CLUSTERING_INFORMATION(&#x27;STUDY19.SALES.ORDERS&#x27;, &#x27;(ORDER_DAY)&#x27;);</span><span id=\"sfLine1\">ALTER TABLE study19.sales.orders CLUSTER BY (order_day);</span><span id=\"sfLine2\">SELECT SUM(amount) FROM study19.sales.orders WHERE order_day = 42;</span></code></pre><button id=\"sfNext\">Advance modeled statement</button><button id=\"sfReset\">Reset model</button><div id=\"sfWorld\" class=\"mechanism\"></div><p id=\"sfState\" aria-live=\"polite\"></p><p><strong>Boundary.</strong> Snowflake already records micro-partition metadata automatically. A user clustering key is a targeted choice for large tables with suitable query patterns, not a prerequisite for pruning. Automatic maintenance costs credits and old results can remain cached separately from pruning.</p>",
+        "markdown": "Use an authorized standard-table sandbox. SQL is unexecuted.\n\n```sql\nSELECT SYSTEM$CLUSTERING_INFORMATION('STUDY19.SALES.ORDERS', '(ORDER_DAY)');\nALTER TABLE study19.sales.orders CLUSTER BY (order_day);\nSELECT SUM(amount) FROM study19.sales.orders WHERE order_day = 42;\n```\n\nThe local model shows overlap before and separated ranges after maintenance. Real Automatic Clustering is asynchronous and consumes serverless credits; metadata exists even without a user clustering key.",
+        "javascript": "const sfLayout=$('sfLayout'),sfNext=$('sfNext'),sfReset=$('sfReset');let sfStep=-1;function sfPaint(){const clustered=sfLayout.value==='clustered',ranges=clustered?[[1,10],[11,20],[21,30],[31,40],[41,50],[51,60]]:Array.from({length:6},()=>[1,60]),candidates=ranges.map(r=>r[0]<=42&&r[1]>=42);for(let i=0;i<3;i++)$('sfLine'+i).classList.toggle('active',i===sfStep);$('sfWorld').innerHTML=`<p>Snowflake micro-partitions; metadata drives the toy.</p><div class=\"cells\">${ranges.map((r,i)=>`<div class=\"cell ${candidates[i]?'scan':'skip'}\">${r[0]}–${r[1]}<br>${candidates[i]?'SCAN':'SKIP'}</div>`).join('')}</div><p>Candidate chunks: ${candidates.filter(Boolean).length}/6. Expected sum: 125.</p>`;$('sfState').textContent=`Step ${sfStep+1}/3. `+(sfStep<0?'No vendor statement modeled yet.':sfStep===2?`Query prediction: scan ${candidates.filter(Boolean).length} chunk(s), result 125.`:'Layout or inspection statement selected; vendor completion is not simulated.');sfNext.disabled=sfStep===2;}sfNext.onclick=()=>{sfStep=Math.min(2,sfStep+1);sfPaint();};sfReset.onclick=()=>{sfStep=-1;sfLayout.value='overlap';sfPaint();};sfLayout.onchange=sfPaint;sfPaint();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Skip unit</td><td>Data file</td><td>Micro-partition</td></tr><tr><td>Layout mechanism here</td><td>Liquid clustering + OPTIMIZE</td><td>Clustering key + Automatic Clustering</td></tr><tr><td>Maintenance</td><td>Predictive optimization or explicit scheduling</td><td>Serverless automatic maintenance</td></tr><tr><td>Main cost question</td><td>Rewrite compute versus scan savings</td><td>Serverless credits versus pruning savings</td></tr></tbody></table><p>Both use metadata to eliminate impossible chunks. They are not equivalent commands or cost models.</p>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Skip unit | File | Micro-partition |\n| Layout | Liquid clustering | Clustering key |\n| Maintenance | Predictive optimization or explicit OPTIMIZE | Automatic Clustering |\n| Tradeoff | Rewrite compute vs scan savings | Serverless credits vs pruning savings |"
+    },
+    "product_questions": [
+      [
+        "Databricks: after enabling liquid clustering, what operation rewrites existing data layout in this lesson?",
+        [
+          "OPTIMIZE (FULL for the explicit full rewrite shown)",
+          "VACUUM",
+          "GRANT SELECT"
+        ],
+        0,
+        "OPTIMIZE performs clustering work. FULL explicitly forces full reclustering on supported runtimes; VACUUM and grants solve different problems."
+      ],
+      [
+        "Snowflake: does a table need a user clustering key before any micro-partition pruning can occur?",
+        [
+          "Yes, always",
+          "No; metadata is automatic, while a key can improve layout for suitable large tables",
+          "Only on hybrid tables"
+        ],
+        1,
+        "Snowflake records micro-partition metadata automatically. User clustering keys are selective optimizations and are unsupported for hybrid tables."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks data skipping",
+        "https://docs.databricks.com/aws/en/tables/data-skipping",
+        "Living docs; checked 2026-10-09"
+      ],
+      [
+        "Databricks liquid clustering",
+        "https://docs.databricks.com/aws/en/tables/clustering",
+        "Living docs; checked 2026-10-09"
+      ],
+      [
+        "Snowflake micro-partitions and pruning",
+        "https://docs.snowflake.com/en/user-guide/tables-clustering-micropartitions",
+        "Living docs; checked 2026-10-09"
+      ],
+      [
+        "Snowflake clustering keys",
+        "https://docs.snowflake.com/en/user-guide/tables-clustering-keys",
+        "Living docs; checked 2026-10-09"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-09",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "transformation_modeling",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Focused performance lesson: data-skipping statistics, liquid clustering and OPTIMIZE tradeoffs. Not full domain coverage."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "domains": [
+          "performance"
+        ],
+        "scope": "Focused performance planning group: micro-partition pruning, overlap and clustering-key maintenance. Full C03 objective IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "A returned value can hide a changed history: the ABA problem",
+    "goal": "Use a version stamp when “A again” must not mean “unchanged.”",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>You photograph a parking spot with a blue car. While you look away, the blue car leaves, a red car parks, then the same blue car returns. A second photo still says “blue,” but the spot changed twice. A compare-and-set that checks only the current value can miss that history. This is the <strong>ABA problem</strong>.</p><p>Add a version stamp. The state becomes <code>(value, version)</code>. A worker that read <code>(A,0)</code> must fail if the current state is <code>(A,2)</code>, even though the visible value is A again.</p>",
+    "example": "<p>Worker W1 reads A at version 0 and pauses. W2 changes A→B, version 1, then B→A, version 2. A plain value comparison says W1's old expectation still matches. <code>AtomicStampedReference.compareAndSet</code> checks both reference and stamp, so W1's stale update A→C with expected stamp 0 fails.</p><pre><code>boolean changed = ref.compareAndSet(\"A\", \"C\", 0, 1);</code></pre><p>The recorded Java example executes this sequence without threads so the history is deterministic. The API operation is atomic; the lesson does not reproduce a race scheduler.</p>",
+    "use_case": {
+      "when": "Use this in lock-free state machines, free lists or ownership tokens where a value can cycle back and that intermediate history matters.",
+      "example": "A worker claims slot A, another worker removes and restores A, and the first worker later tries to update using its stale observation.",
+      "decision": "Use a stamp when value reuse is legitimate and history matters. A lock or immutable identity may be simpler; version wraparound and reference identity still require design."
+    },
+    "practice": "Step W2 through A→B→A. Toggle value-only versus value+stamp validation and predict whether W1’s stale write reaches C.",
+    "boundary": "The browser is a deterministic history player, not a concurrent memory model. The recorded Java uses one thread. Integer stamp wraparound, object identity and memory reclamation are outside the toy.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:17px}.cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:7px}.cell{border:2px solid #54786f;border-radius:8px;padding:10px;text-align:center}.scan{background:#ffd7b7}.skip{background:#dce8e1;color:#51635e}.keep{background:#d6f4b5}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.meter{height:28px;background:#d9e3de;display:flex}.meter span{display:block;height:100%}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"abaCheck\">W1 validates</label><select id=\"abaCheck\"><option value=\"value\">Value only</option><option value=\"stamp\">Value + version stamp</option></select><button id=\"abaNext\">Advance W2</button><button id=\"abaReset\">Reset history</button><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "let abaStep=0;function abaPaint(){const states=[['A',0],['B',1],['A',2]],current=states[abaStep],matches=abaCheck.value==='value'?current[0]==='A':current[0]==='A'&&current[1]===0;world.innerHTML=`<svg viewBox=\"0 0 420 180\" role=\"img\" aria-label=\"State history A version 0 to B version 1 to A version 2\"><path d=\"M100 70 H190 M240 70 H330\" stroke=\"#386957\" stroke-width=\"4\"/><polygon points=\"185,63 200,70 185,77\" fill=\"#386957\"/><polygon points=\"325,63 340,70 325,77\" fill=\"#386957\"/>${[['A',0,30],['B',1,170],['A',2,310]].map((x,i)=>`<rect x=\"${x[2]}\" y=\"30\" width=\"80\" height=\"80\" rx=\"12\" fill=\"${i===abaStep?'#ffd7b7':'#e4eee8'}\" stroke=\"#386957\"/><text x=\"${x[2]+40}\" y=\"63\" text-anchor=\"middle\">${x[0]}</text><text x=\"${x[2]+40}\" y=\"91\" text-anchor=\"middle\">v${x[1]}</text>`).join('')}</svg><p>W1 remembered: A, v0. Current: ${current[0]}, v${current[1]}.</p><p>Stale A→C update: ${matches?'WOULD PASS':'REJECTED'} using ${abaCheck.value==='value'?'value only':'value + stamp'}.</p>`;abaNext.disabled=abaStep===2;}abaNext.onclick=()=>{abaStep=Math.min(2,abaStep+1);abaPaint();};abaReset.onclick=()=>{abaStep=0;abaPaint();};abaCheck.onchange=abaPaint;abaPaint();",
+    "questions": [
+      [
+        "W1 read A,v0. Current state is A,v2. What should stamped CAS do?",
+        [
+          "Succeed because A matches",
+          "Fail because v0 is stale",
+          "Reset the stamp"
+        ],
+        1,
+        "The stamp exposes the intervening A→B→A history."
+      ],
+      [
+        "What does value-only CAS see after A→B→A?",
+        [
+          "A matches A",
+          "B matches A",
+          "The full history"
+        ],
+        0,
+        "It sees only the current value, so it cannot distinguish unchanged A from returned A."
+      ],
+      [
+        "Does a stamp solve every lock-free problem?",
+        [
+          "Yes",
+          "Only on 64-bit systems",
+          "No; wraparound and reclamation remain design concerns"
+        ],
+        2,
+        "A stamp addresses this stale-history check, not all memory lifecycle or concurrency hazards."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var ref = new java.util.concurrent.atomic.AtomicStampedReference<String>(\"A\", 0);\nString seen = ref.getReference();\nint seenStamp = ref.getStamp();",
+          "note": "W1 reads A with stamp 0."
+        },
+        {
+          "code": "ref.compareAndSet(\"A\", \"B\", 0, 1);\nref.compareAndSet(\"B\", \"A\", 1, 2);\nboolean valueMatches = ref.getReference().equals(seen);",
+          "note": "W2 performs the ABA cycle; the visible value matches."
+        },
+        {
+          "code": "boolean staleUpdate = ref.compareAndSet(seen, \"C\", seenStamp, seenStamp + 1);\nString finalValue = ref.getReference();\nint finalStamp = ref.getStamp();",
+          "note": "W1 supplies its old stamp. The atomic update fails."
+        }
+      ],
+      "expect": {
+        "valueMatches": "true",
+        "staleUpdate": "false",
+        "finalValue": "A",
+        "finalStamp": "2"
+      },
+      "limit": "Executed with Java 17 in one thread to verify API outcomes. It does not reproduce interleaving or garbage-collection hazards.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "ref": "java.util.concurrent.atomic.AtomicStampedReference@402e37bc",
+            "seen": "A",
+            "seenStamp": "0"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "ref": "java.util.concurrent.atomic.AtomicStampedReference@402e37bc",
+            "seen": "A",
+            "seenStamp": "0",
+            "valueMatches": "true"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "ref": "java.util.concurrent.atomic.AtomicStampedReference@402e37bc",
+            "seen": "A",
+            "seenStamp": "0",
+            "valueMatches": "true",
+            "staleUpdate": "false",
+            "finalValue": "A",
+            "finalStamp": "2"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java 17 AtomicStampedReference",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/atomic/AtomicStampedReference.html",
+        "Java SE 17 API"
+      ]
+    ],
+    "visual_explanation": "The same visible value A appears at both ends, while the version and highlighted history reveal two intervening changes.",
+    "written_questions": [
+      "Where could an ABA cycle appear in a work-ownership protocol?",
+      "When would a lock be safer or clearer than stamped CAS?"
+    ],
+    "source_checked_on": "2026-10-09"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Build the exit before calling it a two-way door",
+    "goal": "Classify a decision by tested reversibility, not optimism.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A hotel door looks reversible because it has a handle on both sides. If the return handle is locked, it is really one-way. Technical leaders often call a change reversible while the backup is untested, consumers cannot roll back, or data is destroyed.</p><p>A <strong>two-way door</strong> has limited consequences and a practical route back. A one-way door has major, hard-to-reverse consequences and deserves deeper analysis. Classification changes the decision process; it does not label one choice “good” and the other “bad.”</p>",
+    "example": "<p>Consider moving 10% of read traffic to a new query engine. With versioned output, a routing flag, a five-minute rollback, and no destructive writes, the pilot is a two-way door. Sending 100% of writes through a migration that drops the old format is not reversible just because a runbook says “rollback.”</p><p>Our visual asks four concrete questions: blast radius, destructive state, rollback path, and whether rollback was tested. A real decision also includes regulatory, customer, financial and organizational consequences.</p>",
+    "use_case": {
+      "when": "Use this when deciding how much evidence, review and leadership attention a platform change needs.",
+      "example": "Pilot a new data-quality engine on 10% read-only shadow traffic, with a measured rollback and no producer contract change.",
+      "decision": "If reversal is cheap and tested, delegate and learn quickly. If data loss, contract lock-in or broad blast radius makes return hard, treat it as one-way and raise the review bar."
+    },
+    "practice": "Start with the safe pilot. Remove the tested rollback, then add destructive writes. Notice when the recommended decision process changes.",
+    "boundary": "The JavaScript score is an original teaching heuristic, not Amazon policy or a risk model. It cannot price legal, security, customer or human impacts.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:17px}.cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:7px}.cell{border:2px solid #54786f;border-radius:8px;padding:10px;text-align:center}.scan{background:#ffd7b7}.skip{background:#dce8e1;color:#51635e}.keep{background:#d6f4b5}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.meter{height:28px;background:#d9e3de;display:flex}.meter span{display:block;height:100%}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"blast\">Blast radius</label><select id=\"blast\"><option value=\"small\">10% shadow traffic</option><option value=\"large\">100% production</option></select><label for=\"destructive\">Destructive state change</label><select id=\"destructive\"><option value=\"no\">No</option><option value=\"yes\">Yes</option></select><label for=\"rollbackTested\">Rollback exercised</label><select id=\"rollbackTested\"><option value=\"yes\">Yes, measured</option><option value=\"no\">No</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function doorPaint(){const risk=(blast.value==='large'?2:0)+(destructive.value==='yes'?3:0)+(rollbackTested.value==='no'?2:0),two=risk<=1;world.innerHTML=`<svg viewBox=\"0 0 430 230\" role=\"img\" aria-label=\"Decision path to reversible experiment or deep review\"><path d=\"M215 60 V98 M215 150 L105 190 M215 150 L325 190\" fill=\"none\" stroke=\"#386957\" stroke-width=\"4\"/><rect x=\"85\" y=\"10\" width=\"260\" height=\"50\" rx=\"9\" fill=\"#d8e8f4\"/><text x=\"215\" y=\"42\" text-anchor=\"middle\">Proposed platform change</text><path d=\"M215 88 L330 125 L215 162 L100 125 Z\" fill=\"#ffe0b2\" stroke=\"#386957\"/><text x=\"215\" y=\"121\" text-anchor=\"middle\">Can we actually return?</text><text x=\"215\" y=\"143\" text-anchor=\"middle\">risk signals ${risk}</text><rect x=\"20\" y=\"182\" width=\"170\" height=\"42\" rx=\"8\" fill=\"${two?'#d6f4b5':'#e4eee8'}\"/><text x=\"105\" y=\"208\" text-anchor=\"middle\">experiment + measure</text><rect x=\"240\" y=\"182\" width=\"170\" height=\"42\" rx=\"8\" fill=\"${two?'#e4eee8':'#ffd7b7'}\"/><text x=\"325\" y=\"208\" text-anchor=\"middle\">deep review + safeguards</text></svg><p>Classification: ${two?'two-way door':'one-way or not-yet-reversible'}. Tested rollback: ${rollbackTested.value}.</p>`;}blast.onchange=doorPaint;destructive.onchange=doorPaint;rollbackTested.onchange=doorPaint;doorPaint();",
+    "questions": [
+      [
+        "A pilot has small blast radius, no writes and tested rollback. How should it usually be treated?",
+        [
+          "As a reversible experiment",
+          "As an irreversible acquisition",
+          "As risk-free"
+        ],
+        0,
+        "The return path is practical, so speed and learning can be appropriate. Reversible does not mean risk-free."
+      ],
+      [
+        "A migration deletes the old representation. What changes?",
+        [
+          "The runbook makes it reversible",
+          "Destructive state raises the review bar",
+          "Nothing"
+        ],
+        1,
+        "A written intent to roll back cannot restore destroyed state. Preserve or reconstruct it before claiming reversibility."
+      ],
+      [
+        "What is the strongest evidence that a door is two-way?",
+        [
+          "A leader says so",
+          "Rollback was exercised within the required recovery window",
+          "The project is small"
+        ],
+        1,
+        "Tested reversal demonstrates the exit under known conditions; labels and project size do not."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "decision = {\"blast\": \"small\", \"destructive\": False, \"rollback_tested\": True}\nrisk = 0",
+          "note": "Start with a bounded, non-destructive pilot and tested exit."
+        },
+        {
+          "code": "decision[\"rollback_tested\"] = False\nrisk += 2",
+          "note": "Removing tested rollback makes reversibility uncertain."
+        },
+        {
+          "code": "decision[\"destructive\"] = True\nrisk += 3\nclassification = \"deep_review\" if risk > 1 else \"experiment\"",
+          "note": "Destructive state makes the change one-way or not-yet-reversible in this heuristic."
+        }
+      ],
+      "expect": {
+        "risk": 5,
+        "classification": "deep_review"
+      },
+      "limit": "Executed an original Python decision heuristic. It is not an organizational policy or risk calculation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "decision": {
+              "blast": "small",
+              "destructive": false,
+              "rollback_tested": true
+            },
+            "risk": 0
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "decision": {
+              "blast": "small",
+              "destructive": false,
+              "rollback_tested": false
+            },
+            "risk": 2
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "decision": {
+              "blast": "small",
+              "destructive": true,
+              "rollback_tested": false
+            },
+            "risk": 5,
+            "classification": "deep_review"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Executive Insights: Day 1 culture",
+        "https://aws.amazon.com/executive-insights/content/how-amazon-defines-and-operationalizes-a-day-1-culture/",
+        "Living article; checked 2026-10-09"
+      ]
+    ],
+    "visual_explanation": "A decision diamond branches to experiment or deep review. Control changes alter the branch by changing concrete reversibility evidence.",
+    "written_questions": [
+      "Name the exit mechanism for one platform decision you currently call reversible.",
+      "What evidence would cause you to reclassify it as one-way?"
+    ],
+    "source_checked_on": "2026-10-09"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Same agent, different sandbox: resource budgets are part of the eval",
+    "goal": "Separate agent failure from infrastructure failure before comparing scores.",
+    "tag": "Harness engineering · controlled evaluation",
+    "concept": "<p>Two runners take the same obstacle course. One gets ten minutes and the other gets five. Their finish times do not isolate running ability. Agent evaluations are also end-to-end experiments: CPU, memory, time, network and sandbox enforcement can change outcomes.</p><p>A fair comparison fixes and records the resource policy. It also labels infrastructure failures separately from incorrect solutions. “8/10 passed” can hide that two trials were killed before the grader observed an answer.</p>",
+    "example": "<p>Our synthetic task needs 1.5 GB briefly and produces a correct patch. Under a 1 GB hard ceiling it is killed: infrastructure error. Under a 1 GB guaranteed allocation with a 2 GB ceiling it completes: pass. Giving 8 GB may also change which strategies the agent can afford, so more headroom is not automatically a neutral fix.</p><p>This follows Anthropic’s February 2026 finding that infrastructure configuration can materially change agentic benchmark results. Their reported measurements belong to their setup; our browser uses an original one-task calculator.</p>",
+    "use_case": {
+      "when": "Use this when comparing models, prompts or harness versions on coding tasks that run commands, compile code or install dependencies.",
+      "example": "Run every candidate against the same container image, guaranteed CPU/RAM, hard ceilings, time limit and egress policy; publish infra-error counts separately.",
+      "decision": "Calibrate enough headroom to avoid transient platform kills without silently making the task easier. Repeat across times and inspect confidence, not only a leaderboard point estimate."
+    },
+    "practice": "Hold the agent strategy constant. Change the hard memory ceiling, then change the strategy demand. Explain which outcome is capability and which is infrastructure.",
+    "boundary": "The browser uses deterministic thresholds, not a container runtime or LLM. It does not model CPU throttling, noisy neighbors, API latency, sampling variance or statistical significance.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:17px}.cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:7px}.cell{border:2px solid #54786f;border-radius:8px;padding:10px;text-align:center}.scan{background:#ffd7b7}.skip{background:#dce8e1;color:#51635e}.keep{background:#d6f4b5}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.meter{height:28px;background:#d9e3de;display:flex}.meter span{display:block;height:100%}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"memoryCeiling\">Hard memory ceiling</label><select id=\"memoryCeiling\"><option value=\"1\">1 GB</option><option value=\"2\">2 GB</option><option value=\"8\">8 GB</option></select><label for=\"agentDemand\">Agent strategy peak</label><select id=\"agentDemand\"><option value=\"1.5\">1.5 GB standard build</option><option value=\"5\">5 GB heavyweight toolchain</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function budgetPaint(){const cap=Number(memoryCeiling.value),need=Number(agentDemand.value),infra=need>cap,outcome=infra?'INFRA ERROR: killed at ceiling':'PASS: correct patch';world.innerHTML=`<p>Guaranteed allocation: 1 GB. Hard ceiling: ${cap} GB. Strategy peak: ${need} GB.</p><div class=\"meter\"><span style=\"width:${Math.min(100,need/8*100)}%;background:${infra?'#b84e3d':'#287b64'}\"></span></div><p>${outcome}</p><p>Capability result: ${infra?'not observed':'correct'}. Infrastructure result: ${infra?'failed':'completed'}.</p>`;}memoryCeiling.onchange=budgetPaint;agentDemand.onchange=budgetPaint;budgetPaint();",
+    "questions": [
+      [
+        "A correct strategy is OOM-killed before grading. How should the trial be labeled?",
+        [
+          "Wrong answer only",
+          "Infrastructure failure; capability not observed",
+          "Pass"
+        ],
+        1,
+        "The sandbox prevented an observable solution. Count and report it separately from a graded wrong answer."
+      ],
+      [
+        "Why not make every eval uncapped?",
+        [
+          "Unlimited resources can enable different strategies and change what is measured",
+          "It is always free",
+          "It removes sampling variance"
+        ],
+        0,
+        "A very generous environment can make heavyweight strategies viable. Resource methodology remains part of the experiment."
+      ],
+      [
+        "What must be matched when comparing two agents?",
+        [
+          "Only prompt wording",
+          "Only model name",
+          "Task, harness and enforceable resource policy"
+        ],
+        2,
+        "End-to-end agent results depend on the task, scaffold and environment, not just model identity."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "task_peak_gb = 1.5\nstrict_ceiling_gb = 1.0",
+          "note": "The correct strategy briefly needs more memory than the strict ceiling."
+        },
+        {
+          "code": "strict_infra_error = task_peak_gb > strict_ceiling_gb\nstrict_capability_observed = not strict_infra_error",
+          "note": "The strict sandbox kills the trial; no capability result is observed."
+        },
+        {
+          "code": "calibrated_ceiling_gb = 2.0\ncalibrated_infra_error = task_peak_gb > calibrated_ceiling_gb\ncalibrated_capability_observed = not calibrated_infra_error",
+          "note": "A calibrated ceiling lets the same synthetic strategy reach the grader."
+        }
+      ],
+      "expect": {
+        "strict_infra_error": true,
+        "strict_capability_observed": false,
+        "calibrated_infra_error": false,
+        "calibrated_capability_observed": true
+      },
+      "limit": "Executed threshold arithmetic. No agent, container or benchmark task runs.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "task_peak_gb": 1.5,
+            "strict_ceiling_gb": 1.0
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "task_peak_gb": 1.5,
+            "strict_ceiling_gb": 1.0,
+            "strict_infra_error": true,
+            "strict_capability_observed": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "task_peak_gb": 1.5,
+            "strict_ceiling_gb": 1.0,
+            "strict_infra_error": true,
+            "strict_capability_observed": false,
+            "calibrated_ceiling_gb": 2.0,
+            "calibrated_infra_error": false,
+            "calibrated_capability_observed": true
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "Anthropic: Quantifying infrastructure noise in agentic coding evals",
+        "https://www.anthropic.com/engineering/infrastructure-noise",
+        "2026-02-05"
+      ]
+    ],
+    "visual_explanation": "One shared 0–8 GB scale compares strategy demand with the ceiling. Outcome labels separate infrastructure completion from capability.",
+    "written_questions": [
+      "List the resource fields your eval report must publish.",
+      "How would you calibrate headroom without silently changing task difficulty?"
+    ],
+    "source_checked_on": "2026-10-09"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "A key only for approved code: verifiable federated learning with TEEs",
+    "goal": "Trace how policy, attestation and a transparency log constrain who can decrypt training uploads.",
+    "tag": "New development · 2026-10-02 research/deployment report",
+    "concept": "<p>Imagine a sealed kitchen. Ingredients arrive in locked boxes. The key service releases a key only when the kitchen proves it is running an approved recipe whose fingerprint appears in a public log. A trusted execution environment (TEE) provides a related idea for computation: remotely attest the workload identity, protect its internal state, and gate keys on policy.</p><p>Google Research announced a TEE-based federated-learning system on October 2, 2026. This is a current research-and-deployment report, not a claim that TEEs remove all trust. The authors explicitly discuss current-generation TEE limits.</p>",
+    "example": "<p>A device encrypts its example and pre-authorizes a policy hash. That policy is published to a transparency log. A server workload presents an attestation. The KMS releases a decryption key only if the attested workload matches the allowed policy. The workload releases anonymized model updates rather than raw examples.</p><p>Change one hash in the local model: the key gate closes. The visual teaches authorization flow; it performs no attestation, encryption, differential privacy or federated training.</p>",
+    "use_case": {
+      "when": "This is relevant when studying privacy-preserving federated analytics or training where clients need auditable constraints on server-side workloads.",
+      "example": "A keyboard client authorizes a published training program; only an attested matching TEE can receive a key for time-bounded encrypted uploads.",
+      "decision": "Treat this as specialist architecture and research evidence. Evaluate TEE side channels, supply chain, policy review, differential-privacy accounting and operational recovery before production use."
+    },
+    "practice": "Toggle whether the attested workload hash matches the logged policy. Predict whether KMS releases a key and which data becomes visible.",
+    "boundary": "The JavaScript compares two labels. It provides no cryptographic attestation, confidentiality, integrity, transparency proof, differential privacy, consensus or training.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:17px}.cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:7px}.cell{border:2px solid #54786f;border-radius:8px;padding:10px;text-align:center}.scan{background:#ffd7b7}.skip{background:#dce8e1;color:#51635e}.keep{background:#d6f4b5}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.meter{height:28px;background:#d9e3de;display:flex}.meter span{display:block;height:100%}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"attestationMatch\">Attested workload</label><select id=\"attestationMatch\"><option value=\"match\">Matches logged policy P7</option><option value=\"mismatch\">Different workload X9</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function teePaint(){const ok=attestationMatch.value==='match';world.innerHTML=`<svg viewBox=\"0 0 430 245\" role=\"img\" aria-label=\"Encrypted upload reaches a TEE only when attestation matches policy\"><rect x=\"10\" y=\"20\" width=\"110\" height=\"55\" rx=\"9\" fill=\"#d8e8f4\"/><text x=\"65\" y=\"44\" text-anchor=\"middle\">device upload</text><text x=\"65\" y=\"63\" text-anchor=\"middle\">encrypted</text><path d=\"M120 48 H165\" stroke=\"#386957\" stroke-width=\"4\"/><rect x=\"165\" y=\"15\" width=\"115\" height=\"65\" rx=\"9\" fill=\"${ok?'#d6f4b5':'#ffd7b7'}\"/><text x=\"222\" y=\"40\" text-anchor=\"middle\">KMS key gate</text><text x=\"222\" y=\"62\" text-anchor=\"middle\">${ok?'MATCH':'DENY'}</text><path d=\"M280 48 H325\" stroke=\"#386957\" stroke-width=\"4\"/><rect x=\"325\" y=\"20\" width=\"95\" height=\"55\" rx=\"9\" fill=\"${ok?'#d6f4b5':'#e4eee8'}\"/><text x=\"372\" y=\"44\" text-anchor=\"middle\">TEE P7</text><text x=\"372\" y=\"63\" text-anchor=\"middle\">${ok?'key':'no key'}</text><rect x=\"105\" y=\"135\" width=\"220\" height=\"65\" rx=\"9\" fill=\"#eef4f0\" stroke=\"#386957\"/><text x=\"215\" y=\"160\" text-anchor=\"middle\">public transparency log</text><text x=\"215\" y=\"184\" text-anchor=\"middle\">allowed policy: P7</text><path d=\"M215 135 V85\" stroke=\"#386957\" stroke-dasharray=\"6 4\"/></svg><p>Attestation: ${ok?'P7':'X9'}; policy: P7; key released: ${ok}.</p><p>Raw upload visible to operator in this model: never.</p>`;}attestationMatch.onchange=teePaint;teePaint();",
+    "questions": [
+      [
+        "Attestation reports X9 but policy allows P7. What should KMS do?",
+        [
+          "Release the key",
+          "Deny the key",
+          "Publish raw data"
+        ],
+        1,
+        "The mismatch means the workload is not within the pre-authorized policy."
+      ],
+      [
+        "What does the public log add?",
+        [
+          "A visible record of allowed workload policies for auditing",
+          "A copy of every raw training example",
+          "A guarantee against every side channel"
+        ],
+        0,
+        "The log supports transparency about authorized workloads; it does not publish raw data or eliminate TEE limitations."
+      ],
+      [
+        "Does this browser model prove privacy?",
+        [
+          "Yes",
+          "Only for keyboard data",
+          "No; it compares labels and omits cryptography and DP"
+        ],
+        2,
+        "A UI state transition is explanatory, not security evidence."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "allowed_policy = \"P7\"\nattested_workload = \"X9\"",
+          "note": "A client policy and presented workload do not match."
+        },
+        {
+          "code": "key_released = attested_workload == allowed_policy\nplaintext_available = key_released",
+          "note": "The key gate denies the mismatched workload."
+        },
+        {
+          "code": "attested_workload = \"P7\"\nkey_released = attested_workload == allowed_policy\nplaintext_available = key_released",
+          "note": "A matching label opens the toy gate; real attestation is far richer."
+        }
+      ],
+      "expect": {
+        "key_released": true,
+        "plaintext_available": true
+      },
+      "limit": "Executed string comparisons only. It is not a security or privacy implementation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "allowed_policy": "P7",
+            "attested_workload": "X9"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "allowed_policy": "P7",
+            "attested_workload": "X9",
+            "key_released": false,
+            "plaintext_available": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "allowed_policy": "P7",
+            "attested_workload": "P7",
+            "key_released": true,
+            "plaintext_available": true
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Google Research: Toward provably private learning from federated data",
+        "https://www.research.google/blog/toward-provably-private-learning-from-federated-data/",
+        "2026-10-02"
+      ],
+      [
+        "Daly et al. whitepaper",
+        "https://arxiv.org/abs/2609.31494",
+        "2026-09 preprint"
+      ]
+    ],
+    "visual_explanation": "Encrypted data, policy log, KMS gate and TEE are separate. Only a matching workload identity opens the key path.",
+    "written_questions": [
+      "Which component makes the allowed program externally inspectable?",
+      "Name two TEE or surrounding-system limits you would investigate before adoption."
+    ],
+    "source_checked_on": "2026-10-09"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "The digest must match: verify build provenance before deployment",
+    "goal": "Block a substituted binary even when its filename and release tag look correct.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A sealed shipping label says which factory packed a box and identifies the exact contents. If someone swaps the contents, the box name stays the same but its fingerprint changes. A build attestation similarly links an artifact digest to build provenance.</p><p>Verification must check the downloaded artifact’s digest, the attestation’s signature and the signer identity or repository policy. Merely finding an attestation with the same filename is not enough.</p>",
+    "example": "<p>The trusted build emits <code>service.bin</code> with digest <code>sha256:aaa</code> and an attestation for that digest. A registry tag later points to bytes with digest <code>sha256:bbb</code>. Verification fails before deployment even though the filename and tag still look familiar.</p><pre><code>permissions:\n  id-token: write\n  contents: read\n  attestations: write\nsteps:\n  - uses: actions/attest@v4\n    with:\n      subject-path: dist/service.bin\n# consumer gate\n$ gh attestation verify dist/service.bin -R acme/service</code></pre><p>This snippet follows current GitHub documentation but is not run here. Private/internal availability depends on plan; the lesson source lists current documented conditions.</p>",
+    "use_case": {
+      "when": "Use this when binaries or container images cross a trust boundary from build to registry to deployment.",
+      "example": "A deployment job downloads service.bin and verifies its provenance against the expected repository before promoting it.",
+      "decision": "Attestation complements dependency review, protected workflows, SBOMs and signing policy. It does not prove the source is safe or the build system uncompromised."
+    },
+    "practice": "Switch the downloaded digest and signer repository. Predict which verification condition fails and whether deployment proceeds.",
+    "boundary": "The browser compares strings and booleans; it does not sign, query GitHub, validate Sigstore material or run gh. Real verification must validate cryptography, timestamps and signer identity.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:17px}.cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:7px}.cell{border:2px solid #54786f;border-radius:8px;padding:10px;text-align:center}.scan{background:#ffd7b7}.skip{background:#dce8e1;color:#51635e}.keep{background:#d6f4b5}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.meter{height:28px;background:#d9e3de;display:flex}.meter span{display:block;height:100%}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"artifactDigest\">Downloaded artifact digest</label><select id=\"artifactDigest\"><option value=\"aaa\">sha256:aaa — expected</option><option value=\"bbb\">sha256:bbb — substituted</option></select><label for=\"signerRepo\">Attestation signer</label><select id=\"signerRepo\"><option value=\"trusted\">acme/service</option><option value=\"other\">other/fork</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function attestPaint(){const digest=artifactDigest.value==='aaa',signer=signerRepo.value==='trusted',ok=digest&&signer;world.innerHTML=`<div class=\"lane ${digest?'good':'bad'}\">1. Digest: downloaded sha256:${artifactDigest.value}; attested sha256:aaa → ${digest?'MATCH':'MISMATCH'}</div><div class=\"lane ${signer?'good':'bad'}\">2. Signer policy: ${signerRepo.value==='trusted'?'acme/service':'other/fork'} → ${signer?'TRUSTED':'UNTRUSTED'}</div><div class=\"lane ${ok?'good':'bad'}\">3. Deployment gate → ${ok?'PASS':'BLOCK'}</div><p>Filename: service.bin in every branch. Names do not establish identity.</p>`;}artifactDigest.onchange=attestPaint;signerRepo.onchange=attestPaint;attestPaint();",
+    "questions": [
+      [
+        "The filename matches but digest differs. What should verification do?",
+        [
+          "Pass because the tag is trusted",
+          "Block because the attestation names different bytes",
+          "Rename the file"
+        ],
+        1,
+        "The digest binds provenance to exact content; a stable name does not."
+      ],
+      [
+        "Digest matches but signer is outside policy. What is missing?",
+        [
+          "Artifact bytes",
+          "Trusted builder identity",
+          "A larger runner"
+        ],
+        1,
+        "Content identity alone does not establish who produced it under which workflow."
+      ],
+      [
+        "What does a valid provenance attestation prove?",
+        [
+          "The software has no vulnerabilities",
+          "Where/how the attested artifact was built under verified claims",
+          "Every dependency is licensed"
+        ],
+        1,
+        "Provenance is valuable evidence about origin, not a blanket quality, vulnerability or licensing guarantee."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "attested = {\"digest\": \"aaa\", \"repo\": \"acme/service\"}\ndownloaded = {\"name\": \"service.bin\", \"digest\": \"bbb\"}",
+          "note": "The release name looks right, but bytes were substituted."
+        },
+        {
+          "code": "digest_ok = downloaded[\"digest\"] == attested[\"digest\"]\nrepo_ok = attested[\"repo\"] == \"acme/service\"",
+          "note": "Evaluate content identity and signer policy separately."
+        },
+        {
+          "code": "deploy = digest_ok and repo_ok",
+          "note": "Deployment remains blocked despite the familiar filename."
+        }
+      ],
+      "expect": {
+        "digest_ok": false,
+        "repo_ok": true,
+        "deploy": false
+      },
+      "limit": "Executed Python equality checks. No cryptographic signature or GitHub attestation is verified.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "attested": {
+              "digest": "aaa",
+              "repo": "acme/service"
+            },
+            "downloaded": {
+              "name": "service.bin",
+              "digest": "bbb"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "attested": {
+              "digest": "aaa",
+              "repo": "acme/service"
+            },
+            "downloaded": {
+              "name": "service.bin",
+              "digest": "bbb"
+            },
+            "digest_ok": false,
+            "repo_ok": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "attested": {
+              "digest": "aaa",
+              "repo": "acme/service"
+            },
+            "downloaded": {
+              "name": "service.bin",
+              "digest": "bbb"
+            },
+            "digest_ok": false,
+            "repo_ok": true,
+            "deploy": false
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Docs: artifact attestations for builds",
+        "https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations",
+        "Living docs; actions/attest v4 checked 2026-10-09"
+      ],
+      [
+        "GitHub Docs: artifact attestation concept",
+        "https://docs.github.com/en/actions/concepts/security/artifact-attestations",
+        "Living docs; checked 2026-10-09"
+      ]
+    ],
+    "visual_explanation": "A three-stage gate shows digest identity, signer policy and final deployment decision. A stable filename is deliberately held constant.",
+    "written_questions": [
+      "Which repository or workflow identities would your deployment policy trust?",
+      "What supply-chain risk remains after provenance verification passes?"
+    ],
+    "source_checked_on": "2026-10-09"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Verify the exact webhook bytes before parsing",
+    "goal": "Reject payload tampering before business logic sees the event.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A tamper-evident envelope is checked before you open and repackage the letter. Webhook receivers should likewise verify the signature over the exact request bytes before parsing or transforming the JSON.</p><p>With GitHub webhooks, the sender computes an HMAC-SHA256 using a shared secret and sends it in <code>X-Hub-Signature-256</code>. The receiver recomputes the HMAC over the raw payload and uses a timing-safe comparison.</p>",
+    "example": "<p>The original body is <code>{\"amount\":50}</code>. Its header matches. A proxy or attacker changes the body to <code>{\"amount\":500}</code> but cannot recompute the header without the secret, so verification fails. Parsing and reserializing first can also change whitespace or key order and break a legitimate signature.</p><pre><code>expected = \"sha256=\" + hmac_sha256(secret, raw_body)\nif not constant_time_equal(expected, header): reject()\nevent = json_parse(raw_body)</code></pre><p>The Python replay computes real HMAC values with a synthetic secret. Never put a production secret in this page or repository.</p>",
+    "use_case": {
+      "when": "Use this for webhook endpoints that trigger builds, payments, data loads or other side effects.",
+      "example": "A GitHub push webhook starts a deployment only after its raw UTF-8 body passes signature verification.",
+      "decision": "Signature validation authenticates the shared secret holder and detects body changes. Add delivery-ID deduplication and freshness/replay policy separately; HMAC alone does not stop a captured valid delivery from being replayed."
+    },
+    "practice": "Toggle body tampering and verification order. Predict whether the request reaches JSON parsing and business processing.",
+    "boundary": "The browser uses precomputed teaching labels, not Web Crypto. The Python replay uses a synthetic secret but omits HTTP headers, timing measurement, secret rotation, replay storage and delivery retries.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px}.mechanism svg{width:100%;height:auto;display:block;font-size:17px}.cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:7px}.cell{border:2px solid #54786f;border-radius:8px;padding:10px;text-align:center}.scan{background:#ffd7b7}.skip{background:#dce8e1;color:#51635e}.keep{background:#d6f4b5}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.meter{height:28px;background:#d9e3de;display:flex}.meter span{display:block;height:100%}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"bodyVersion\">Received raw body</label><select id=\"bodyVersion\"><option value=\"original\">Original amount 50</option><option value=\"tampered\">Tampered amount 500</option></select><label for=\"verifyOrder\">Receiver order</label><select id=\"verifyOrder\"><option value=\"first\">Verify raw bytes, then parse</option><option value=\"after\">Parse/process before verifying</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function hookPaint(){const authentic=bodyVersion.value==='original',safeOrder=verifyOrder.value==='first';world.innerHTML=`<div class=\"lane ${authentic?'good':'bad'}\">1. HMAC over received raw bytes → ${authentic?'MATCH':'MISMATCH'}</div><div class=\"lane ${safeOrder?'good':'bad'}\">2. Processing order → ${safeOrder?'verification first':'business logic first'}</div><div class=\"lane ${(authentic&&safeOrder)?'good':'bad'}\">3. Business effect → ${authentic&&safeOrder?'ACCEPT amount 50':safeOrder?'REJECT before effect':'UNSAFE: effect may run before rejection'}</div><p>Replay protection: not modeled; a captured valid original would still match.</p>`;}bodyVersion.onchange=hookPaint;verifyOrder.onchange=hookPaint;hookPaint();",
+    "questions": [
+      [
+        "Body changes from amount 50 to 500 but header stays the same. What happens?",
+        [
+          "HMAC mismatch",
+          "HMAC automatically updates",
+          "Verification proves 500 is valid"
+        ],
+        0,
+        "The secret-backed digest covers the payload bytes; changing them invalidates the old header."
+      ],
+      [
+        "Why verify before JSON parsing?",
+        [
+          "JSON cannot be parsed",
+          "The signature covers exact raw bytes and untrusted events should not trigger logic first",
+          "It makes HMAC public"
+        ],
+        1,
+        "Transformation can change bytes, and business logic should not process unauthenticated input."
+      ],
+      [
+        "What threat remains after a valid signature?",
+        [
+          "Payload tampering without the secret",
+          "Replay of a captured valid delivery unless separately controlled",
+          "All network failures disappear"
+        ],
+        1,
+        "HMAC integrity does not provide uniqueness or freshness. Track delivery IDs and define a replay window or idempotent handling."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "import hmac, hashlib\nsecret = b\"study-secret\"\noriginal = b'{\"amount\":50}'\nheader = \"sha256=\" + hmac.new(secret, original, hashlib.sha256).hexdigest()",
+          "note": "Create a synthetic valid signature over the original bytes."
+        },
+        {
+          "code": "tampered = b'{\"amount\":500}'\nexpected = \"sha256=\" + hmac.new(secret, tampered, hashlib.sha256).hexdigest()",
+          "note": "Recompute what the changed body would require."
+        },
+        {
+          "code": "valid_original = hmac.compare_digest(header, \"sha256=\" + hmac.new(secret, original, hashlib.sha256).hexdigest())\nvalid_tampered = hmac.compare_digest(header, expected)",
+          "note": "The original passes; the changed body fails against the unchanged header."
+        }
+      ],
+      "expect": {
+        "valid_original": true,
+        "valid_tampered": false
+      },
+      "limit": "Executed Python HMAC-SHA256 with a public synthetic secret. No HTTP request or timing experiment runs.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "header": "sha256=fb1500834ad8d3ca43c29dbd670cf700244c0901aad8bdc1aa91120db18119ad"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "header": "sha256=fb1500834ad8d3ca43c29dbd670cf700244c0901aad8bdc1aa91120db18119ad",
+            "expected": "sha256=780606e258944d06c87049f2cbb881c447c7d8d9fe245e0182c4dd65d97ec6fc"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "header": "sha256=fb1500834ad8d3ca43c29dbd670cf700244c0901aad8bdc1aa91120db18119ad",
+            "expected": "sha256=780606e258944d06c87049f2cbb881c447c7d8d9fe245e0182c4dd65d97ec6fc",
+            "valid_original": true,
+            "valid_tampered": false
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "GitHub Docs: validating webhook deliveries",
+        "https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries",
+        "Living docs; checked 2026-10-09"
+      ],
+      [
+        "GitHub Docs: webhook best practices",
+        "https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks",
+        "Living docs; checked 2026-10-09"
+      ]
+    ],
+    "visual_explanation": "The pipeline places signature comparison before parsing and side effects. Tampering turns the first gate red; unsafe ordering shows why eventual rejection can be too late.",
+    "written_questions": [
+      "How will you rotate webhook secrets without dropping deliveries?",
+      "Design delivery-ID deduplication for a redelivered valid event."
+    ],
+    "source_checked_on": "2026-10-09"
+  }
+]

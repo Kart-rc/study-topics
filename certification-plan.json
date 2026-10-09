@@ -80,6 +80,36 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day19/data-engineering",
+      "product_material_added_on": "2026-10-09",
+      "session_type": "focused",
+      "cycle_position": 3,
+      "cycle_origin": "Day17",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "transformation_modeling",
+        "troubleshooting_optimization"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Full objective IDs and weights unverified; performance planning group only",
+      "snowflake_planning_groups": [
+        "performance"
+      ],
+      "source_checked_on": "2026-10-09",
+      "source_versions": {
+        "databricks": "Data-skipping and liquid-clustering docs checked 2026-10-09",
+        "snowflake": "Micro-partition and clustering-key docs checked 2026-10-09"
+      },
+      "depth": "Focused pruning and clustering tradeoff; not complete performance-domain coverage",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -89,7 +119,13 @@
     14,
     30
   ],
-  "product_review_deliveries": [],
+  "product_review_deliveries": [
+    {
+      "day_number": 19,
+      "date": "2026-10-09",
+      "key": "Day17/data-engineering+products+1"
+    }
+  ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
   "readiness_criteria": {
     "fresh_timed_practice_sets": 2,
