@@ -1,0 +1,1037 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "One receipt becomes two item rows: flatten nested data deliberately",
+    "goal": "Keep the flexible original payload while projecting predictable rows for analytics.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A paper receipt has one header and several item lines. JSON often uses the same shape: one order contains an <code>items</code> array. A semi-structured <strong>VARIANT</strong> keeps that nested shape. <strong>Flattening</strong> turns each array element into a correlated row.</p><p>Parse once, preserve the raw record, then project stable columns such as <code>order_id</code>, <code>sku</code>, and <code>qty</code>.</p>",
+    "example": "<p>Order <code>R7</code> contains two items: two units of SKU A and one of SKU B. Switching to item rows repeats <code>R7</code> while emitting two child rows. That repetition preserves the parent-child relationship.</p><p>A malformed payload is different from an empty array. Strict parsing stops it; tolerant parsing can quarantine it, but null must not silently mean “zero items.”</p>",
+    "use_case": {
+      "when": "Use this when producers add optional fields or nested arrays faster than a rigid ingestion schema can evolve.",
+      "example": "Land order JSON in a bronze table, retain the original VARIANT, then flatten items into a silver line-item table.",
+      "decision": "Use VARIANT for genuine flexibility and typed columns for stable high-value fields. Flatten only needed paths because row counts can grow quickly."
+    },
+    "practice": "Predict the row count for R7. Switch between nested, flattened, and malformed states; explain what each preserves.",
+    "boundary": "The browser uses one hand-authored receipt. It does not parse JSON, infer schema, run a distributed plan, or reproduce product errors.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:16px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"jsonState\">Payload state</label><select id=\"jsonState\"><option value=\"valid\">Valid receipt R7</option><option value=\"malformed\">Malformed JSON</option></select><label for=\"jsonView\">View</label><select id=\"jsonView\"><option value=\"nested\">One nested receipt</option><option value=\"flat\">One row per item</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function variantPaint(){const v=jsonState.value==='valid',f=jsonView.value==='flat';if(!v)world.innerHTML='<div class=\"lane bad\"><strong>Parse failed</strong><br>Quarantine raw bytes; this is not zero items.</div>';else if(!f)world.innerHTML='<div class=\"lane good\"><strong>R7</strong> · Ava<br>items=[A×2, B×1]</div><p>1 parent row; children remain nested.</p>';else world.innerHTML='<div class=\"rows\"><div class=\"row active\">R7 · A · qty 2</div><div class=\"row active\">R7 · B · qty 1</div></div><p>2 item rows; R7 repeats for correlation.</p>';}jsonState.onchange=variantPaint;jsonView.onchange=variantPaint;variantPaint();",
+    "questions": [
+      [
+        "R7 has two objects in items. How many item rows should it emit?",
+        [
+          "One",
+          "Two",
+          "Three"
+        ],
+        1,
+        "Flatten counts array elements, not total quantity."
+      ],
+      [
+        "Tolerant parsing returns null. What is safe?",
+        [
+          "Assume no items",
+          "Treat it as a parse/NULL state requiring explicit handling",
+          "Assume valid"
+        ],
+        1,
+        "Parse failure and an empty array are distinct."
+      ],
+      [
+        "Why keep raw VARIANT after typed projection?",
+        [
+          "Guaranteed speed",
+          "Controlled reprocessing and audit of unprojected fields",
+          "No governance"
+        ],
+        1,
+        "Raw data supports later projection but does not replace contracts."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "receipt={\"order_id\":\"R7\",\"items\":[{\"sku\":\"A\",\"qty\":2},{\"sku\":\"B\",\"qty\":1}]}",
+          "note": "Define one nested order."
+        },
+        {
+          "code": "rows=[{\"order_id\":receipt[\"order_id\"],**item} for item in receipt[\"items\"]]",
+          "note": "Emit one correlated row per item."
+        },
+        {
+          "code": "row_count=len(rows)\nunit_count=sum(r[\"qty\"] for r in rows)",
+          "note": "Count child rows separately from quantity."
+        }
+      ],
+      "expect": {
+        "row_count": 2,
+        "unit_count": 3
+      },
+      "limit": "Executed local Python only; no vendor SQL ran.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "receipt": {
+              "order_id": "R7",
+              "items": [
+                {
+                  "sku": "A",
+                  "qty": 2
+                },
+                {
+                  "sku": "B",
+                  "qty": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "receipt": {
+              "order_id": "R7",
+              "items": [
+                {
+                  "sku": "A",
+                  "qty": 2
+                },
+                {
+                  "sku": "B",
+                  "qty": 1
+                }
+              ]
+            },
+            "rows": [
+              {
+                "order_id": "R7",
+                "sku": "A",
+                "qty": 2
+              },
+              {
+                "order_id": "R7",
+                "sku": "B",
+                "qty": 1
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "receipt": {
+              "order_id": "R7",
+              "items": [
+                {
+                  "sku": "A",
+                  "qty": 2
+                },
+                {
+                  "sku": "B",
+                  "qty": 1
+                }
+              ]
+            },
+            "rows": [
+              {
+                "order_id": "R7",
+                "sku": "A",
+                "qty": 2
+              },
+              {
+                "order_id": "R7",
+                "sku": "B",
+                "qty": 1
+              }
+            ],
+            "row_count": 2,
+            "unit_count": 3
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks: query VARIANT data",
+        "https://docs.databricks.com/aws/en/semi-structured/variant",
+        "Updated 2026-09-11"
+      ],
+      [
+        "Snowflake: query semi-structured data",
+        "https://docs.snowflake.com/en/user-guide/querying-semistructured",
+        "Living docs"
+      ]
+    ],
+    "visual_explanation": "The visual changes one parent into two correlated children and keeps malformed input separate from an empty array.",
+    "written_questions": [
+      "Which fields become typed silver columns first?",
+      "How will parse failures remain replayable?"
+    ],
+    "source_checked_on": "2026-10-10",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: parse VARIANT, then explode only items",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Land changing order JSON without discarding new fields, then create an item-level silver projection.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production Databricks SQL warehouse or cluster and Unity Catalog schema. Use DBR 15.4 LTS or later for the documented VARIANT query path. The operator needs create/modify privileges and compute; selected compute incurs cost.</p><p><strong>9-minute route.</strong> First minute: due product recall. Then predict R7 row counts, advance the SQL, and explain malformed-input handling.</p><p>The SQL is <strong>not run on Databricks</strong>. Buttons run a local JavaScript model.</p><pre class=\"codepanel\"><code><span id=\"dbLine0\">CREATE TABLE study20.bronze_orders (raw VARIANT);</span><span id=\"dbLine1\">INSERT INTO study20.bronze_orders SELECT parse_json(&#x27;{&quot;order_id&quot;:&quot;R7&quot;,&quot;items&quot;:[{&quot;sku&quot;:&quot;A&quot;,&quot;qty&quot;:2},{&quot;sku&quot;:&quot;B&quot;,&quot;qty&quot;:1}]}&#x27;);</span><span id=\"dbLine2\">SELECT raw:order_id::STRING, item.value:sku::STRING, item.value:qty::INT FROM study20.bronze_orders, LATERAL variant_explode(raw:items) item;</span></code></pre><button id=\"dbNext\">Advance modeled statement</button><button id=\"dbReset\">Reset model</button><div id=\"dbWorld\" class=\"mechanism\"></div><p id=\"dbState\" aria-live=\"polite\"></p><p><strong>Failure/fix.</strong> <code>parse_json</code> errors on malformed input; deliberately quarantine with raw bytes, optionally using <code>try_parse_json</code>. VARIANT has documented clustering and operation limits.</p>",
+        "markdown": "Authorized DBR 15.4 LTS+ sandbox; SQL unexecuted.\n\n```sql\nCREATE TABLE study20.bronze_orders (raw VARIANT);\nINSERT INTO study20.bronze_orders SELECT parse_json('{\"order_id\":\"R7\",\"items\":[{\"sku\":\"A\",\"qty\":2},{\"sku\":\"B\",\"qty\":1}]}');\nSELECT raw:order_id::STRING, item.value:sku::STRING, item.value:qty::INT FROM study20.bronze_orders, LATERAL variant_explode(raw:items) item;\n```\n\nThe model stores one R7 row and emits two child rows. Preserve malformed raw input; VARIANT has operation limits.",
+        "javascript": "const dbNext=$('dbNext'),dbReset=$('dbReset');let dbStep=-1;function dbPaint(){for(let i=0;i<3;i++)$('dbLine'+i).classList.toggle('active',i===dbStep);$('dbWorld').innerHTML=dbStep<2?'<div class=\"lane '+(dbStep<0?'':'good')+'\">'+(['No table yet','VARIANT table created','R7 stored as one nested row'][dbStep+1])+'</div><p>Visible item rows: '+(dbStep===1?1:0)+'</p>':'<div class=\"rows\"><div class=\"row active\">R7 · A · qty 2</div><div class=\"row active\">R7 · B · qty 1</div></div><p>2 item rows; 3 total units.</p>';$('dbState').textContent='Step '+(dbStep+1)+'/3. '+(dbStep<0?'Predict first.':dbStep===2?'Flatten emitted two correlated rows.':'Vendor statement selected; not actually executed.');dbNext.disabled=dbStep===2;}dbNext.onclick=()=>{dbStep=Math.min(2,dbStep+1);dbPaint();};dbReset.onclick=()=>{dbStep=-1;dbPaint();};dbPaint();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: correlate VARIANT with LATERAL FLATTEN",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Keep a nested receipt in VARIANT and emit one relational row per item.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production Snowflake account, schema, and active warehouse. The role needs create/insert/select privileges; warehouse use costs credits.</p><p><strong>9-minute route.</strong> First minute: due product recall. Then predict R7 rows, advance SQL, and distinguish null, empty array, and parse failure.</p><p>The SQL is <strong>not run on Snowflake</strong>. Buttons run a local JavaScript model.</p><pre class=\"codepanel\"><code><span id=\"sfLine0\">CREATE TABLE study20.bronze_orders (raw VARIANT);</span><span id=\"sfLine1\">INSERT INTO study20.bronze_orders SELECT PARSE_JSON(&#x27;{&quot;order_id&quot;:&quot;R7&quot;,&quot;items&quot;:[{&quot;sku&quot;:&quot;A&quot;,&quot;qty&quot;:2},{&quot;sku&quot;:&quot;B&quot;,&quot;qty&quot;:1}]}&#x27;);</span><span id=\"sfLine2\">SELECT raw:order_id::STRING, item.value:sku::STRING, item.value:qty::INT FROM study20.bronze_orders, LATERAL FLATTEN(input =&gt; raw:items) item;</span></code></pre><button id=\"sfNext\">Advance modeled statement</button><button id=\"sfReset\">Reset model</button><div id=\"sfWorld\" class=\"mechanism\"></div><p id=\"sfState\" aria-live=\"polite\"></p><p><strong>Failure/fix.</strong> <code>PARSE_JSON</code> rejects invalid JSON; <code>TRY_PARSE_JSON</code> can return SQL NULL. Recursive FLATTEN can multiply rows rapidly, so scope the path.</p>",
+        "markdown": "Authorized Snowflake sandbox with active warehouse; SQL unexecuted.\n\n```sql\nCREATE TABLE study20.bronze_orders (raw VARIANT);\nINSERT INTO study20.bronze_orders SELECT PARSE_JSON('{\"order_id\":\"R7\",\"items\":[{\"sku\":\"A\",\"qty\":2},{\"sku\":\"B\",\"qty\":1}]}');\nSELECT raw:order_id::STRING, item.value:sku::STRING, item.value:qty::INT FROM study20.bronze_orders, LATERAL FLATTEN(input => raw:items) item;\n```\n\nThe model stores one R7 row and emits two item rows. Parse failure, SQL NULL, and empty array are distinct.",
+        "javascript": "const sfNext=$('sfNext'),sfReset=$('sfReset');let sfStep=-1;function sfPaint(){for(let i=0;i<3;i++)$('sfLine'+i).classList.toggle('active',i===sfStep);$('sfWorld').innerHTML=sfStep<2?'<div class=\"lane '+(sfStep<0?'':'good')+'\">'+(['No table yet','VARIANT table created','R7 stored as one nested row'][sfStep+1])+'</div><p>Visible item rows: '+(sfStep===1?1:0)+'</p>':'<div class=\"rows\"><div class=\"row active\">R7 · A · qty 2</div><div class=\"row active\">R7 · B · qty 1</div></div><p>2 item rows; 3 total units.</p>';$('sfState').textContent='Step '+(sfStep+1)+'/3. '+(sfStep<0?'Predict first.':sfStep===2?'Flatten emitted two correlated rows.':'Vendor statement selected; not actually executed.');sfNext.disabled=sfStep===2;}sfNext.onclick=()=>{sfStep=Math.min(2,sfStep+1);sfPaint();};sfReset.onclick=()=>{sfStep=-1;sfPaint();};sfPaint();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Flexible value</td><td>VARIANT</td><td>VARIANT</td></tr><tr><td>Parse</td><td>parse_json</td><td>PARSE_JSON</td></tr><tr><td>Child rows</td><td>variant_explode</td><td>LATERAL FLATTEN</td></tr><tr><td>Tolerant parse</td><td>try_parse_json</td><td>TRY_PARSE_JSON</td></tr></tbody></table><p>Names look similar; syntax, runtime requirements, optimization, and limits remain product-specific.</p>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Flexible value | VARIANT | VARIANT |\n| Parse | parse_json | PARSE_JSON |\n| Child rows | variant_explode | LATERAL FLATTEN |\n| Tolerant parse | try_parse_json | TRY_PARSE_JSON |"
+    },
+    "product_questions": [
+      [
+        "Databricks: R7 has two item objects. variant_explode emits?",
+        [
+          "One parent",
+          "Two children correlated with R7",
+          "Three rows from qty"
+        ],
+        1,
+        "It counts elements, not units."
+      ],
+      [
+        "Snowflake: TRY_PARSE_JSON returns SQL NULL. Meaning?",
+        [
+          "Definitely empty items",
+          "Parsing failed or input was NULL; handle explicitly",
+          "Already flattened"
+        ],
+        1,
+        "Do not collapse malformed input into empty business data."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks VARIANT",
+        "https://docs.databricks.com/aws/en/semi-structured/variant",
+        "Updated 2026-09-11"
+      ],
+      [
+        "Databricks parse_json",
+        "https://docs.databricks.com/aws/en/sql/language-manual/functions/parse_json",
+        "Updated 2026-09-11"
+      ],
+      [
+        "Snowflake semi-structured queries",
+        "https://docs.snowflake.com/en/user-guide/querying-semistructured",
+        "Living docs"
+      ],
+      [
+        "Snowflake FLATTEN",
+        "https://docs.snowflake.com/en/sql-reference/functions/flatten",
+        "Living docs"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-10",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "ingestion",
+          "transformation_modeling"
+        ],
+        "scope": "Focused VARIANT ingestion and projection; not complete domain coverage."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "domains": [
+          "data_formats",
+          "loading_unloading_transformation"
+        ],
+        "scope": "Focused VARIANT and FLATTEN planning groups; full C03 objective IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "A clock can move backward: measure elapsed time with a monotonic source",
+    "goal": "Use a monotonic clock for durations and a wall clock for human timestamps.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A kitchen timer measures how long the cake baked. A wall clock tells when dinner started. Correcting the wall clock should not make the timer say “minus two seconds.”</p><p>A <strong>wall clock</strong> maps to calendar time and may jump. A <strong>monotonic clock</strong> moves in one direction and is intended for elapsed comparisons.</p>",
+    "example": "<p>A request starts at 12:00:00.000. During 250 ms of work, the wall clock is corrected backward by two seconds. Wall subtraction says −1750 ms; monotonic subtraction still says 250 ms.</p><pre><code>long start = System.nanoTime();<br>work();<br>long elapsed = System.nanoTime() - start;</code></pre>",
+    "use_case": {
+      "when": "Use this for deadlines, retry backoff, cache-expiry checks, latency metrics, and local lease intervals.",
+      "example": "A Java service enforces a 500 ms local deadline even if time synchronization adjusts the wall clock.",
+      "decision": "Use wall time for audit timestamps. Use monotonic time for local duration; its origin is arbitrary and it is not comparable across machines or restarts."
+    },
+    "practice": "Toggle source and a backward correction. Predict the duration.",
+    "boundary": "The browser uses fixed values; it omits clock resolution, scheduler pauses, VM suspension, and distributed uncertainty.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:16px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"clockKind\">Duration source</label><select id=\"clockKind\"><option value=\"wall\">Wall clock</option><option value=\"mono\">Monotonic clock</option></select><label for=\"clockCorrection\">During request</label><select id=\"clockCorrection\"><option value=\"none\">No correction</option><option value=\"back\">Wall moves back 2000 ms</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function clockPaint(){const m=clockKind.value==='mono',b=clockCorrection.value==='back',e=m?250:(b?-1750:250);world.innerHTML='<svg viewBox=\"0 0 430 180\" role=\"img\" aria-label=\"Wall clock correction can move finish before start\"><line x1=\"55\" y1=\"62\" x2=\"375\" y2=\"62\" stroke=\"#386957\" stroke-width=\"4\"/><circle cx=\"95\" cy=\"62\" r=\"9\" fill=\"#287b64\"/><circle cx=\"335\" cy=\"62\" r=\"9\" fill=\"#d18621\"/><text x=\"95\" y=\"38\" text-anchor=\"middle\">start</text><text x=\"335\" y=\"38\" text-anchor=\"middle\">finish</text><path d=\"M275 96 L180 125\" stroke=\"'+(b?'#a74a3d':'#779e91')+'\" stroke-width=\"5\"/><text x=\"215\" y=\"150\" text-anchor=\"middle\">'+(b?'wall −2000 ms':'no correction')+'</text></svg><p>'+(m?'Monotonic':'Wall-clock')+' subtraction: <strong>'+e+' ms</strong>.</p><p>'+(e<0?'Impossible duration: wrong clock.':'Meaningful duration in this model.')+'</p>';}clockKind.onchange=clockPaint;clockCorrection.onchange=clockPaint;clockPaint();",
+    "questions": [
+      [
+        "Wall time jumps back 2000 ms during 250 ms of work. Result?",
+        [
+          "250 ms",
+          "A negative duration",
+          "A global order"
+        ],
+        1,
+        "End wall time can be earlier than start."
+      ],
+      [
+        "Java source for elapsed time?",
+        [
+          "System.nanoTime()",
+          "System.getenv()",
+          "LocalDate.now()"
+        ],
+        0,
+        "nanoTime is documented for elapsed timing."
+      ],
+      [
+        "What does nanoTime not provide?",
+        [
+          "Local duration",
+          "A calendar timestamp comparable across machines",
+          "A local nondecreasing source"
+        ],
+        1,
+        "Its origin is arbitrary."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var startWall=12000000L; var startMono=1000000000L;",
+          "note": "Capture synthetic starts."
+        },
+        {
+          "code": "var endWall=11998250L; var endMono=1250000000L;",
+          "note": "Wall time moves back while monotonic advances."
+        },
+        {
+          "code": "var wallElapsed=endWall-startWall; var monoElapsed=(endMono-startMono)/1000000L;",
+          "note": "Compute both durations in milliseconds."
+        }
+      ],
+      "expect": {
+        "wallElapsed": "-1750",
+        "monoElapsed": "250"
+      },
+      "limit": "Executed Java 17 arithmetic with synthetic readings; it did not alter the host clock.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "startWall": "12000000",
+            "startMono": "1000000000"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "startWall": "12000000",
+            "startMono": "1000000000",
+            "endWall": "11998250",
+            "endMono": "1250000000"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "startWall": "12000000",
+            "startMono": "1000000000",
+            "endWall": "11998250",
+            "endMono": "1250000000",
+            "wallElapsed": "-1750",
+            "monoElapsed": "250"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java System.nanoTime",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/System.html",
+        "Java SE 25 API; checked 2026-10-10"
+      ]
+    ],
+    "visual_explanation": "The correction arrow changes the wall timeline while monotonic elapsed time stays 250 ms.",
+    "written_questions": [
+      "Name one elapsed-time and one calendar-time use.",
+      "Why can a persisted monotonic reading fail after restart?"
+    ],
+    "source_checked_on": "2026-10-10"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Keep checkout, drop recommendations: design a tested degraded mode",
+    "goal": "Preserve the critical customer path when an optional dependency is slow.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A restaurant can still serve dinner when the dessert printer breaks. If every meal waits for dessert, an optional feature became a critical dependency.</p><p><strong>Graceful degradation</strong> keeps minimum useful service working while omitting optional work. Leaders must name the outcome that survives, acceptable quality loss, and evidence that the fallback was exercised.</p>",
+    "example": "<p>Checkout calls payment, inventory, and recommendations. Recommendations rise from 80 ms to 4 seconds. Payment stays green, but checkout p99 becomes 4.2 seconds.</p><p>Contain with a 150 ms recommendation budget and omit that panel. Orders continue. Then repair the recommender and verify the fallback did not hide pricing, inventory, or payment errors.</p>",
+    "use_case": {
+      "when": "Use this when an optional dependency can consume a critical path’s latency or capacity budget.",
+      "example": "Return checkout confirmation without personalized recommendations after 150 ms.",
+      "decision": "Degrade only acceptable quality. Do not hide corrupt prices, authorization failures, or data loss; those need fail-closed or explicit error behavior."
+    },
+    "practice": "Make recommendations slow and toggle fallback. Observe useful checkout.",
+    "boundary": "The deterministic toy uses 100 requests and omits queues, retries, cohorts, regional failures, and correctness hazards.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:16px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"recLatency\">Recommendation latency</label><select id=\"recLatency\"><option value=\"80\">80 ms</option><option value=\"4000\">4000 ms</option></select><label for=\"fallbackMode\">Fallback</label><select id=\"fallbackMode\"><option value=\"off\">None</option><option value=\"on\">150 ms then omit</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function degradePaint(){const s=Number(recLatency.value)>150,o=fallbackMode.value==='on',n=s&&!o?0:100;world.innerHTML='<svg viewBox=\"0 0 430 210\" role=\"img\" aria-label=\"Checkout keeps critical branch and can bypass recommendations\"><rect x=\"15\" y=\"70\" width=\"95\" height=\"48\" rx=\"8\" fill=\"#d8e8f4\"/><text x=\"62\" y=\"99\" text-anchor=\"middle\">checkout</text><path d=\"M110 94 H175\" stroke=\"#386957\" stroke-width=\"4\"/><rect x=\"175\" y=\"35\" width=\"110\" height=\"48\" rx=\"8\" fill=\"#d6f4b5\"/><text x=\"230\" y=\"65\" text-anchor=\"middle\">pay + reserve</text><rect x=\"175\" y=\"125\" width=\"110\" height=\"48\" rx=\"8\" fill=\"'+(s?'#ffd7b7':'#d6f4b5')+'\"/><text x=\"230\" y=\"154\" text-anchor=\"middle\">recommend</text><path d=\"M285 59 L365 94 M285 149 L365 94\" stroke=\"#386957\" stroke-width=\"4\"/><rect x=\"350\" y=\"70\" width=\"65\" height=\"48\" rx=\"8\" fill=\"'+(n?'#d6f4b5':'#ffd7b7')+'\"/><text x=\"382\" y=\"99\" text-anchor=\"middle\">result</text></svg><p>Useful checkouts: <strong>'+n+'/100</strong>. '+(s&&o?'Recommendations omitted.':s?'Optional branch blocks all in this toy.':'Full experience.')+'</p>';}recLatency.onchange=degradePaint;fallbackMode.onchange=degradePaint;degradePaint();",
+    "questions": [
+      [
+        "Recommendations take 4 seconds. First containment?",
+        [
+          "Wait",
+          "Bound call and omit them",
+          "Skip payment"
+        ],
+        1,
+        "Bound the optional branch."
+      ],
+      [
+        "Which can be misleadingly green?",
+        [
+          "Payment health",
+          "Checkout latency",
+          "Recommendation latency"
+        ],
+        0,
+        "Payment can be healthy while end-to-end checkout fails."
+      ],
+      [
+        "Where not to degrade casually?",
+        [
+          "Recommendations",
+          "Price or authorization correctness",
+          "Decoration"
+        ],
+        1,
+        "Incorrect critical decisions are unacceptable."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "requests=100\nrecommendation_ms=4000\nfallback_tested=False",
+          "note": "Start overloaded without tested fallback."
+        },
+        {
+          "code": "served_without_fallback=0 if recommendation_ms>150 else requests",
+          "note": "Optional latency blocks the toy path."
+        },
+        {
+          "code": "fallback_tested=True\nserved_with_fallback=requests if fallback_tested else served_without_fallback",
+          "note": "Tested omission preserves checkout."
+        }
+      ],
+      "expect": {
+        "served_without_fallback": 0,
+        "fallback_tested": true,
+        "served_with_fallback": 100
+      },
+      "limit": "Executed a Python decision model, not a capacity forecast.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "requests": 100,
+            "recommendation_ms": 4000,
+            "fallback_tested": false
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "requests": 100,
+            "recommendation_ms": 4000,
+            "fallback_tested": false,
+            "served_without_fallback": 0
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "requests": 100,
+            "recommendation_ms": 4000,
+            "fallback_tested": true,
+            "served_without_fallback": 0,
+            "served_with_fallback": 100
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Google SRE: cascading failures",
+        "https://sre.google/sre-book/addressing-cascading-failures/",
+        "Foundation; checked 2026-10-10"
+      ],
+      [
+        "Google SRE: production service best practices",
+        "https://sre.google/sre-book/service-best-practices/",
+        "Foundation; checked 2026-10-10"
+      ]
+    ],
+    "visual_explanation": "The architecture separates critical and optional branches; controls change only the optional branch and survival behavior.",
+    "written_questions": [
+      "Which platform dependency is optional during an incident?",
+      "What test proves degradation is safe?"
+    ],
+    "source_checked_on": "2026-10-10"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "A tool call is a proposal: validate before the handler",
+    "goal": "Reject malformed agent arguments before any side effect.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>An agent filling a change form is like a person filling a bank form: plausible text is not an approved instruction. The tool boundary must check structure before the handler runs.</p><p>MCP tools advertise an <code>inputSchema</code>. Validation can enforce required fields, types, bounds, and unexpected properties. Authorization and producer approval remain separate gates.</p>",
+    "example": "<p>A data-quality tool accepts <code>{dataset, rule_type, threshold}</code>. The agent adds <code>approve:true</code>. A permissive schema lets it reach business code; <code>additionalProperties:false</code> rejects it before registration.</p><p>“Valid JSON” is not the same as valid tool input.</p>",
+    "use_case": {
+      "when": "Use this for tools that register rules, deploy code, spend money, or change production state.",
+      "example": "Validate a proposed data-quality rule before invoking the existing authenticated API.",
+      "decision": "Schema covers shape and bounds. Still enforce identity, dataset entitlement, tier approval, idempotency, audit, and semantic rules in the trusted service."
+    },
+    "practice": "Toggle strictness and proposal shape. Predict handler reachability.",
+    "boundary": "The browser performs three hand-coded checks, not JSON Schema or MCP. It does not authenticate, authorize, approve, or call an API.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:16px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"schemaMode\">Schema</label><select id=\"schemaMode\"><option value=\"strict\">Reject extras</option><option value=\"loose\">Allow extras</option></select><label for=\"agentArgs\">Proposal</label><select id=\"agentArgs\"><option value=\"clean\">Expected fields</option><option value=\"extra\">Adds approve=true</option><option value=\"missing\">Missing dataset</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function toolPaint(){const s=schemaMode.value==='strict',k=agentArgs.value,m=k==='missing',x=k==='extra',v=!m&&!(s&&x);world.innerHTML='<div class=\"lane '+(m?'bad':'good')+'\">1. dataset → '+(m?'MISSING':'PRESENT')+'</div><div class=\"lane '+(x&&s?'bad':x?'warn':'good')+'\">2. approve field → '+(x?(s?'REJECTED':'ALLOWED BY SHAPE'):'NONE')+'</div><div class=\"lane '+(v?'warn':'bad')+'\">3. handler → '+(v?'REACHED; authorization still required':'NOT CALLED')+'</div>';}schemaMode.onchange=toolPaint;agentArgs.onchange=toolPaint;toolPaint();",
+    "questions": [
+      [
+        "dataset missing. What happens?",
+        [
+          "Guess",
+          "Validation error before handler",
+          "Approve"
+        ],
+        1,
+        "The effect target is ambiguous."
+      ],
+      [
+        "additionalProperties:false does what?",
+        [
+          "Authenticates",
+          "Rejects undeclared fields",
+          "Encrypts"
+        ],
+        1,
+        "It closes the object shape only."
+      ],
+      [
+        "Schema passes. Still needed?",
+        [
+          "Nothing",
+          "Authorization and domain approval",
+          "Prettier logs"
+        ],
+        1,
+        "Valid shape can still be unauthorized."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "schema={\"required\":[\"dataset\",\"rule_type\",\"threshold\"],\"allow_extra\":False}\nproposal={\"dataset\":\"orders\",\"rule_type\":\"freshness\",\"threshold\":0.95,\"approve\":True}",
+          "note": "Define closed shape and extra proposal."
+        },
+        {
+          "code": "missing=[k for k in schema[\"required\"] if k not in proposal]\nextra=[k for k in proposal if k not in schema[\"required\"]]",
+          "note": "Find violations."
+        },
+        {
+          "code": "handler_called=not missing and (schema[\"allow_extra\"] or not extra)",
+          "note": "Extra field blocks handler."
+        }
+      ],
+      "expect": {
+        "missing": [],
+        "extra": [
+          "approve"
+        ],
+        "handler_called": false
+      },
+      "limit": "Executed a Python shape check, not conforming JSON Schema or MCP.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "schema": {
+              "required": [
+                "dataset",
+                "rule_type",
+                "threshold"
+              ],
+              "allow_extra": false
+            },
+            "proposal": {
+              "dataset": "orders",
+              "rule_type": "freshness",
+              "threshold": 0.95,
+              "approve": true
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "schema": {
+              "required": [
+                "dataset",
+                "rule_type",
+                "threshold"
+              ],
+              "allow_extra": false
+            },
+            "proposal": {
+              "dataset": "orders",
+              "rule_type": "freshness",
+              "threshold": 0.95,
+              "approve": true
+            },
+            "missing": [],
+            "extra": [
+              "approve"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "schema": {
+              "required": [
+                "dataset",
+                "rule_type",
+                "threshold"
+              ],
+              "allow_extra": false
+            },
+            "proposal": {
+              "dataset": "orders",
+              "rule_type": "freshness",
+              "threshold": 0.95,
+              "approve": true
+            },
+            "missing": [],
+            "extra": [
+              "approve"
+            ],
+            "handler_called": false
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP TypeScript SDK: schema libraries",
+        "https://ts.sdk.modelcontextprotocol.io/v2/advanced/schema-libraries",
+        "Living docs; checked 2026-10-10"
+      ],
+      [
+        "JSON Schema object keywords",
+        "https://json-schema.org/understanding-json-schema/reference/object",
+        "Living reference; checked 2026-10-10"
+      ]
+    ],
+    "visual_explanation": "The visual separates required-field validation, extra-field validation, and the later authorization boundary.",
+    "written_questions": [
+      "Which bounds belong in your DQ tool schema?",
+      "Which tier approval stays outside model control?"
+    ],
+    "source_checked_on": "2026-10-10"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "One telescope, two science programs: commensal signal capture",
+    "goal": "Explain how a sidecar digital backend reuses observations without taking telescope time.",
+    "tag": "New research review · claims bounded to authors’ report",
+    "concept": "<p>A passenger can photograph the view while a train follows its normal route. A <strong>commensal</strong> astronomy backend receives a copy of telescope signals while the primary program continues.</p><p>The advance is architectural and operational—not a claim of detected extraterrestrial life: packetized backends, commodity GPUs, pipelines, archives, and verification workflows let another search piggyback at scale.</p>",
+    "example": "<p>The October 5, 2026 Breakthrough Listen decade review describes commensal systems including COSMIC at the VLA and BLUSE at MeerKAT. It reports more than 1.2 million BLUSE pointings since mid-2022 and about 42 PB storage capacity, 31 PB in use, by March 2026.</p><p>Our synthetic 4 Gb/s tap for one hour receives 1.8 TB before reduction. Retaining 2% keeps 36 GB. These are teaching inputs, not named-instrument performance.</p>",
+    "use_case": {
+      "when": "Relevant to specialist observatories and to architects designing sidecar analytics that must not disturb a primary workload.",
+      "example": "Mirror a read-only signal stream to a GPU pipeline while the primary telescope schedule remains authoritative.",
+      "decision": "Use only with explicit isolation, bandwidth, backpressure, provenance, and archive budgets. A side tap can harm primary work if shared paths saturate."
+    },
+    "practice": "Change tap rate and retention. Predict raw and retained volume while observing time stays fixed.",
+    "boundary": "This is unit conversion, not telescope sensitivity, spectra, compression quality, candidate verification, packet loss, or detection evidence.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:16px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"tapRate\">Synthetic tap rate</label><select id=\"tapRate\"><option value=\"1\">1 Gb/s</option><option value=\"4\">4 Gb/s</option><option value=\"8\">8 Gb/s</option></select><label for=\"retainPct\">Retained</label><select id=\"retainPct\"><option value=\"2\">2%</option><option value=\"10\">10%</option><option value=\"100\">100%</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function radioPaint(){const r=Number(tapRate.value),p=Number(retainPct.value),raw=r*3600/8/1000,kept=raw*p/100;world.innerHTML='<svg viewBox=\"0 0 430 215\" role=\"img\" aria-label=\"Telescope stream forks to primary science and a GPU sidecar\"><rect x=\"15\" y=\"75\" width=\"105\" height=\"48\" rx=\"8\" fill=\"#d8e8f4\"/><text x=\"67\" y=\"104\" text-anchor=\"middle\">telescope</text><path d=\"M120 99 H205\" stroke=\"#386957\" stroke-width=\"4\"/><rect x=\"205\" y=\"25\" width=\"120\" height=\"48\" rx=\"8\" fill=\"#d6f4b5\"/><text x=\"265\" y=\"54\" text-anchor=\"middle\">primary science</text><path d=\"M165 99 V160 H205\" stroke=\"#d18621\" stroke-width=\"4\"/><rect x=\"205\" y=\"135\" width=\"120\" height=\"48\" rx=\"8\" fill=\"#fff5cf\"/><text x=\"265\" y=\"155\" text-anchor=\"middle\">GPU sidecar</text><text x=\"265\" y=\"174\" text-anchor=\"middle\">+ archive</text></svg><p>1 hour raw: <strong>'+raw.toFixed(1)+' TB</strong>. Retained: <strong>'+kept.toFixed(3)+' TB</strong> ('+p+'%).</p><p>Additional primary observing time in this model: 0 hours.</p>';}tapRate.onchange=radioPaint;retainPct.onchange=radioPaint;radioPaint();",
+    "questions": [
+      [
+        "What makes capture commensal?",
+        [
+          "Reuses primary stream",
+          "Owns all telescope time",
+          "Stores nothing"
+        ],
+        0,
+        "The side backend receives a copy."
+      ],
+      [
+        "4 Gb/s for one hour equals?",
+        [
+          "1.8 TB",
+          "18 TB",
+          "0.018 TB"
+        ],
+        0,
+        "4×3600/8/1000."
+      ],
+      [
+        "What does the review establish?",
+        [
+          "Alien detection",
+          "Engineering history and reported scale",
+          "Every sidecar is free"
+        ],
+        1,
+        "It is an instrumentation and operations review."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "rate_gbps=4\nhours=1\nretain_fraction=0.02",
+          "note": "Set synthetic inputs."
+        },
+        {
+          "code": "raw_tb=rate_gbps*hours*3600/8/1000",
+          "note": "Convert to decimal TB."
+        },
+        {
+          "code": "retained_tb=raw_tb*retain_fraction",
+          "note": "Apply a teaching reduction fraction."
+        }
+      ],
+      "expect": {
+        "raw_tb": 1.8,
+        "retained_tb": 0.036
+      },
+      "limit": "Executed Python conversion with synthetic inputs; no instrument is reproduced.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "rate_gbps": 4,
+            "hours": 1,
+            "retain_fraction": 0.02
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "rate_gbps": 4,
+            "hours": 1,
+            "retain_fraction": 0.02,
+            "raw_tb": 1.8
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "rate_gbps": 4,
+            "hours": 1,
+            "retain_fraction": 0.02,
+            "raw_tb": 1.8,
+            "retained_tb": 0.036000000000000004
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "The First Decade of Breakthrough Listen",
+        "https://arxiv.org/abs/2610.07482",
+        "Research review submitted 2026-10-05"
+      ],
+      [
+        "Breakthrough Listen public data and archiving",
+        "https://arxiv.org/abs/1906.07391",
+        "Foundation submitted 2019-06-18"
+      ]
+    ],
+    "visual_explanation": "The stream forks without giving scheduling control to the sidecar; quantity labels separate raw ingress from archive.",
+    "written_questions": [
+      "Which shared resource risks primary work?",
+      "What provenance belongs with reduced candidates?"
+    ],
+    "source_checked_on": "2026-10-10"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A tag can move; a full commit SHA cannot",
+    "goal": "Pin third-party actions to reviewed immutable code and update explicitly.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A street address can keep its name while the building changes. A Git tag such as <code>v1</code> is also movable. A full commit SHA identifies one exact Git object.</p><p>GitHub documents full-length SHA pinning as the only immutable action reference. It prevents silent ref movement but does not deliver fixes automatically.</p>",
+    "example": "<p>Monday: <code>vendor/action@v1</code> points to reviewed <code>aaa…</code>. Tuesday: the tag moves to <code>bbb…</code>. Unchanged workflow text runs different code. <code>@aaa…</code> stays on reviewed bytes until a pull request changes it.</p><pre><code>- uses: vendor/action@a824008085750b8e136effc585c3cd6082bd575f</code></pre>",
+    "use_case": {
+      "when": "Use for third-party actions with write access, secrets, OIDC, artifacts, or deployment authority.",
+      "example": "Pin a cloud-login action and use controlled dependency updates for new SHAs.",
+      "decision": "Pinning stops ref drift. It does not prove code safe or patch dependencies automatically."
+    },
+    "practice": "Move the tag and compare it with a full SHA.",
+    "boundary": "The browser maps toy labels; it does not inspect Git objects, signatures, or action code.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:16px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"actionRef\">Reference</label><select id=\"actionRef\"><option value=\"tag\">vendor/action@v1</option><option value=\"sha\">vendor/action@aaa…</option></select><label for=\"tagState\">v1 points to</label><select id=\"tagState\"><option value=\"aaa\">reviewed aaa…</option><option value=\"bbb\">new bbb…</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function pinPaint(){const p=actionRef.value==='sha',r=p?'aaa':tagState.value,ok=r==='aaa';world.innerHTML='<div class=\"lane\">Workflow → '+(p?'full SHA aaa…':'tag v1')+'</div><div class=\"lane '+(ok?'good':'bad')+'\">Resolved → '+r+'… '+(ok?'REVIEWED':'CHANGED WITHOUT WORKFLOW DIFF')+'</div><div class=\"lane '+(p?'warn':'bad')+'\">Update → '+(p?'explicit SHA change':'tag owner can move ref')+'</div>';}actionRef.onchange=pinPaint;tagState.onchange=pinPaint;pinPaint();",
+    "questions": [
+      [
+        "v1 moves aaa→bbb. @v1 does what?",
+        [
+          "Still aaa",
+          "Can run bbb without workflow diff",
+          "Rejects tags"
+        ],
+        1,
+        "Ref resolves at run time."
+      ],
+      [
+        "Full SHA provides?",
+        [
+          "Immutable identity",
+          "Auto patches",
+          "Proof of safety"
+        ],
+        0,
+        "It fixes the Git object only."
+      ],
+      [
+        "Tradeoff?",
+        [
+          "Explicit reviewed updates",
+          "Cannot run",
+          "Secrets public"
+        ],
+        0,
+        "Patch uptake becomes an explicit path."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "tag=\"aaa\"\npinned=\"aaa\"",
+          "note": "Both initially select reviewed code."
+        },
+        {
+          "code": "tag=\"bbb\"",
+          "note": "Movable tag changes."
+        },
+        {
+          "code": "tag_run=tag\npinned_run=pinned",
+          "note": "Resolve both after the move."
+        }
+      ],
+      "expect": {
+        "tag_run": "bbb",
+        "pinned_run": "aaa"
+      },
+      "limit": "Executed a Python name model; it did not access GitHub.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "tag": "aaa",
+            "pinned": "aaa"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "tag": "bbb",
+            "pinned": "aaa"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "tag": "bbb",
+            "pinned": "aaa",
+            "tag_run": "bbb",
+            "pinned_run": "aaa"
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions secure use",
+        "https://docs.github.com/en/actions/reference/security/secure-use",
+        "Living docs; checked 2026-10-10"
+      ],
+      [
+        "GitHub managing custom actions",
+        "https://docs.github.com/en/actions/how-tos/create-and-publish-actions/manage-custom-actions",
+        "Living docs; checked 2026-10-10"
+      ]
+    ],
+    "visual_explanation": "Two references resolve after a tag move: the tag follows new code while the SHA stays attached to reviewed code.",
+    "written_questions": [
+      "Which deployment actions have highest authority?",
+      "How will SHA updates be received and tested?"
+    ],
+    "source_checked_on": "2026-10-10"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Stop routing before the next RPC: gRPC health Watch",
+    "goal": "Use the standard health stream so clients avoid NOT_SERVING backends.",
+    "tag": "Foundation · original worked example",
+    "concept": "<p>A restaurant host stops seating guests in a closed room. Waiting for each guest to find the locked door creates needless failures.</p><p>gRPC defines a health service. A client can open streaming <code>Watch</code> for a named service. After <code>NOT_SERVING</code>, health-aware routing avoids that backend; calls can resume after <code>SERVING</code>.</p>",
+    "example": "<p>Inventory has A and B. B loses database access but its process stays alive. It publishes <code>NOT_SERVING</code>. With client health checking, four new calls go to A. Without it, two still reach B and fail in this toy.</p><p>Unary <code>Check</code> suits monitoring; streaming <code>Watch</code> avoids every connected client polling constantly.</p>",
+    "use_case": {
+      "when": "Use when gRPC clients choose among multiple addresses and service readiness can change while connections remain open.",
+      "example": "Inventory remains live but cannot query its database, so it reports NOT_SERVING for that service.",
+      "decision": "Health guides routing but does not replace deadlines, retries, load shedding, or accurate readiness. Some policies may disable it; UNIMPLEMENTED disables client health checking per the guide."
+    },
+    "practice": "Mark B unhealthy and toggle client health. Predict four routes.",
+    "boundary": "The toy has no network, stream delay, resolver, backoff, channel state, or gRPC library.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:16px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}</style><label for=\"backendB\">Backend B</label><select id=\"backendB\"><option value=\"serving\">SERVING</option><option value=\"down\">NOT_SERVING</option></select><label for=\"healthClient\">Client health</label><select id=\"healthClient\"><option value=\"on\">Enabled</option><option value=\"off\">Disabled</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function healthPaint(){const d=backendB.value==='down',o=healthClient.value==='on',c=d&&o?['A','A','A','A']:['A','B','A','B'],f=d?c.filter(x=>x==='B').length:0;world.innerHTML='<svg viewBox=\"0 0 430 205\" role=\"img\" aria-label=\"Health-aware client routes around backend B\"><rect x=\"15\" y=\"78\" width=\"100\" height=\"48\" rx=\"8\" fill=\"#d8e8f4\"/><text x=\"65\" y=\"108\" text-anchor=\"middle\">client</text><path d=\"M115 102 L205 55 M115 102 L205 150\" stroke=\"#386957\" stroke-width=\"4\"/><rect x=\"205\" y=\"30\" width=\"130\" height=\"48\" rx=\"8\" fill=\"#d6f4b5\"/><text x=\"270\" y=\"60\" text-anchor=\"middle\">A · SERVING</text><rect x=\"205\" y=\"125\" width=\"130\" height=\"48\" rx=\"8\" fill=\"'+(d?'#ffd7b7':'#d6f4b5')+'\"/><text x=\"270\" y=\"155\" text-anchor=\"middle\">B · '+(d?'NOT_SERVING':'SERVING')+'</text></svg><p>Next: <strong>'+c.join(' → ')+'</strong>. Failed: '+f+'/4.</p>';}backendB.onchange=healthPaint;healthClient.onchange=healthPaint;healthPaint();",
+    "questions": [
+      [
+        "B NOT_SERVING with health enabled?",
+        [
+          "Avoid B",
+          "Wait for TCP loss",
+          "Stop forever"
+        ],
+        0,
+        "Health changes eligibility."
+      ],
+      [
+        "Why Watch?",
+        [
+          "Streams changes instead of polling",
+          "Encrypts",
+          "Retries business calls"
+        ],
+        0,
+        "It scales continuous updates."
+      ],
+      [
+        "Key boundary?",
+        [
+          "Replaces deadlines",
+          "Server health must be accurate and policy must use it",
+          "SERVING means perfect"
+        ],
+        1,
+        "Bad health logic still routes badly."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "backends={\"A\":\"SERVING\",\"B\":\"SERVING\"}\nhealth_checking=True",
+          "note": "Both begin eligible."
+        },
+        {
+          "code": "backends[\"B\"]=\"NOT_SERVING\"",
+          "note": "Watch updates B."
+        },
+        {
+          "code": "eligible=[n for n,s in backends.items() if s==\"SERVING\"]\nroutes=[eligible[i%len(eligible)] for i in range(4)]",
+          "note": "Route only to serving backends."
+        }
+      ],
+      "expect": {
+        "eligible": [
+          "A"
+        ],
+        "routes": [
+          "A",
+          "A",
+          "A",
+          "A"
+        ]
+      },
+      "limit": "Executed a Python eligibility model, not a gRPC channel.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "backends": {
+              "A": "SERVING",
+              "B": "SERVING"
+            },
+            "health_checking": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "backends": {
+              "A": "SERVING",
+              "B": "NOT_SERVING"
+            },
+            "health_checking": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "backends": {
+              "A": "SERVING",
+              "B": "NOT_SERVING"
+            },
+            "health_checking": true,
+            "eligible": [
+              "A"
+            ],
+            "routes": [
+              "A",
+              "A",
+              "A",
+              "A"
+            ]
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "gRPC health checking",
+        "https://grpc.io/docs/guides/health-checking/",
+        "Official guide; checked 2026-10-10"
+      ],
+      [
+        "gRPC service config",
+        "https://grpc.io/docs/guides/service-config/",
+        "Official guide; checked 2026-10-10"
+      ]
+    ],
+    "visual_explanation": "B remains connected but changes readiness and route eligibility, separating transport reachability from service health.",
+    "written_questions": [
+      "What condition should report NOT_SERVING?",
+      "How will stuck-SERVING be detected?"
+    ],
+    "source_checked_on": "2026-10-10"
+  }
+]
