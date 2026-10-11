@@ -21,7 +21,7 @@
     30
   ],
   "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
-  "last_generated_day": 20,
+  "last_generated_day": 21,
   "days": [
     {
       "number": 1,
@@ -454,6 +454,29 @@
         "apis-microservices"
       ],
       "validation": "Recorded examples and semantic checks completed locally; native desktop/mobile verification runs in repository Browser smoke. Product SQL not executed. See Day20/VALIDATION.md."
+    },
+    {
+      "number": 21,
+      "folder": "Day21",
+      "date": "2026-10-11",
+      "generation_key": "2026-10-11",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day13+7",
+        "Day17+3",
+        "Day6+14"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs",
+        "ci-cd-github-actions",
+        "apis-microservices"
+      ],
+      "validation": "Recorded examples, 127 walkthroughs, seven mechanism checks, 15 policy tests, scoring, review scheduling, save/export structure and links passed locally. Local browser launch was unavailable; repository browser gate pending. Product SQL/YAML not executed."
     }
   ],
   "submitted_assessments": [],

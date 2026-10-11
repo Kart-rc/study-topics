@@ -1,0 +1,1028 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "minutes": 30,
+    "title": "Publish only after the quality gate: make dependencies carry the rule",
+    "goal": "Model a pipeline as a DAG where publish waits for validated data and cleanup still runs after failure.",
+    "tag": "Certification focus · orchestration",
+    "concept": "<p>A restaurant does not serve a plate before the safety check. A data workflow needs the same rule: <strong>publish depends on validation succeeding</strong>.</p><p>A directed acyclic graph, or DAG, records those prerequisites. It allows independent work to run together, but it prevents the final step from starting early.</p>",
+    "example": "<p>Batch <code>B21</code> lands 1,000 rows. The quality task finds 12 invalid customer IDs. A correct graph blocks <code>publish</code>, records the failed gate, and still runs cleanup or notification.</p><p>The green “ingest succeeded” signal is not enough. The business outcome is whether only validated rows become visible.</p>",
+    "use_case": {
+      "when": "Use task dependencies when later work is unsafe or meaningless until named prerequisites finish.",
+      "example": "Ingest sales, validate keys, publish a gold table only after validation, and notify after the graph finishes.",
+      "decision": "Use a DAG for durable, observable multi-step work. Keep one atomic SQL transaction when all changes fit one database and one short unit of work."
+    },
+    "practice": "Choose whether B21 passes validation. Predict which nodes run and which table customers can query.",
+    "boundary": "The browser models task state only. It does not schedule compute, persist checkpoints, retry tasks, charge credits, or reproduce either vendor runtime.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select,input{font:inherit;max-width:100%;padding:8px}.bars{display:grid;gap:7px}.bar{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.bar>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.timeline{display:grid;grid-template-columns:repeat(7,minmax(30px,1fr));gap:4px}.tick{min-height:70px;border-left:2px solid #759589;padding:4px;font-size:.82rem}.request{display:block;background:#d18621;color:#142f2c;border-radius:12px;padding:2px 5px;margin:2px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(4,1fr)}}\n</style><label for=\"qualityOutcome\">B21 quality result</label><select id=\"qualityOutcome\"><option value=\"fail\">12 invalid IDs · fail</option><option value=\"pass\">0 invalid IDs · pass</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function dagPaint(){const pass=qualityOutcome.value==='pass';world.innerHTML='<svg viewBox=\"0 0 700 300\" role=\"img\" aria-label=\"Ingest feeds validation; only a passing gate feeds publish; finalizer runs after the graph\"><defs><marker id=\"arr\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"3\" orient=\"auto\"><path d=\"M0,0 L0,6 L8,3 z\" fill=\"#466f64\"/></marker></defs><path d=\"M180 75 L285 75\" stroke=\"#466f64\" stroke-width=\"5\" marker-end=\"url(#arr)\"/><path d=\"M430 75 L540 75\" stroke=\"'+(pass?'#287b64':'#a74a3d')+'\" stroke-width=\"5\" marker-end=\"url(#arr)\"/><path d=\"M350 125 L350 210\" stroke=\"#466f64\" stroke-width=\"4\" marker-end=\"url(#arr)\"/><rect x=\"30\" y=\"35\" width=\"150\" height=\"80\" rx=\"14\" fill=\"#e4f3cf\" stroke=\"#287b64\" stroke-width=\"3\"/><text x=\"105\" y=\"66\" text-anchor=\"middle\">INGEST</text><text x=\"105\" y=\"91\" text-anchor=\"middle\">1,000 rows ✓</text><rect x=\"285\" y=\"35\" width=\"145\" height=\"80\" rx=\"14\" fill=\"'+(pass?'#e4f3cf':'#fff0e6')+'\" stroke=\"'+(pass?'#287b64':'#a74a3d')+'\" stroke-width=\"3\"/><text x=\"357\" y=\"66\" text-anchor=\"middle\">VALIDATE</text><text x=\"357\" y=\"91\" text-anchor=\"middle\">'+(pass?'0 invalid ✓':'12 invalid ✕')+'</text><rect x=\"540\" y=\"35\" width=\"130\" height=\"80\" rx=\"14\" fill=\"'+(pass?'#e4f3cf':'#e2e5e3')+'\" stroke=\"'+(pass?'#287b64':'#687773')+'\" stroke-width=\"3\"/><text x=\"605\" y=\"66\" text-anchor=\"middle\">PUBLISH</text><text x=\"605\" y=\"91\" text-anchor=\"middle\">'+(pass?'ran ✓':'blocked')+'</text><rect x=\"275\" y=\"210\" width=\"165\" height=\"60\" rx=\"14\" fill=\"#fff5cf\" stroke=\"#d18621\" stroke-width=\"3\"/><text x=\"357\" y=\"246\" text-anchor=\"middle\">FINALIZE · '+(pass?'success':'failure')+'</text></svg><p><strong>Visible gold rows: '+(pass?'1,000':'0')+'.</strong> Cleanup/notification still records the outcome.</p>';}qualityOutcome.onchange=dagPaint;dagPaint();",
+    "questions": [
+      [
+        "Validation fails for B21. What should publish do?",
+        [
+          "Run because ingest was green",
+          "Stay blocked",
+          "Publish 988 rows silently"
+        ],
+        1,
+        "The dependency is the business gate, not a timing hint."
+      ],
+      [
+        "Why keep a finalizer or failure handler?",
+        [
+          "To bypass validation",
+          "To record/clean up after either outcome",
+          "To create a cycle"
+        ],
+        1,
+        "Terminal handling is different from publishing business data."
+      ],
+      [
+        "When is a DAG excessive?",
+        [
+          "A single short database transaction can enforce the whole change",
+          "Tasks need different compute",
+          "The workflow needs retry history"
+        ],
+        0,
+        "Do not replace one atomic unit with distributed orchestration without a reason."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "tasks={\"ingest\":\"success\",\"validate\":\"failed\"}",
+          "note": "Record the two observed task outcomes."
+        },
+        {
+          "code": "can_publish=tasks[\"ingest\"]==\"success\" and tasks[\"validate\"]==\"success\"",
+          "note": "Evaluate the explicit publish gate."
+        },
+        {
+          "code": "result={\"publish\":\"success\" if can_publish else \"blocked\",\"finalize\":\"failure\" if \"failed\" in tasks.values() else \"success\"}",
+          "note": "Derive business publish and terminal handling separately."
+        }
+      ],
+      "expect": {
+        "can_publish": false,
+        "result": {
+          "publish": "blocked",
+          "finalize": "failure"
+        }
+      },
+      "limit": "Executed local Python over synthetic states; no vendor scheduler or SQL ran.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "tasks": {
+              "ingest": "success",
+              "validate": "failed"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "tasks": {
+              "ingest": "success",
+              "validate": "failed"
+            },
+            "can_publish": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "tasks": {
+              "ingest": "success",
+              "validate": "failed"
+            },
+            "can_publish": false,
+            "result": {
+              "publish": "blocked",
+              "finalize": "failure"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks: configure task dependencies",
+        "https://docs.databricks.com/aws/en/jobs/run-if",
+        "Updated 2026-09-11"
+      ],
+      [
+        "Snowflake: create a task graph",
+        "https://docs.snowflake.com/en/user-guide/tasks-graphs",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "Follow the green ingest node to the quality gate. The publish edge changes from blocked to allowed; the finalizer remains reachable in both outcomes.",
+    "written_questions": [
+      "Which business invariant should your publish task enforce?",
+      "What state must be preserved before retrying a failed task graph?"
+    ],
+    "source_checked_on": "2026-10-11",
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: Lakeflow Jobs dependencies and Run if",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Keep a gold-table publish task behind a data-quality task while a failure handler records bad batches.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production Databricks workspace and job identity with permissions to manage/run the job. Compute and task runs can incur cost.</p><p><strong>Why this is not SQL first.</strong> This is job control, so the example uses declarative job YAML. The SQL belongs inside the tasks; there is no SQL statement in this lesson that creates the Lakeflow Jobs DAG.</p><p>The YAML is <strong>not applied in Databricks</strong>. Buttons replay a local state model.</p><pre class=\"codepanel\"><code><span id=\"dbLine0\">- task_key: validate</span><span id=\"dbLine1\">- task_key: publish<br>  depends_on: [{task_key: validate}]<br>  run_if: ALL_SUCCESS</span><span id=\"dbLine2\">- task_key: notify_failure<br>  depends_on: [{task_key: validate}]<br>  run_if: AT_LEAST_ONE_FAILED</span></code></pre><button id=\"dbNext\">Advance modeled task</button><button id=\"dbReset\">Reset model</button><div id=\"dbWorld\" class=\"mechanism\"></div><p id=\"dbState\" aria-live=\"polite\"></p><p><strong>Failure/fix.</strong> <code>ALL_SUCCESS</code> blocks publish after validation failure. A separate failure task handles notification. Excluded/upstream-failed states have documented rules, so test the exact branch.</p>",
+        "markdown": "Authorized non-production workspace; YAML unexecuted. Job control uses YAML here because SQL does not define this Lakeflow Jobs dependency graph.\n\n```yaml\n- task_key: publish\n  depends_on: [{task_key: validate}]\n  run_if: ALL_SUCCESS\n- task_key: notify_failure\n  depends_on: [{task_key: validate}]\n  run_if: AT_LEAST_ONE_FAILED\n```\n\nThe local model shows publish blocked and failure notification selected.",
+        "javascript": "const dbNext=$('dbNext'),dbReset=$('dbReset');let dbStep=-1;function dbPaint(){for(let i=0;i<3;i++)$('dbLine'+i).classList.toggle('active',i===dbStep);const states=['No task evaluated','validate = FAILED','publish = UPSTREAM_FAILED','notify_failure = RUNNING'];$('dbWorld').innerHTML='<div class=\"lane '+(dbStep<0?'':dbStep===1?'bad':'warn')+'\"><strong>'+states[dbStep+1]+'</strong></div>';$('dbState').textContent='Step '+(dbStep+1)+'/3. '+(dbStep<0?'Predict first.':'Recorded local replay; no Databricks job ran.');dbNext.disabled=dbStep===2;}dbNext.onclick=()=>{dbStep=Math.min(2,dbStep+1);dbPaint()};dbReset.onclick=()=>{dbStep=-1;dbPaint()};dbPaint();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: CREATE TASK … AFTER and one finalizer",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Express the same quality gate as a Snowflake task graph, using SQL DDL.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production database/schema, a task-owning role, and either serverless tasks or a warehouse. Ownership, warehouse usage, and task execution can incur cost.</p><p>The SQL is <strong>not run on Snowflake</strong>. Buttons replay a local state model.</p><pre class=\"codepanel\"><code><span id=\"sfLine0\">CREATE TASK ingest SCHEDULE='USING CRON 0 * * * * UTC' AS CALL load_b21();</span><span id=\"sfLine1\">CREATE TASK validate AFTER ingest AS CALL assert_b21_quality();<br>CREATE TASK publish AFTER validate AS CALL publish_b21();</span><span id=\"sfLine2\">CREATE TASK finish FINALIZE = ingest AS CALL record_graph_result();</span></code></pre><button id=\"sfNext\">Advance modeled DDL</button><button id=\"sfReset\">Reset model</button><div id=\"sfWorld\" class=\"mechanism\"></div><p id=\"sfState\" aria-live=\"polite\"></p><p><strong>Failure/fix.</strong> A child with multiple parents waits for successful predecessors; a finalizer runs after other tasks finish or fail. Snowflake documents graph ownership, limits, resume steps, and retry behavior—DDL creation alone does not activate a production graph.</p>",
+        "markdown": "Authorized Snowflake sandbox; SQL unexecuted.\n\n```sql\nCREATE TASK validate AFTER ingest AS CALL assert_b21_quality();\nCREATE TASK publish AFTER validate AS CALL publish_b21();\nCREATE TASK finish FINALIZE = ingest AS CALL record_graph_result();\n```\n\nThe local model builds the dependency links but does not resume or execute tasks.",
+        "javascript": "const sfNext=$('sfNext'),sfReset=$('sfReset');let sfStep=-1;function sfPaint(){for(let i=0;i<3;i++)$('sfLine'+i).classList.toggle('active',i===sfStep);const labels=['No graph','root: ingest','ingest → validate → publish','finalizer attached to root'];$('sfWorld').innerHTML='<div class=\"lane '+(sfStep<0?'':'good')+'\"><strong>'+labels[sfStep+1]+'</strong></div>';$('sfState').textContent='Step '+(sfStep+1)+'/3. '+(sfStep<0?'Predict first.':'DDL selected only; no Snowflake task ran.');sfNext.disabled=sfStep===2;}sfNext.onclick=()=>{sfStep=Math.min(2,sfStep+1);sfPaint()};sfReset.onclick=()=>{sfStep=-1;sfPaint()};sfPaint();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Dependency form</td><td>Job task configuration</td><td>SQL <code>AFTER</code></td></tr><tr><td>Success gate</td><td><code>run_if: ALL_SUCCESS</code></td><td>Successful predecessors by default</td></tr><tr><td>Failure/terminal work</td><td>Failure task or all-done task</td><td>One finalizer per root</td></tr><tr><td>Execution here</td><td>Not run</td><td>Not run</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Dependency form | Job task config | SQL `AFTER` |\n| Success gate | `ALL_SUCCESS` | Successful predecessors |\n| Terminal work | failure/all-done task | one finalizer per root |"
+    },
+    "product_questions": [
+      [
+        "Databricks validation fails. Which setting protects publish?",
+        [
+          "ALL_DONE",
+          "ALL_SUCCESS",
+          "AT_LEAST_ONE_FAILED"
+        ],
+        1,
+        "Publish should require its quality dependency to succeed."
+      ],
+      [
+        "Snowflake task <code>publish AFTER validate</code>: when does publish normally start?",
+        [
+          "Before validate",
+          "After validate succeeds",
+          "Whenever its warehouse starts"
+        ],
+        1,
+        "The dependency, not warehouse availability alone, controls readiness."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks Lakeflow Jobs task dependencies",
+        "https://docs.databricks.com/aws/en/jobs/run-if",
+        "Updated 2026-09-11"
+      ],
+      [
+        "Snowflake task graphs",
+        "https://docs.snowflake.com/en/user-guide/tasks-graphs",
+        "Living documentation"
+      ],
+      [
+        "Snowflake CREATE TASK",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-task",
+        "Living documentation"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-11",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "lakeflow_jobs"
+        ],
+        "scope": "Focused task dependencies and outcome gates; not complete Lakeflow Jobs coverage."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "domains": [
+          "loading_unloading_transformation",
+          "account_warehouse_access"
+        ],
+        "scope": "Focused task graph dependencies, ownership, and finalization; full C03 objective IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Publish one configuration snapshot, not three changing fields",
+    "goal": "Let every request observe one complete configuration version instead of an impossible mixture.",
+    "tag": "Foundation · concurrency",
+    "concept": "<p>Imagine replacing a restaurant menu one page at a time while customers are ordering. A reader can combine prices from the old menu with rules from the new one.</p><p>Build a complete immutable configuration, then publish one reference to it. Each request reads that reference once. The formal mechanism is an <strong>atomic snapshot publication</strong>.</p>",
+    "example": "<p>Version 1 is <code>{timeout:1000, retries:2, route:A}</code>. Version 2 is <code>{timeout:400, retries:0, route:B}</code>. Three separate field writes can expose <code>{1000,0,B}</code>, a version that never existed. One <code>AtomicReference&lt;Config&gt;</code> yields either v1 or v2.</p>",
+    "use_case": {
+      "when": "Use this when many request threads read related configuration fields while a control-plane thread refreshes them.",
+      "example": "Publish routing, timeout, and retry policy together in a Java service after validating the full update.",
+      "decision": "Use an immutable snapshot for coherent read-mostly state. Use locks or a database transaction when readers must coordinate mutations, not only observe a version."
+    },
+    "practice": "Switch from separate fields to one snapshot and move the reader between update steps. Find the impossible mixed version.",
+    "boundary": "The browser fixes one interleaving. Atomic publication does not validate configuration, coordinate external systems, or make mutable objects inside the snapshot safe.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select,input{font:inherit;max-width:100%;padding:8px}.bars{display:grid;gap:7px}.bar{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.bar>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.timeline{display:grid;grid-template-columns:repeat(7,minmax(30px,1fr));gap:4px}.tick{min-height:70px;border-left:2px solid #759589;padding:4px;font-size:.82rem}.request{display:block;background:#d18621;color:#142f2c;border-radius:12px;padding:2px 5px;margin:2px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(4,1fr)}}\n</style><label for=\"configMode\">Publication method</label><select id=\"configMode\"><option value=\"fields\">Three separate fields</option><option value=\"snapshot\">One immutable snapshot</option></select><label for=\"readMoment\">Reader timing</label><select id=\"readMoment\"><option value=\"middle\">After route and retries changed</option><option value=\"before\">Before update</option><option value=\"after\">After update</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function configPaint(){const snap=configMode.value==='snapshot',m=readMoment.value;let v;if(snap)v=m==='before'?['1000','2','A']:['400','0','B'];else v=m==='before'?['1000','2','A']:m==='middle'?['1000','0','B']:['400','0','B'];const mixed=v.join('/')!=='1000/2/A'&&v.join('/')!=='400/0/B';world.innerHTML='<div class=\"rows\"><div class=\"row\">timeout <strong>'+v[0]+' ms</strong></div><div class=\"row\">retries <strong>'+v[1]+'</strong></div><div class=\"row\">route <strong>'+v[2]+'</strong></div></div><p class=\"lane '+(mixed?'bad':'good')+'\">'+(mixed?'Impossible mixture: no validated version had these values.':'Coherent version observed.')+'</p>';}configMode.onchange=configPaint;readMoment.onchange=configPaint;configPaint();",
+    "questions": [
+      [
+        "Reader sees {1000,0,B}. What does that prove?",
+        [
+          "It saw one valid version",
+          "It combined separately published fields",
+          "AtomicReference is broken"
+        ],
+        1,
+        "That tuple exists in neither v1 nor v2."
+      ],
+      [
+        "What should a request do with the AtomicReference?",
+        [
+          "Call get once and use that Config",
+          "Call get before every field",
+          "Mutate the Config"
+        ],
+        0,
+        "One read pins one coherent version for that decision."
+      ],
+      [
+        "What remains outside this pattern?",
+        [
+          "Safe publication",
+          "Cross-system atomic rollout",
+          "Reading one version"
+        ],
+        1,
+        "The snapshot is local process state, not a distributed transaction."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "record Config(int timeoutMs, int retries, String route) {}\nvar config=new java.util.concurrent.atomic.AtomicReference<>(new Config(1000,2,\"A\"));",
+          "note": "Create and publish v1."
+        },
+        {
+          "code": "var before=config.get();",
+          "note": "One reader captures v1 once."
+        },
+        {
+          "code": "config.set(new Config(400,0,\"B\"));\nvar after=config.get();",
+          "note": "Publish v2 with one atomic reference write."
+        }
+      ],
+      "expect": {
+        "before": "Config[timeoutMs=1000, retries=2, route=A]",
+        "after": "Config[timeoutMs=400, retries=0, route=B]"
+      },
+      "limit": "Executed on local Java 17. It demonstrates reference publication, not a race detector or a distributed configuration service.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {
+            "before": "Config[timeoutMs=1000, retries=2, route=A]"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "before": "Config[timeoutMs=1000, retries=2, route=A]",
+            "after": "Config[timeoutMs=400, retries=0, route=B]"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java SE 25 AtomicReference",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/atomic/AtomicReference.html",
+        "Java SE 25 API"
+      ],
+      [
+        "Java SE 25 concurrent package memory consistency",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/package-summary.html",
+        "Java SE 25 API"
+      ]
+    ],
+    "visual_explanation": "The three field boxes can show a tuple that never existed. Snapshot mode restricts the visual to exactly v1 or v2.",
+    "written_questions": [
+      "Which fields in your service must change as one version?",
+      "What mutable object would accidentally weaken an “immutable” snapshot?"
+    ],
+    "source_checked_on": "2026-10-11"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "An architecture rule that cannot fail the build is only advice",
+    "goal": "Turn one high-value architecture constraint into an executable fitness function with an owner and exception path.",
+    "tag": "Architecture governance · worked incident",
+    "concept": "<p><strong>Incident.</strong> A deployment was green, but a new customer-data bucket was public and unencrypted. The review checklist said “private and encrypted”; nobody executed the check.</p><p>A <strong>fitness function</strong> turns an architecture outcome into a repeatable test. It does not test everything. It makes one important boundary hard to cross accidentally.</p>",
+    "example": "<p>The manifest says <code>classification=PII</code>, <code>public=true</code>, <code>encrypted=false</code>. The deployment job itself succeeds—our misleading green signal. The fitness function emits two violations and blocks promotion until both fields change or a time-bounded exception is approved.</p><p>Trigger: a new manifest. Mechanism: unenforced prose. Impact: exposed regulated data. Missing control: a pre-deployment policy test.</p>",
+    "use_case": {
+      "when": "Use fitness functions when a cross-team architecture rule is objective, important, and cheap enough to evaluate repeatedly.",
+      "example": "Block a PII data product unless storage is private, encrypted, and owned.",
+      "decision": "Automate deterministic constraints. Keep nuanced tradeoffs in human review, and provide explicit, expiring exceptions instead of hidden bypasses."
+    },
+    "practice": "Change classification, encryption, and exposure. Predict the exact rule failures and whether promotion is blocked.",
+    "boundary": "This local rules engine checks three synthetic fields. Real controls need authoritative inventory, identity, policy versioning, exception expiry, and evidence that deployed state matches the manifest.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select,input{font:inherit;max-width:100%;padding:8px}.bars{display:grid;gap:7px}.bar{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.bar>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.timeline{display:grid;grid-template-columns:repeat(7,minmax(30px,1fr));gap:4px}.tick{min-height:70px;border-left:2px solid #759589;padding:4px;font-size:.82rem}.request{display:block;background:#d18621;color:#142f2c;border-radius:12px;padding:2px 5px;margin:2px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(4,1fr)}}\n</style><label for=\"classification\">Classification</label><select id=\"classification\"><option value=\"PII\">PII</option><option value=\"public\">Public data</option></select><label for=\"encrypted\">Encrypted</label><select id=\"encrypted\"><option value=\"no\">No</option><option value=\"yes\">Yes</option></select><label for=\"exposure\">Exposure</label><select id=\"exposure\"><option value=\"public\">Public</option><option value=\"private\">Private</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function fitnessPaint(){const pii=classification.value==='PII',errs=[];if(pii&&encrypted.value!=='yes')errs.push('PII must be encrypted');if(pii&&exposure.value!=='private')errs.push('PII must be private');world.innerHTML='<div class=\"rows\"><div class=\"row good\">Build<br><strong>SUCCESS</strong></div><div class=\"row '+(errs.length?'bad':'good')+'\">Architecture gate<br><strong>'+(errs.length?'BLOCK':'PASS')+'</strong></div></div><div class=\"lane '+(errs.length?'bad':'good')+'\">'+(errs.length?errs.join('<br>'):'No selected violation')+'</div>';}classification.onchange=fitnessPaint;encrypted.onchange=fitnessPaint;exposure.onchange=fitnessPaint;fitnessPaint();",
+    "questions": [
+      [
+        "Build is green but PII is public. Senior response?",
+        [
+          "Trust build success",
+          "Add an executable pre-deploy rule at the boundary",
+          "Email a reminder"
+        ],
+        1,
+        "The missing mechanism is enforcement, not awareness."
+      ],
+      [
+        "Which is a good fitness function?",
+        [
+          "“Architecture should be good”",
+          "“PII storage must be private and encrypted”",
+          "“Review carefully”"
+        ],
+        1,
+        "It is objective and executable."
+      ],
+      [
+        "When should the gate not decide alone?",
+        [
+          "A deterministic encryption rule",
+          "A nuanced tradeoff with incomplete evidence",
+          "A schema invariant"
+        ],
+        1,
+        "Judgment-heavy decisions need accountable human review."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "manifest={\"classification\":\"PII\",\"encrypted\":False,\"public\":True}",
+          "note": "Load the proposed data-product state."
+        },
+        {
+          "code": "violations=[]\nif manifest[\"classification\"]==\"PII\" and not manifest[\"encrypted\"]: violations.append(\"PII must be encrypted\")\nif manifest[\"classification\"]==\"PII\" and manifest[\"public\"]: violations.append(\"PII must be private\")",
+          "note": "Evaluate two explicit architectural constraints."
+        },
+        {
+          "code": "decision=\"BLOCK\" if violations else \"PASS\"",
+          "note": "Make the promotion decision from evidence."
+        }
+      ],
+      "expect": {
+        "violations": [
+          "PII must be encrypted",
+          "PII must be private"
+        ],
+        "decision": "BLOCK"
+      },
+      "limit": "Executed local Python against a synthetic manifest; no cloud policy engine or deployment was contacted.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "manifest": {
+              "classification": "PII",
+              "encrypted": false,
+              "public": true
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "manifest": {
+              "classification": "PII",
+              "encrypted": false,
+              "public": true
+            },
+            "violations": [
+              "PII must be encrypted",
+              "PII must be private"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "manifest": {
+              "classification": "PII",
+              "encrypted": false,
+              "public": true
+            },
+            "violations": [
+              "PII must be encrypted",
+              "PII must be private"
+            ],
+            "decision": "BLOCK"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Well-Architected: on architecture",
+        "https://docs.aws.amazon.com/wellarchitected/2024-06-27/framework/on-architecture.html",
+        "Framework 2024-06-27"
+      ],
+      [
+        "AWS OPS05-BP02: test and validate changes",
+        "https://docs.aws.amazon.com/wellarchitected/latest/framework/ops_dev_integ_test_val_chg.html",
+        "Living guidance"
+      ]
+    ],
+    "visual_explanation": "The deployment box stays green while the architecture gate turns red, separating “code ran” from “the system still obeys the rule.”",
+    "written_questions": [
+      "Which one architecture rule would prevent your most expensive recurring exception?",
+      "Who owns expiry and audit of an approved exception?"
+    ],
+    "source_checked_on": "2026-10-11"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Freeze the tool catalog: schema drift can impersonate model drift",
+    "goal": "Record the exact tool schemas used by every evaluation so a changed harness is not blamed on the model.",
+    "tag": "Harness engineering · MCP",
+    "concept": "<p>Two runners take the same exam, but one receives a calculator with different buttons. Comparing their scores as if the exam were identical is unfair.</p><p>An agent evaluation includes the model, prompt, data, <strong>and tool catalog</strong>. Tool names, descriptions, input schemas, and output schemas can change. Snapshot a canonical catalog and hash it for every trial.</p>",
+    "example": "<p>Trial A exposes <code>search(query)</code>. Trial B exposes <code>search(query, region required)</code>. The same agent call now fails validation. Without a catalog hash, the dashboard says “model regression”; the evidence actually says “harness changed.”</p>",
+    "use_case": {
+      "when": "Use catalog snapshots when comparing models, prompts, or releases that can call MCP tools.",
+      "example": "Store canonical tools/list output, protocol version, server build, and schema hash with each eval trial.",
+      "decision": "Pin tools for controlled comparisons. Run a separate compatibility suite against the live catalog so production drift is still detected."
+    },
+    "practice": "Switch the second trial between the same and changed tool schema. Decide whether the score difference is attributable.",
+    "boundary": "The browser uses two tiny schemas and a displayed teaching hash. Production canonicalization must define ordering, omit volatile fields deliberately, retain full schemas securely, and include server/protocol identity.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select,input{font:inherit;max-width:100%;padding:8px}.bars{display:grid;gap:7px}.bar{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.bar>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.timeline{display:grid;grid-template-columns:repeat(7,minmax(30px,1fr));gap:4px}.tick{min-height:70px;border-left:2px solid #759589;padding:4px;font-size:.82rem}.request{display:block;background:#d18621;color:#142f2c;border-radius:12px;padding:2px 5px;margin:2px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(4,1fr)}}\n</style><label for=\"catalogB\">Trial B tool catalog</label><select id=\"catalogB\"><option value=\"changed\">region became required</option><option value=\"same\">same as Trial A</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function catalogPaint(){const same=catalogB.value==='same';world.innerHTML='<div class=\"rows\"><div class=\"row\"><strong>Trial A</strong><br>hash 6a1f<br>search(query)<br>score 1</div><div class=\"row '+(same?'good':'bad')+'\"><strong>Trial B</strong><br>hash '+(same?'6a1f':'9c42')+'<br>search(query'+(same?'':', region!')+')<br>score '+(same?'1':'0')+'</div></div><p class=\"lane '+(same?'good':'warn')+'\">'+(same?'Controlled comparison: tool contract held constant.':'Confounded comparison: schema changed with the score.')+'</p>';}catalogB.onchange=catalogPaint;catalogPaint();",
+    "questions": [
+      [
+        "Same prompt/model, different tool hash, lower score. First conclusion?",
+        [
+          "Model regressed",
+          "Comparison is confounded",
+          "Tool hash is irrelevant"
+        ],
+        1,
+        "The harness changed with the measured outcome."
+      ],
+      [
+        "What belongs in the trial record?",
+        [
+          "Only final answer",
+          "Catalog snapshot/hash plus model, prompt, data and protocol/server versions",
+          "User secrets"
+        ],
+        1,
+        "Attribution needs the effective environment, not secrets."
+      ],
+      [
+        "Why still test the live catalog?",
+        [
+          "Pinned evals prove compatibility forever",
+          "Production tools can drift and need separate compatibility evidence",
+          "MCP forbids changes"
+        ],
+        1,
+        "Controlled evaluation and production compatibility answer different questions."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "import json, hashlib\ncatalog_a={\"tools\":[{\"name\":\"search\",\"inputSchema\":{\"required\":[\"query\"]}}]}",
+          "note": "Define the first catalog."
+        },
+        {
+          "code": "canonical=json.dumps(catalog_a,sort_keys=True,separators=(\",\",\":\"))\nhash_a=hashlib.sha256(canonical.encode()).hexdigest()[:8]",
+          "note": "Canonicalize and hash trial A."
+        },
+        {
+          "code": "catalog_b={\"tools\":[{\"name\":\"search\",\"inputSchema\":{\"required\":[\"query\",\"region\"]}}]}\nhash_b=hashlib.sha256(json.dumps(catalog_b,sort_keys=True,separators=(\",\",\":\")).encode()).hexdigest()[:8]\ncomparable=hash_a==hash_b",
+          "note": "Hash trial B and test comparability."
+        }
+      ],
+      "expect": {
+        "comparable": false
+      },
+      "limit": "Executed local Python hashing synthetic catalogs. It did not connect to an MCP server or establish a universal canonicalization standard.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "catalog_a": {
+              "tools": [
+                {
+                  "name": "search",
+                  "inputSchema": {
+                    "required": [
+                      "query"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "catalog_a": {
+              "tools": [
+                {
+                  "name": "search",
+                  "inputSchema": {
+                    "required": [
+                      "query"
+                    ]
+                  }
+                }
+              ]
+            },
+            "canonical": "{\"tools\":[{\"inputSchema\":{\"required\":[\"query\"]},\"name\":\"search\"}]}",
+            "hash_a": "6492c748"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "catalog_a": {
+              "tools": [
+                {
+                  "name": "search",
+                  "inputSchema": {
+                    "required": [
+                      "query"
+                    ]
+                  }
+                }
+              ]
+            },
+            "canonical": "{\"tools\":[{\"inputSchema\":{\"required\":[\"query\"]},\"name\":\"search\"}]}",
+            "hash_a": "6492c748",
+            "catalog_b": {
+              "tools": [
+                {
+                  "name": "search",
+                  "inputSchema": {
+                    "required": [
+                      "query",
+                      "region"
+                    ]
+                  }
+                }
+              ]
+            },
+            "hash_b": "8edce0dd",
+            "comparable": false
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP 2026-07-28: tools",
+        "https://modelcontextprotocol.io/specification/2026-07-28/server/tools",
+        "Specification dated 2026-07-28"
+      ],
+      [
+        "MCP 2026-07-28: versioning and compatibility",
+        "https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning",
+        "Specification dated 2026-07-28"
+      ],
+      [
+        "MCP release-candidate notes",
+        "https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/",
+        "Published 2026-07-28"
+      ]
+    ],
+    "visual_explanation": "The two trial cards keep model and prompt implicit while the tool hash changes beside the score, making the confound visible.",
+    "written_questions": [
+      "Which volatile catalog fields should your canonicalizer exclude, and why?",
+      "What separate test proves a pinned agent still works with today’s live tools?"
+    ],
+    "source_checked_on": "2026-10-11"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Three probability maps, one mask: ensemble confidence is not independent evidence",
+    "goal": "Understand probability averaging, its reported benefit, and the correlated-error boundary in a recent vision study.",
+    "tag": "New research · submitted 2026-10-05",
+    "concept": "<p>Three weather forecasters can average their rain probabilities. That often steadies a noisy forecast—but not when all three rely on the same broken sensor.</p><p>A recent panoramic street-segmentation study averaged class probabilities across independently seeded models and multiple views. Averaging changes confidence before the final class choice.</p>",
+    "example": "<p>For one pixel, three models assign “road” probabilities 0.90, 0.80, and 0.20. The mean is 0.63, so a 0.50 threshold labels road. If all three share the same blind spot and output 0.10, agreement is confidently wrong.</p><p>The paper reports 60.95% mean IoU on an 84-image public validation split and 57.08% on the hidden test leaderboard. Those are study results, not a universal production guarantee.</p>",
+    "use_case": {
+      "when": "Potentially useful when prediction quality justifies extra inference cost and independently trained models make meaningfully different errors.",
+      "example": "Average per-class probabilities from three segmentation seeds before producing a street-scene mask.",
+      "decision": "Measure hidden-set gain, latency, memory, calibration, and error correlation. Prefer one model when ensemble cost exceeds the verified benefit."
+    },
+    "practice": "Choose diverse or correlated model outputs and move the decision threshold. Predict the pixel label and confidence.",
+    "boundary": "This one-pixel model omits spatial structure, class imbalance, calibration, multi-scale transforms, mIoU aggregation, and the paper’s full implementation. It does not reproduce the study.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select,input{font:inherit;max-width:100%;padding:8px}.bars{display:grid;gap:7px}.bar{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.bar>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.timeline{display:grid;grid-template-columns:repeat(7,minmax(30px,1fr));gap:4px}.tick{min-height:70px;border-left:2px solid #759589;padding:4px;font-size:.82rem}.request{display:block;background:#d18621;color:#142f2c;border-radius:12px;padding:2px 5px;margin:2px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(4,1fr)}}\n</style><label for=\"ensembleCase\">Model outputs</label><select id=\"ensembleCase\"><option value=\"diverse\">0.90, 0.80, 0.20</option><option value=\"wrong\">0.10, 0.10, 0.10 · shared blind spot</option></select><label for=\"threshold\">Road threshold <output id=\"thresholdValue\">0.50</output></label><input id=\"threshold\" type=\"range\" min=\"40\" max=\"80\" value=\"50\"><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function ensemblePaint(){const vals=ensembleCase.value==='diverse'?[.9,.8,.2]:[.1,.1,.1],avg=vals.reduce((a,b)=>a+b,0)/3,t=Number(threshold.value)/100;thresholdValue.textContent=t.toFixed(2);world.innerHTML='<div class=\"bars\">'+vals.map((v,i)=>'<div class=\"bar\"><span style=\"width:'+v*100+'%\">seed '+(i+1)+' · '+v.toFixed(2)+'</span></div>').join('')+'</div><p>Mean road probability: <strong>'+avg.toFixed(2)+'</strong> → <strong>'+(avg>=t?'ROAD':'NOT ROAD')+'</strong></p><p class=\"lane '+(ensembleCase.value==='wrong'?'bad':'good')+'\">'+(ensembleCase.value==='wrong'?'Agreement did not create independent evidence.':'Different outputs were averaged before thresholding.')+'</p>';}ensembleCase.onchange=ensemblePaint;threshold.oninput=ensemblePaint;ensemblePaint();",
+    "questions": [
+      [
+        "Mean of 0.90, 0.80 and 0.20?",
+        [
+          "0.20",
+          "0.63",
+          "0.90"
+        ],
+        1,
+        "The ensemble averages probabilities before thresholding."
+      ],
+      [
+        "All seeds share one training blind spot. What can happen?",
+        [
+          "Averaging guarantees correction",
+          "Confident correlated error",
+          "Zero inference cost"
+        ],
+        1,
+        "Diversity of seeds is not proof of independent errors."
+      ],
+      [
+        "What limits the paper’s reported metrics?",
+        [
+          "They guarantee every deployment",
+          "They come from specified validation/hidden challenge data and workflow",
+          "mIoU is latency"
+        ],
+        1,
+        "Research claims transfer only with matching evidence."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "probabilities=[0.90,0.80,0.20]",
+          "note": "Record three seed probabilities for one pixel."
+        },
+        {
+          "code": "mean_road=sum(probabilities)/len(probabilities)",
+          "note": "Average probabilities."
+        },
+        {
+          "code": "threshold=0.50\nlabel=\"road\" if mean_road>=threshold else \"not-road\"",
+          "note": "Apply one decision threshold."
+        }
+      ],
+      "expect": {
+        "mean_road": 0.6333333333333334,
+        "label": "road"
+      },
+      "limit": "Executed local arithmetic for one synthetic pixel. It did not run a vision model or reproduce the paper’s datasets.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "probabilities": [
+              0.9,
+              0.8,
+              0.2
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "probabilities": [
+              0.9,
+              0.8,
+              0.2
+            ],
+            "mean_road": 0.6333333333333334
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "probabilities": [
+              0.9,
+              0.8,
+              0.2
+            ],
+            "mean_road": 0.6333333333333334,
+            "threshold": 0.5,
+            "label": "road"
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Vision Transformer Ensembles for Panoramic Street Segmentation",
+        "https://arxiv.org/abs/2610.06063",
+        "Submitted 2026-10-05"
+      ],
+      [
+        "HTML paper version",
+        "https://arxiv.org/html/2610.06063v1",
+        "Version 1 · 2026-10-05"
+      ]
+    ],
+    "visual_explanation": "The bar lengths are the three probabilities on one consistent 0–1 scale; the mean and threshold determine the label while the red state exposes correlated error.",
+    "written_questions": [
+      "What evidence would show your ensemble members add complementary signal?",
+      "Which cost metric would stop you deploying the ensemble despite accuracy gain?"
+    ],
+    "source_checked_on": "2026-10-11"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "Do not run fork code inside a trusted pull_request_target job",
+    "goal": "Keep untrusted pull-request code out of jobs that hold base-repository secrets or write tokens.",
+    "tag": "Current GitHub security guidance · 2026-10-11",
+    "concept": "<p>A visitor may hand reception a form. They should not be allowed to replace the receptionist’s instruction book and then use the master keys.</p><p><code>pull_request</code> is designed to run untrusted fork code with restrictions. <code>pull_request_target</code> runs trusted base-branch workflow logic with elevated trust. The dangerous combination is checking out the fork head and then executing it in that trusted job.</p>",
+    "example": "<p>A workflow triggered by <code>pull_request_target</code> checks out <code>github.event.pull_request.head.sha</code> and runs <code>make test</code>. The PR changes the Makefile to print a secret. Checkout alone is data movement; <code>make test</code> completes the exploit by executing attacker-controlled code.</p><p>GitHub’s current guide says its default public-repository policy is in evaluate mode and is scheduled for enforcement on <strong>November 2, 2026</strong>. Verify policy state again before relying on that date.</p>",
+    "use_case": {
+      "when": "Use this distinction for public repositories accepting fork pull requests, especially when workflows can write, use secrets, populate caches, or reach internal runners.",
+      "example": "Run tests on pull_request with read-only permissions; perform trusted labeling separately without executing fork code.",
+      "decision": "Prefer pull_request for building/testing fork code. Use pull_request_target only for necessary trusted automation and keep PR content as untrusted data."
+    },
+    "practice": "Choose the event, whether fork code is executed, and whether secrets are present. Locate the trust-boundary crossing.",
+    "boundary": "This model reduces GitHub’s permission, approval, cache, artifact, runner, and policy system to three switches. Review current organization policies and the complete secure-use guidance.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select,input{font:inherit;max-width:100%;padding:8px}.bars{display:grid;gap:7px}.bar{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.bar>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.timeline{display:grid;grid-template-columns:repeat(7,minmax(30px,1fr));gap:4px}.tick{min-height:70px;border-left:2px solid #759589;padding:4px;font-size:.82rem}.request{display:block;background:#d18621;color:#142f2c;border-radius:12px;padding:2px 5px;margin:2px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(4,1fr)}}\n</style><label for=\"eventKind\">Trigger</label><select id=\"eventKind\"><option value=\"target\">pull_request_target</option><option value=\"pr\">pull_request</option></select><label for=\"runFork\">Execute fork code</label><select id=\"runFork\"><option value=\"yes\">Yes · make test</option><option value=\"no\">No · inspect metadata only</option></select><label for=\"secretAccess\">Privileged token/secrets</label><select id=\"secretAccess\"><option value=\"yes\">Present</option><option value=\"no\">Absent</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function trustPaint(){const privileged=eventKind.value==='target'&&secretAccess.value==='yes',exec=runFork.value==='yes',risk=privileged&&exec;world.innerHTML='<svg viewBox=\"0 0 680 240\" role=\"img\" aria-label=\"Untrusted fork code crossing into a privileged job\"><rect x=\"25\" y=\"35\" width=\"220\" height=\"150\" rx=\"15\" fill=\"#fff5cf\" stroke=\"#d18621\" stroke-width=\"3\"/><text x=\"135\" y=\"70\" text-anchor=\"middle\">UNTRUSTED FORK</text><text x=\"135\" y=\"105\" text-anchor=\"middle\">PR files / Makefile</text><rect x=\"430\" y=\"35\" width=\"220\" height=\"150\" rx=\"15\" fill=\"'+(risk?'#fff0e6':'#e4f3cf')+'\" stroke=\"'+(risk?'#a74a3d':'#287b64')+'\" stroke-width=\"3\"/><text x=\"540\" y=\"70\" text-anchor=\"middle\">WORKFLOW JOB</text><text x=\"540\" y=\"105\" text-anchor=\"middle\">'+(privileged?'privileged':'restricted')+'</text><path d=\"M245 110 L430 110\" stroke=\"'+(exec?'#a74a3d':'#779e91')+'\" stroke-width=\"6\"/><text x=\"338\" y=\"95\" text-anchor=\"middle\">'+(exec?'EXECUTES':'metadata only')+'</text></svg><p class=\"lane '+(risk?'bad':'good')+'\"><strong>'+(risk?'PWN REQUEST PATH':'No modeled secret-execution crossing')+'</strong></p>';}eventKind.onchange=trustPaint;runFork.onchange=trustPaint;secretAccess.onchange=trustPaint;trustPaint();",
+    "questions": [
+      [
+        "What completes the vulnerable pattern after checking out fork code?",
+        [
+          "Executing its build/test/configuration",
+          "Reading PR number",
+          "Using a hosted runner name"
+        ],
+        0,
+        "Execution gives attacker-controlled files the job’s authority."
+      ],
+      [
+        "Safer default for fork tests without secrets?",
+        [
+          "pull_request",
+          "pull_request_target with write token",
+          "issue_comment plus checkout"
+        ],
+        0,
+        "The pull_request event applies fork protections."
+      ],
+      [
+        "Does “checkout only” make all later steps safe?",
+        [
+          "Yes",
+          "No; tools may execute checked-out scripts, dependencies, or config",
+          "Only on Linux"
+        ],
+        1,
+        "Execution can be indirect. Follow the data into every tool."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "event=\"pull_request_target\"\nexecutes_fork=True\nprivileged=True",
+          "note": "Record the trust inputs."
+        },
+        {
+          "code": "crosses_boundary=executes_fork and privileged",
+          "note": "Detect untrusted execution with elevated authority."
+        },
+        {
+          "code": "decision=\"BLOCK\" if crosses_boundary else \"ALLOW\"",
+          "note": "Fail the policy check before the job runs."
+        }
+      ],
+      "expect": {
+        "crosses_boundary": true,
+        "decision": "BLOCK"
+      },
+      "limit": "Executed local policy arithmetic only; it did not run GitHub Actions or process real repository secrets.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "event": "pull_request_target",
+            "executes_fork": true,
+            "privileged": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "event": "pull_request_target",
+            "executes_fork": true,
+            "privileged": true,
+            "crosses_boundary": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "event": "pull_request_target",
+            "executes_fork": true,
+            "privileged": true,
+            "crosses_boundary": true,
+            "decision": "BLOCK"
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub: securely using pull_request_target",
+        "https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target",
+        "Living documentation with a dated 2026-11-02 policy milestone"
+      ],
+      [
+        "GitHub: secure use reference",
+        "https://docs.github.com/en/actions/reference/security/secure-use",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The arrow is harmless data inspection until it becomes execution inside the privileged zone; then the destination box turns red.",
+    "written_questions": [
+      "Which current workflow could execute fork-controlled configuration indirectly?",
+      "How would you separate untrusted testing from a later trusted action?"
+    ],
+    "source_checked_on": "2026-10-11"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Retry-After is a floor, not a synchronized alarm clock",
+    "goal": "Use 429/503 plus Retry-After to slow clients without creating a retry herd or duplicating unsafe work.",
+    "tag": "HTTP semantics · resilience",
+    "concept": "<p>A crowded café asks customers to return after three minutes. If everyone sets the same alarm, the doorway floods again at exactly minute three.</p><p><code>Retry-After</code> tells a client how long it ought to wait before a follow-up request. A robust client respects that minimum, then may add bounded jitter so many clients do not synchronize.</p>",
+    "example": "<p>Five clients receive <code>429 Too Many Requests</code> and <code>Retry-After: 3</code>. Immediate retry sends five more requests at second 1. Exact retry moves all five to second 3. Respecting the three-second floor and adding bounded jitter spreads them across seconds 3–5.</p><p>Timing does not make a non-idempotent payment safe to repeat. Retry permission and operation semantics are separate decisions.</p>",
+    "use_case": {
+      "when": "Use this when an API enforces quotas or is temporarily unavailable and clients can retry safely.",
+      "example": "An ingestion API returns 429 with Retry-After: 3; SDK clients wait at least three seconds and add bounded jitter.",
+      "decision": "Retry safe/idempotent operations within a deadline. Require an idempotency mechanism or explicit status lookup before repeating side-effecting requests."
+    },
+    "practice": "Compare immediate, exact, and jittered schedules for five clients. Notice load concentration and the earliest retry.",
+    "boundary": "The teaching schedule uses whole seconds and fixed jitter. Real clients must parse HTTP-date or delay-seconds, account for clocks and deadlines, cap attempts, and observe operation semantics.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5;border-color:#d18621}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}select,input{font:inherit;max-width:100%;padding:8px}.bars{display:grid;gap:7px}.bar{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.bar>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.timeline{display:grid;grid-template-columns:repeat(7,minmax(30px,1fr));gap:4px}.tick{min-height:70px;border-left:2px solid #759589;padding:4px;font-size:.82rem}.request{display:block;background:#d18621;color:#142f2c;border-radius:12px;padding:2px 5px;margin:2px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(4,1fr)}}\n</style><label for=\"retryMode\">Client policy</label><select id=\"retryMode\"><option value=\"immediate\">Ignore header · retry at 1s</option><option value=\"exact\">Honor exactly · all at 3s</option><option value=\"jitter\">Honor floor + bounded jitter</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function retryPaint(){const mode=retryMode.value,times=mode==='immediate'?[1,1,1,1,1]:mode==='exact'?[3,3,3,3,3]:[3,3,4,4,5];let cells='';for(let t=0;t<=6;t++){const n=times.filter(x=>x===t).length;cells+='<div class=\"tick\"><strong>'+t+'s</strong>'+Array.from({length:n},(_,i)=>'<span class=\"request\">C'+(times.slice(0,times.indexOf(t)+i+1).length)+'</span>').join('')+'</div>';}world.innerHTML='<div class=\"timeline\">'+cells+'</div><p>Earliest retry: <strong>'+Math.min(...times)+'s</strong>. Peak simultaneous retries: <strong>'+Math.max(...Object.values(times.reduce((m,t)=>(m[t]=(m[t]||0)+1,m),{})))+'</strong>.</p><p class=\"lane '+(mode==='immediate'?'bad':mode==='exact'?'warn':'good')+'\">'+(mode==='immediate'?'Violates the 3-second advice.':mode==='exact'?'Compliant, but synchronized.':'Compliant floor with a spread-out retry wave.')+'</p>';}retryMode.onchange=retryPaint;retryPaint();",
+    "questions": [
+      [
+        "Retry-After: 3. Is a retry at second 1 compliant with the advice?",
+        [
+          "Yes",
+          "No",
+          "Only for POST"
+        ],
+        1,
+        "The field asks the client to wait."
+      ],
+      [
+        "Why add jitter after the floor?",
+        [
+          "To retry earlier",
+          "To spread synchronized clients",
+          "To make POST idempotent"
+        ],
+        1,
+        "Jitter reduces the retry herd; it does not change method semantics."
+      ],
+      [
+        "What must be decided separately?",
+        [
+          "Whether repeating the operation is safe",
+          "Whether 3 is an integer",
+          "Whether HTTP has headers"
+        ],
+        0,
+        "Timing and idempotency are different boundaries."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "retry_after=3\nclient_jitter=[0,0,1,1,2]",
+          "note": "Record the server floor and bounded client jitter."
+        },
+        {
+          "code": "retry_times=[retry_after+j for j in client_jitter]",
+          "note": "Schedule no request before the floor."
+        },
+        {
+          "code": "peak=max(retry_times.count(t) for t in set(retry_times))\nearliest=min(retry_times)",
+          "note": "Measure concentration and compliance."
+        }
+      ],
+      "expect": {
+        "retry_times": [
+          3,
+          3,
+          4,
+          4,
+          5
+        ],
+        "peak": 2,
+        "earliest": 3
+      },
+      "limit": "Executed local Python scheduling arithmetic. It did not send HTTP requests or model network delay, clock skew, or server recovery.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "retry_after": 3,
+            "client_jitter": [
+              0,
+              0,
+              1,
+              1,
+              2
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "retry_after": 3,
+            "client_jitter": [
+              0,
+              0,
+              1,
+              1,
+              2
+            ],
+            "retry_times": [
+              3,
+              3,
+              4,
+              4,
+              5
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "retry_after": 3,
+            "client_jitter": [
+              0,
+              0,
+              1,
+              1,
+              2
+            ],
+            "retry_times": [
+              3,
+              3,
+              4,
+              4,
+              5
+            ],
+            "peak": 2,
+            "earliest": 3
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "RFC 9110 §10.2.3 Retry-After",
+        "https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3",
+        "Published 2022-06"
+      ],
+      [
+        "RFC 6585 §4 429 Too Many Requests",
+        "https://www.rfc-editor.org/rfc/rfc6585.html#section-4",
+        "Published 2012-04"
+      ]
+    ],
+    "visual_explanation": "The timeline keeps the same five clients and moves only their retry markers, so the peak at each second is directly visible.",
+    "written_questions": [
+      "Which operations in your API are safe to retry after 429?",
+      "Where should the client’s total deadline cap Retry-After and backoff?"
+    ],
+    "source_checked_on": "2026-10-11"
+  }
+]
