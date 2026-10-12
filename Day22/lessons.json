@@ -1,0 +1,1334 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "minutes": 30,
+    "title": "Consolidation case: repair one orders batch without publishing the mistake",
+    "goal": "Use recovery state, least privilege, tolerant parsing, deduplication, scan evidence, and a publish gate as one incident response.",
+    "tag": "Certification consolidation · cycle 1 of 7",
+    "concept": "<p><strong>Symptom first:</strong> the orders dashboard shows five item rows, but the source manifest says the batch should contain three. Ingest is green and consumer lag is zero. Those signals prove movement, not correctness.</p><p>Treat the raw batch like a sealed evidence bag: stop publish, preserve the original input and checkpoint, repair into a new candidate, validate the counts, then promote it. Do not edit the visible gold table while still discovering the failure.</p>",
+    "example": "<p>Batch <code>B22</code> contains four envelopes: valid <code>o-41</code> with two items, a duplicate <code>o-41</code>, valid <code>o-42</code> with one item, and malformed <code>o-43</code>. Naive flattening emits five rows. The repaired result is two orders and three item rows; one duplicate is excluded and one malformed envelope is quarantined.</p>",
+    "use_case": {
+      "when": "Use this recovery sequence when a batch passed transport checks but violates a business invariant after parsing, deduplication, or flattening.",
+      "example": "A retail order batch is present and on time, yet repeated events and bad JSON inflate the gold item count.",
+      "decision": "Contain first when visible data may be wrong. Replay from preserved raw data into an isolated candidate; publish only after explicit reconciliation. For a harmless late batch, normal retry may be enough."
+    },
+    "practice": "Move the incident through containment, parse, deduplicate, reconcile, and publish. Watch the visible row count stay unchanged until the final gate.",
+    "boundary": "The browser is a local JavaScript state machine over four synthetic envelopes. It does not run Databricks, Snowflake, Spark, warehouses, permissions, checkpoints, or production SQL.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.timeline{display:grid;grid-template-columns:repeat(4,minmax(80px,1fr));gap:6px}.tick{min-height:75px;border-top:5px solid #759589;padding:7px;background:#eef4f0;border-radius:6px}select,input{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(2,1fr)}}\n</style><button id=\"incidentNext\">Advance investigation</button><button id=\"incidentReset\">Reset</button><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "let incidentStep=0;const incidentStates=[['Observe','Gold=5; ingest green; expected=3','bad'],['Contain','Publish blocked; raw B22 preserved','warn'],['Parse','3 valid envelopes; o-43 quarantined','warn'],['Deduplicate','2 unique orders; repeated o-41 excluded','warn'],['Reconcile','3 item rows = manifest expectation','good'],['Publish','Gold candidate promoted: 3 rows','good']];function incidentPaint(){const s=incidentStates[incidentStep];world.innerHTML='<div class=\"timeline\">'+incidentStates.map((x,i)=>'<div class=\"tick '+(i===incidentStep?'active':'')+'\"><strong>'+x[0]+'</strong><br>'+x[1]+'</div>').join('')+'</div><p class=\"lane '+s[2]+'\"><strong>Current evidence:</strong> '+s[1]+'</p><p>Customer-visible gold rows: <strong>'+(incidentStep<5?'5 (held)':'3 (repaired)')+'</strong></p>';incidentNext.disabled=incidentStep===5;}incidentNext.onclick=()=>{incidentStep=Math.min(5,incidentStep+1);incidentPaint()};incidentReset.onclick=()=>{incidentStep=0;incidentPaint()};incidentPaint();",
+    "questions": [
+      [
+        "Ingest is green but gold has five rows instead of three. First action?",
+        [
+          "Publish and inspect later",
+          "Block publish and preserve raw evidence",
+          "Delete the checkpoint"
+        ],
+        1,
+        "A transport success does not prove the business result."
+      ],
+      [
+        "After repair, which evidence supports publish?",
+        [
+          "Lag is zero",
+          "2 unique orders, 3 items, 1 duplicate excluded, 1 malformed quarantined",
+          "The warehouse is running"
+        ],
+        1,
+        "The gate should reconcile the business invariant and every excluded record."
+      ],
+      [
+        "When should layout tuning happen?",
+        [
+          "Before correctness",
+          "Only after query evidence shows a selective, repeated access path",
+          "For every table automatically"
+        ],
+        1,
+        "Correctness and recoverability come first; optimize from measured scans."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "events=[{\"id\":\"e1\",\"order\":\"o-41\",\"items\":[\"A\",\"B\"]},{\"id\":\"e1\",\"order\":\"o-41\",\"items\":[\"A\",\"B\"]},{\"id\":\"e2\",\"order\":\"o-42\",\"items\":[\"C\"]},None]",
+          "note": "Represent two valid events, one duplicate, and one malformed envelope."
+        },
+        {
+          "code": "valid=[e for e in events if e is not None]\nunique={e[\"id\"]:e for e in valid}",
+          "note": "Quarantine the malformed value and deduplicate by stable event identity."
+        },
+        {
+          "code": "items=[(e[\"order\"],item) for e in unique.values() for item in e[\"items\"]]\ngate={\"orders\":len(unique),\"items\":len(items),\"duplicate\":len(valid)-len(unique),\"malformed\":len(events)-len(valid)}",
+          "note": "Flatten once, then compute the publish evidence."
+        },
+        {
+          "code": "publish=gate=={\"orders\":2,\"items\":3,\"duplicate\":1,\"malformed\":1}",
+          "note": "Compare all four observed counts with the contract."
+        }
+      ],
+      "expect": {
+        "gate": {
+          "orders": 2,
+          "items": 3,
+          "duplicate": 1,
+          "malformed": 1
+        },
+        "publish": true
+      },
+      "limit": "Executed local Python over synthetic in-memory values. No vendor platform, checkpoint, privilege, or SQL was executed.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "events": [
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e2",
+                "order": "o-42",
+                "items": [
+                  "C"
+                ]
+              },
+              null
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "events": [
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e2",
+                "order": "o-42",
+                "items": [
+                  "C"
+                ]
+              },
+              null
+            ],
+            "valid": [
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e2",
+                "order": "o-42",
+                "items": [
+                  "C"
+                ]
+              }
+            ],
+            "unique": {
+              "e1": {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              "e2": {
+                "id": "e2",
+                "order": "o-42",
+                "items": [
+                  "C"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "events": [
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e2",
+                "order": "o-42",
+                "items": [
+                  "C"
+                ]
+              },
+              null
+            ],
+            "valid": [
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e2",
+                "order": "o-42",
+                "items": [
+                  "C"
+                ]
+              }
+            ],
+            "unique": {
+              "e1": {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              "e2": {
+                "id": "e2",
+                "order": "o-42",
+                "items": [
+                  "C"
+                ]
+              }
+            },
+            "items": [
+              [
+                "o-41",
+                "A"
+              ],
+              [
+                "o-41",
+                "B"
+              ],
+              [
+                "o-42",
+                "C"
+              ]
+            ],
+            "gate": {
+              "orders": 2,
+              "items": 3,
+              "duplicate": 1,
+              "malformed": 1
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "events": [
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e2",
+                "order": "o-42",
+                "items": [
+                  "C"
+                ]
+              },
+              null
+            ],
+            "valid": [
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "id": "e2",
+                "order": "o-42",
+                "items": [
+                  "C"
+                ]
+              }
+            ],
+            "unique": {
+              "e1": {
+                "id": "e1",
+                "order": "o-41",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              "e2": {
+                "id": "e2",
+                "order": "o-42",
+                "items": [
+                  "C"
+                ]
+              }
+            },
+            "items": [
+              [
+                "o-41",
+                "A"
+              ],
+              [
+                "o-41",
+                "B"
+              ],
+              [
+                "o-42",
+                "C"
+              ]
+            ],
+            "gate": {
+              "orders": 2,
+              "items": 3,
+              "duplicate": 1,
+              "malformed": 1
+            },
+            "publish": true
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks Lakeflow expectations",
+        "https://docs.databricks.com/aws/en/ldp/expectations",
+        "Living documentation"
+      ],
+      [
+        "Databricks task dependencies and Run if",
+        "https://docs.databricks.com/aws/en/jobs/run-if",
+        "Updated 2026-09-11"
+      ],
+      [
+        "Snowflake TRY_PARSE_JSON",
+        "https://docs.snowflake.com/en/sql-reference/functions/try_parse_json",
+        "Living documentation"
+      ],
+      [
+        "Snowflake FLATTEN",
+        "https://docs.snowflake.com/en/sql-reference/functions/flatten",
+        "Living documentation"
+      ],
+      [
+        "Snowflake task graphs",
+        "https://docs.snowflake.com/en/user-guide/tasks-graphs",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The timeline is an incident evidence chain: visible data stays held through four changing intermediate states and changes only after the reconciliation gate.",
+    "written_questions": [
+      "Which green signal in your platform could hide a wrong business result?",
+      "What four counts would your own repaired-batch publish gate reconcile?"
+    ],
+    "source_checked_on": "2026-10-12",
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: isolate, repair, validate, then let the job DAG publish",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Replay preserved bronze records into a candidate table without changing the current gold table.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production workspace, Unity Catalog objects, and a job identity limited to read bronze, write the repair schema, and publish the approved target. Compute can incur cost.</p><p>The SQL below is <strong>unexecuted vendor code</strong>. Exact VARIANT availability and syntax depend on your supported Databricks Runtime.</p><pre class=\"codepanel\"><code><span id=\"dbLine0\">CREATE OR REPLACE TEMP VIEW parsed AS\nSELECT *, try_parse_json(payload) AS v FROM bronze.orders_b22;</span><span id=\"dbLine1\">CREATE OR REPLACE TEMP VIEW deduped AS\nSELECT * EXCEPT(rn) FROM (SELECT *, row_number() OVER (PARTITION BY event_id ORDER BY ingested_at) rn FROM parsed WHERE v IS NOT NULL) WHERE rn=1;</span><span id=\"dbLine2\">CREATE OR REPLACE TABLE repair.b22_items AS\nSELECT event_id, item.value FROM deduped, LATERAL variant_explode(v:items) item;</span><span id=\"dbLine3\">-- Job task publish depends_on validate; run_if: ALL_SUCCESS</span></code></pre><button id=\"dbNext\">Advance local replay</button><button id=\"dbReset\">Reset</button><div id=\"dbWorld\" class=\"mechanism\"></div><p id=\"dbState\" aria-live=\"polite\"></p><p><strong>Failure/fix.</strong> Writing gold inside the parse step makes partial repair visible. Write an isolated candidate, have a separate validation task compare counts, and allow publish only after success. A job DAG does not replace table-level transactions or Unity Catalog privileges.</p>",
+        "markdown": "Authorized non-production workspace; SQL/YAML unexecuted.\n\n```sql\nCREATE OR REPLACE TEMP VIEW parsed AS\nSELECT *, try_parse_json(payload) AS v FROM bronze.orders_b22;\n-- deduplicate by event_id, explode items into repair.b22_items\n```\n\nLakeflow Jobs: `publish` depends on `validate` with `run_if: ALL_SUCCESS`. The local replay shows 4 envelopes → 3 valid → 2 unique orders → 3 items → publish.",
+        "javascript": "const dbNext=$('dbNext'),dbReset=$('dbReset');let dbStep=-1;const dbStates=['raw=4, gold held=5','valid=3, quarantine=1','unique=2, duplicate=1','candidate items=3','validation passed; publish eligible'];function dbPaint(){for(let i=0;i<4;i++)$('dbLine'+i).classList.toggle('active',i===Math.min(dbStep,3));$('dbWorld').innerHTML='<div class=\"rows\">'+dbStates.map((x,i)=>'<div class=\"row '+(i===dbStep?'active':'')+'\">'+x+'</div>').join('')+'</div>';$('dbState').textContent=dbStep<0?'Predict the next count. Local model only.':'Step '+(dbStep+1)+'/5: '+dbStates[dbStep]+'. No Databricks code ran.';dbNext.disabled=dbStep===4;}dbNext.onclick=()=>{dbStep=Math.min(4,dbStep+1);dbPaint()};dbReset.onclick=()=>{dbStep=-1;dbPaint()};dbPaint();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: quarantine parse failures, flatten the candidate, gate the task",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Build the same evidence chain in a repair schema, then let a downstream task publish only the reconciled candidate.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production database, schema, warehouse, and task-owning role. Warehouse and task execution can incur credits.</p><p>The SQL is <strong>unexecuted vendor code</strong>.</p><pre class=\"codepanel\"><code><span id=\"sfLine0\">CREATE OR REPLACE TEMP TABLE parsed AS\nSELECT *, TRY_PARSE_JSON(payload) v FROM bronze.orders_b22;</span><span id=\"sfLine1\">CREATE OR REPLACE TEMP TABLE deduped AS\nSELECT * EXCLUDE rn FROM (SELECT *, ROW_NUMBER() OVER(PARTITION BY event_id ORDER BY ingested_at) rn FROM parsed WHERE v IS NOT NULL) QUALIFY rn=1;</span><span id=\"sfLine2\">CREATE OR REPLACE TABLE repair.b22_items AS\nSELECT event_id, f.value FROM deduped, LATERAL FLATTEN(INPUT =&gt; v:items) f;</span><span id=\"sfLine3\">CREATE TASK publish AFTER validate AS CALL publish_b22();</span></code></pre><button id=\"sfNext\">Advance local replay</button><button id=\"sfReset\">Reset</button><div id=\"sfWorld\" class=\"mechanism\"></div><p id=\"sfState\" aria-live=\"polite\"></p><p><strong>Failure/fix.</strong> <code>PARSE_JSON</code> can abort on malformed input. <code>TRY_PARSE_JSON</code> exposes a NULL that you must quarantine and count; silently dropping it loses reconciliation evidence. Clustering is a separate, evidence-driven performance choice.</p>",
+        "markdown": "Authorized Snowflake sandbox; SQL unexecuted.\n\n```sql\nSELECT *, TRY_PARSE_JSON(payload) AS v FROM bronze.orders_b22;\n-- deduplicate with ROW_NUMBER, then LATERAL FLATTEN into repair.b22_items\nCREATE TASK publish AFTER validate AS CALL publish_b22();\n```\n\nThe local replay shows the changing counts; it does not run a warehouse or task graph.",
+        "javascript": "const sfNext=$('sfNext'),sfReset=$('sfReset');let sfStep=-1;const sfStates=['raw=4, current gold held','TRY_PARSE_JSON: valid=3, NULL=1','QUALIFY: unique=2','FLATTEN: candidate=3','validate succeeded; task may publish'];function sfPaint(){for(let i=0;i<4;i++)$('sfLine'+i).classList.toggle('active',i===Math.min(sfStep,3));$('sfWorld').innerHTML='<div class=\"rows\">'+sfStates.map((x,i)=>'<div class=\"row '+(i===sfStep?'active':'')+'\">'+x+'</div>').join('')+'</div>';$('sfState').textContent=sfStep<0?'Predict the next count. Local model only.':'Step '+(sfStep+1)+'/5: '+sfStates[sfStep]+'. No Snowflake SQL ran.';sfNext.disabled=sfStep===4;}sfNext.onclick=()=>{sfStep=Math.min(4,sfStep+1);sfPaint()};sfReset.onclick=()=>{sfStep=-1;sfPaint()};sfPaint();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Decision</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Tolerant JSON parse</td><td><code>try_parse_json</code></td><td><code>TRY_PARSE_JSON</code></td></tr><tr><td>Nested expansion</td><td><code>variant_explode</code> where supported</td><td><code>LATERAL FLATTEN</code></td></tr><tr><td>Publish dependency</td><td>Job task <code>ALL_SUCCESS</code></td><td>Task graph <code>AFTER</code></td></tr><tr><td>Access boundary</td><td>Unity Catalog + job identity</td><td>RBAC + warehouse/task privileges</td></tr><tr><td>Execution here</td><td>Not run</td><td>Not run</td></tr></tbody></table>",
+      "markdown": "| Decision | Databricks | Snowflake |\n|---|---|---|\n| Tolerant parse | `try_parse_json` | `TRY_PARSE_JSON` |\n| Nested expansion | `variant_explode` where supported | `LATERAL FLATTEN` |\n| Publish gate | Jobs `ALL_SUCCESS` | Tasks `AFTER` |\n| Execution | Not run | Not run |"
+    },
+    "product_questions": [
+      [
+        "Why count quarantined rows?",
+        [
+          "To preserve reconciliation evidence",
+          "To make JSON valid",
+          "To skip authorization"
+        ],
+        0,
+        "A repair must explain every source envelope."
+      ],
+      [
+        "Which product feature alone proves the repaired data is correct?",
+        [
+          "Databricks Jobs",
+          "Snowflake Tasks",
+          "Neither; explicit business reconciliation is required"
+        ],
+        2,
+        "Orchestration carries a gate; it does not define the invariant."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks VARIANT type",
+        "https://docs.databricks.com/aws/en/semi-structured/variant",
+        "Living documentation"
+      ],
+      [
+        "Databricks task dependencies",
+        "https://docs.databricks.com/aws/en/jobs/run-if",
+        "Updated 2026-09-11"
+      ],
+      [
+        "Snowflake TRY_PARSE_JSON",
+        "https://docs.snowflake.com/en/sql-reference/functions/try_parse_json",
+        "Living documentation"
+      ],
+      [
+        "Snowflake FLATTEN",
+        "https://docs.snowflake.com/en/sql-reference/functions/flatten",
+        "Living documentation"
+      ],
+      [
+        "Snowflake task graphs",
+        "https://docs.snowflake.com/en/user-guide/tasks-graphs",
+        "Living documentation"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-12",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "ingestion",
+          "transformation_modeling",
+          "governance_security",
+          "lakeflow_jobs",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Consolidates Days17–21 recovery, access, nested-data, performance, and orchestration concepts; not complete exam coverage."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "domains": [
+          "loading_unloading_transformation",
+          "account_warehouse_access",
+          "performance",
+          "data_protection"
+        ],
+        "scope": "Consolidates planning groups only; full COF-C03 objective IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "The reply happened after the request—even when its wall clock says earlier",
+    "goal": "Use a hybrid logical clock to preserve causal order without pretending physical clocks are perfectly synchronized.",
+    "tag": "Foundation · distributed time",
+    "concept": "<p>Two office clocks disagree. A reply can appear to happen before the request if you sort only by wall time.</p><p>A hybrid logical clock stores <code>(physical, logical)</code>. It follows the wall clock when possible. When a received event is already ahead, it keeps that physical value and increments the logical counter.</p>",
+    "example": "<p>Node A sends at wall time 100 with HLC <code>(100,0)</code>. Node B’s clock reads 95. After receiving the message, B replies with <code>(100,1)</code>. The reply sorts after the request even though B’s wall clock is behind.</p>",
+    "use_case": {
+      "when": "Use HLC timestamps when you need a compact, roughly wall-time-ordered label that respects observed message causality across nodes.",
+      "example": "Order changes from two regions are tagged so a received update and its reply cannot be reversed by clock skew.",
+      "decision": "Use HLC for causality plus approximate time. Use a consensus log for one authoritative total order, and vector clocks when you need to distinguish concurrency precisely."
+    },
+    "practice": "Change B’s wall clock from 95 to 105 and watch whether the physical component or logical counter advances.",
+    "boundary": "This two-node model omits clock bounds, persistence across restart, overflow, concurrent events, and database-specific tie breaking. HLC does not create consensus.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.timeline{display:grid;grid-template-columns:repeat(4,minmax(80px,1fr));gap:6px}.tick{min-height:75px;border-top:5px solid #759589;padding:7px;background:#eef4f0;border-radius:6px}select,input{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(2,1fr)}}\n</style><label for=\"bClock\">B wall clock <output id=\"bClockValue\">95</output></label><input id=\"bClock\" type=\"range\" min=\"90\" max=\"110\" value=\"95\"><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function hlcPaint(){const wall=Number(bClock.value),recvP=100,replyP=Math.max(wall,recvP),replyL=replyP===recvP?1:0;bClockValue.textContent=wall;world.innerHTML='<svg viewBox=\"0 0 700 220\" role=\"img\" aria-label=\"Request from A and reply from B with hybrid logical timestamps\"><line x1=\"100\" y1=\"35\" x2=\"100\" y2=\"195\" stroke=\"#54786f\" stroke-width=\"4\"/><line x1=\"600\" y1=\"35\" x2=\"600\" y2=\"195\" stroke=\"#54786f\" stroke-width=\"4\"/><text x=\"100\" y=\"25\" text-anchor=\"middle\">A wall 100</text><text x=\"600\" y=\"25\" text-anchor=\"middle\">B wall '+wall+'</text><path d=\"M110 70 L590 120\" stroke=\"#d18621\" stroke-width=\"5\"/><text x=\"350\" y=\"82\" text-anchor=\"middle\">request HLC (100,0)</text><path d=\"M590 145 L110 180\" stroke=\"#287b64\" stroke-width=\"5\"/><text x=\"350\" y=\"170\" text-anchor=\"middle\">reply HLC ('+replyP+','+replyL+')</text></svg><p class=\"lane good\">Lexicographic order: (100,0) &lt; ('+replyP+','+replyL+'). Causality is preserved.</p>';}bClock.oninput=hlcPaint;hlcPaint();",
+    "questions": [
+      [
+        "B wall=95 receives (100,0). Its next HLC is?",
+        [
+          "(95,0)",
+          "(100,1)",
+          "(101,0)"
+        ],
+        1,
+        "The received physical value wins and the logical counter advances."
+      ],
+      [
+        "What does HLC guarantee here?",
+        [
+          "Global consensus",
+          "Observed request sorts before its reply",
+          "Perfect clocks"
+        ],
+        1,
+        "It preserves the happened-before edge without synchronizing clocks."
+      ],
+      [
+        "When is HLC insufficient?",
+        [
+          "One authoritative write order must be agreed by replicas",
+          "A reply follows a request",
+          "Approximate wall time is useful"
+        ],
+        0,
+        "Agreement requires a coordination/consensus mechanism."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "record Hlc(long physical, int logical) {}",
+          "note": "Define the timestamp pair."
+        },
+        {
+          "code": "var request=new Hlc(100,0);\nlong bWall=95;",
+          "note": "Record the request and B wall clock."
+        },
+        {
+          "code": "long p=Math.max(bWall,request.physical());",
+          "note": "Advance B physical time to the larger observed value."
+        },
+        {
+          "code": "int l=(p==request.physical())?request.logical()+1:0;\nvar reply=new Hlc(p,l);",
+          "note": "Break the physical-time tie with the logical counter."
+        }
+      ],
+      "expect": {
+        "request": "Hlc[physical=100, logical=0]",
+        "reply": "Hlc[physical=100, logical=1]"
+      },
+      "limit": "Executed on local Java 17 over synthetic timestamps. It did not test a distributed datastore or clock-drift bound.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {
+            "request": "Hlc[physical=100, logical=0]"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "request": "Hlc[physical=100, logical=0]"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "request": "Hlc[physical=100, logical=0]",
+            "l": "1",
+            "reply": "Hlc[physical=100, logical=1]"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Logical Physical Clocks and Consistent Snapshots in Globally Distributed Databases",
+        "https://cse.buffalo.edu/~demirbas/publications/hlc.pdf",
+        "Original paper · 2014"
+      ]
+    ],
+    "visual_explanation": "The two lifelines keep their disagreeing wall clocks visible while the arrows carry HLC values; the counter, not a fabricated wall-clock jump, orders the reply.",
+    "written_questions": [
+      "Where would HLC state need durable storage across a service restart?",
+      "Which of your ordering requirements actually needs consensus instead?"
+    ],
+    "source_checked_on": "2026-10-12"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "The service is green; the business is not recovered yet",
+    "goal": "Separate technical restoration, business reconciliation, and systemic prevention instead of declaring victory at the first green dashboard.",
+    "tag": "Leadership · incident recovery",
+    "concept": "<p>A reopened airport is not fully recovered while thousands of passengers still have wrong itineraries. Likewise, healthy servers are only one recovery clock.</p><p>Track three outcomes: <strong>service restored</strong>, <strong>business state reconciled</strong>, and <strong>systemic control closed</strong>. Each needs its own owner and evidence.</p>",
+    "example": "<p>The pipeline turns green at 10:12. At that moment, 12,400 customer records are still wrong. Replay and reconciliation finish at 11:05. The preventive publish gate is deployed and tested two days later. “Resolved at 10:12” erases most of the work and risk.</p>",
+    "use_case": {
+      "when": "Use multiple recovery clocks when an incident leaves durable customer, financial, data, or compliance effects after infrastructure recovers.",
+      "example": "A corrected ETL job is healthy, but invoices created during the bad window still need identification and repair.",
+      "decision": "Close the technical incident when operations stabilize; keep business remediation and prevention as explicit tracked work with exit evidence."
+    },
+    "practice": "Move the status marker across the three milestones and decide what statement is safe for customers, leaders, and engineers.",
+    "boundary": "The dates are illustrative. Real severity, disclosure, audit, legal, and customer-communication duties depend on the organization and incident.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.timeline{display:grid;grid-template-columns:repeat(4,minmax(80px,1fr));gap:6px}.tick{min-height:75px;border-top:5px solid #759589;padding:7px;background:#eef4f0;border-radius:6px}select,input{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(2,1fr)}}\n</style><label for=\"recoveryPoint\">Latest verified milestone</label><select id=\"recoveryPoint\"><option value=\"0\">10:12 · service green</option><option value=\"1\">11:05 · customers reconciled</option><option value=\"2\">+2 days · prevention verified</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function recoveryPaint(){const p=Number(recoveryPoint.value),labels=[['Service','10:12','Jobs healthy'],['Business','11:05','12,400 records repaired'],['Systemic','+2 days','Publish gate tested']];world.innerHTML='<div class=\"timeline\">'+labels.map((x,i)=>'<div class=\"tick '+(i<=p?'good':'warn')+'\"><strong>'+x[0]+'</strong><br>'+x[1]+'<br>'+(i<=p?'✓ '+x[2]:'open · '+x[2])+'</div>').join('')+'</div><p class=\"lane '+(p===2?'good':'warn')+'\">Safe statement: '+(p===0?'service restored; customer correction still in progress':p===1?'customer impact reconciled; prevention remains open':'recovery and preventive control verified')+'.</p>';}recoveryPoint.onchange=recoveryPaint;recoveryPaint();",
+    "questions": [
+      [
+        "Pipeline is green; customer rows remain wrong. Status?",
+        [
+          "Fully recovered",
+          "Technical service restored; business recovery open",
+          "No incident"
+        ],
+        1,
+        "Availability and durable business state are different outcomes."
+      ],
+      [
+        "What closes the prevention clock?",
+        [
+          "A ticket exists",
+          "The control is deployed and its behavior verified",
+          "The postmortem meeting ended"
+        ],
+        1,
+        "Closure needs evidence that the risk-reduction mechanism works."
+      ],
+      [
+        "Why name owners per clock?",
+        [
+          "To split accountability for distinct outcomes",
+          "To hide the incident",
+          "To avoid metrics"
+        ],
+        0,
+        "Different work streams can otherwise disappear behind one status."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "milestones={\"service\":\"10:12\",\"business\":\"11:05\",\"prevention\":\"+2d\"}",
+          "note": "Record separate evidence times."
+        },
+        {
+          "code": "customer_rows_wrong_at_service_restore=12400",
+          "note": "Quantify the residual business impact at technical restoration."
+        },
+        {
+          "code": "fully_recovered=all(k in milestones for k in (\"service\",\"business\",\"prevention\")) and customer_rows_wrong_at_service_restore>0",
+          "note": "Require all three recorded outcomes; retain the residual-impact fact."
+        }
+      ],
+      "expect": {
+        "customer_rows_wrong_at_service_restore": 12400,
+        "fully_recovered": true
+      },
+      "limit": "Executed local Python over illustrative incident facts. It did not query an incident system or validate organizational closure policy.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "milestones": {
+              "service": "10:12",
+              "business": "11:05",
+              "prevention": "+2d"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "milestones": {
+              "service": "10:12",
+              "business": "11:05",
+              "prevention": "+2d"
+            },
+            "customer_rows_wrong_at_service_restore": 12400
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "milestones": {
+              "service": "10:12",
+              "business": "11:05",
+              "prevention": "+2d"
+            },
+            "customer_rows_wrong_at_service_restore": 12400,
+            "fully_recovered": true
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Well-Architected: learn from operational events",
+        "https://docs.aws.amazon.com/wellarchitected/latest/operational-excellence-pillar/ops_evolve_ops_exp.html",
+        "Living guidance"
+      ],
+      [
+        "AWS Well-Architected: test recovery procedures",
+        "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_testing_resiliency_failure_recovery.html",
+        "Living guidance"
+      ]
+    ],
+    "visual_explanation": "The three milestone cards deliberately do not collapse into one line: the selected evidence turns green while later obligations stay amber.",
+    "written_questions": [
+      "Which incident metric currently turns green before customers are actually whole?",
+      "Who owns reconciliation evidence after the incident channel quiets down?"
+    ],
+    "source_checked_on": "2026-10-12"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "A valid tool call can still return the wrong shape",
+    "goal": "Validate MCP structured output against the declared output schema before a model reasons over it.",
+    "tag": "Harness engineering · MCP 2026-07-28",
+    "concept": "<p>A vending machine can accept a valid button press and still dispense the wrong product. Validating tool input is only half the boundary.</p><p>An MCP tool may declare an <code>outputSchema</code>. The server must return matching structured content; the client should validate it before passing the result to an LLM.</p>",
+    "example": "<p><code>get_order</code> promises <code>{order_id, status}</code>. The handler returns <code>{id, state}</code>. Both objects look plausible to a person, but the contract failed. Treat the result as an error, keep the raw evidence for debugging, and do not invite the model to guess field meanings.</p>",
+    "use_case": {
+      "when": "Use result validation for tools whose output feeds model decisions, workflow branching, side effects, or audit records.",
+      "example": "An order-support agent calls a tool before deciding whether a refund is allowed.",
+      "decision": "Reject schema mismatches at the harness boundary. Add semantic checks for valid-but-impossible values; JSON Schema does not prove business truth."
+    },
+    "practice": "Switch between the promised and drifted result. Observe that the tool invocation succeeds but the harness gate changes.",
+    "boundary": "The browser checks only two required field names. Production validation must implement the full negotiated JSON Schema dialect, size limits, untrusted text handling, logging controls, and server identity.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.timeline{display:grid;grid-template-columns:repeat(4,minmax(80px,1fr));gap:6px}.tick{min-height:75px;border-top:5px solid #759589;padding:7px;background:#eef4f0;border-radius:6px}select,input{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(2,1fr)}}\n</style><label for=\"toolResult\">Tool result</label><select id=\"toolResult\"><option value=\"drift\">{id, state}</option><option value=\"valid\">{order_id, status}</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function resultPaint(){const valid=toolResult.value==='valid';world.innerHTML='<div class=\"rows\"><div class=\"row good\"><strong>Declared output</strong><br>order_id<br>status</div><div class=\"row '+(valid?'good':'bad')+'\"><strong>Returned keys</strong><br>'+(valid?'order_id<br>status':'id<br>state')+'</div><div class=\"row '+(valid?'good':'warn')+'\"><strong>Harness decision</strong><br>'+(valid?'pass to model':'reject + record error')+'</div></div><p class=\"lane '+(valid?'good':'bad')+'\">The RPC completed. The result contract '+(valid?'passed.':'did not.')+'</p>';}toolResult.onchange=resultPaint;resultPaint();",
+    "questions": [
+      [
+        "Tool promises {order_id,status} but returns {id,state}. What should the client do?",
+        [
+          "Let the model infer aliases",
+          "Reject/mark the result invalid",
+          "Rename fields silently"
+        ],
+        1,
+        "A schema mismatch is contract evidence, not a prompt for guessing."
+      ],
+      [
+        "Who must conform when outputSchema is present?",
+        [
+          "Only the user",
+          "The server result",
+          "Only the model"
+        ],
+        1,
+        "The specification makes conformance a server obligation."
+      ],
+      [
+        "What does schema validation not prove?",
+        [
+          "Required fields exist",
+          "The business value is true and authorized",
+          "The shape matches"
+        ],
+        1,
+        "Syntax and structure are not semantic truth or authorization."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "required={\"order_id\",\"status\"}\nresult={\"id\":\"o-9\",\"state\":\"shipped\"}",
+          "note": "Record the promised keys and the drifted result."
+        },
+        {
+          "code": "missing=sorted(required-result.keys())",
+          "note": "Compute the missing contract fields."
+        },
+        {
+          "code": "decision=\"PASS_TO_MODEL\" if not missing else \"REJECT_RESULT\"",
+          "note": "Gate model-visible output on validation."
+        }
+      ],
+      "expect": {
+        "missing": [
+          "order_id",
+          "status"
+        ],
+        "decision": "REJECT_RESULT"
+      },
+      "limit": "Executed local Python set arithmetic. It did not implement JSON Schema, call an MCP server, or send data to a model.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "result": {
+              "id": "o-9",
+              "state": "shipped"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "result": {
+              "id": "o-9",
+              "state": "shipped"
+            },
+            "missing": [
+              "order_id",
+              "status"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "result": {
+              "id": "o-9",
+              "state": "shipped"
+            },
+            "missing": [
+              "order_id",
+              "status"
+            ],
+            "decision": "REJECT_RESULT"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP 2026-07-28: tools and output schemas",
+        "https://modelcontextprotocol.io/specification/2026-07-28/server/tools",
+        "Specification dated 2026-07-28"
+      ],
+      [
+        "MCP TypeScript SDK: calling tools",
+        "https://ts.sdk.modelcontextprotocol.io/v2/clients/calling",
+        "Current v2 client documentation"
+      ]
+    ],
+    "visual_explanation": "The declared and returned key cards sit side by side; the third card shows the harness decision, separating RPC success from contract success.",
+    "written_questions": [
+      "Which tool result currently reaches your model without structural validation?",
+      "What semantic rule must run after schema validation for that tool?"
+    ],
+    "source_checked_on": "2026-10-12"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Round where the optimizer feels the error, not where the state is stored",
+    "goal": "See why changing the coordinate used for stochastic rounding can reduce update error in 4-bit optimizer-state quantization.",
+    "tag": "New research · submitted 2026-10-08",
+    "concept": "<p>Suppose a thermostat stores temperature, but your real concern is heating cost. Equal temperature errors do not create equal cost errors. You may want rounding probabilities to reflect the quantity the system actually uses.</p><p>A new paper studies 4-bit AdamW state. It proposes rounding in <em>preconditioner space</em>—closer to the optimizer update—rather than only in stored second-moment space.</p>",
+    "example": "<p>A toy value <code>v=0.01</code> lies between stored levels 0 and 0.04. State-space stochastic rounding chooses zero with probability 0.75. With <code>h(v)=1/(sqrt(v)+0.01)</code>, matching the expected preconditioner chooses zero with probability about 0.045. The coordinate changes the probability dramatically.</p><p>The authors report reduced mean validation-loss gaps versus TorchAO 4-bit AdamW at every evaluated model size from 130M to 2.7B, with the largest reported reduction 70%. This is a research claim, not a production guarantee.</p>",
+    "use_case": {
+      "when": "Potentially useful when optimizer state memory limits training scale and 4-bit quantization error materially changes learning.",
+      "example": "Pretraining a billion-parameter transformer where AdamW state consumes scarce accelerator memory.",
+      "decision": "Reproduce quality, throughput, memory, kernels, and numerical stability on your exact stack before adoption. Use mature 8/32-bit state when reliability matters more than the extra memory saving."
+    },
+    "practice": "Move v between 0 and 0.04 and compare the zero probability under the two coordinate systems.",
+    "boundary": "The browser performs one-cell arithmetic. It omits tensor blocks, exponent selection, ZE-EDEN calibration, first moments, kernels, training dynamics, and every benchmark in the paper.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.timeline{display:grid;grid-template-columns:repeat(4,minmax(80px,1fr));gap:6px}.tick{min-height:75px;border-top:5px solid #759589;padding:7px;background:#eef4f0;border-radius:6px}select,input{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(2,1fr)}}\n</style><label for=\"vValue\">Second moment v <output id=\"vOut\">0.010</output></label><input id=\"vValue\" type=\"range\" min=\"1\" max=\"39\" value=\"10\"><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function quantPaint(){const v=Number(vValue.value)/1000,lo=0,hi=.04,eps=.01,pState=(hi-v)/(hi-lo),h=x=>1/(Math.sqrt(x)+eps),pUpdate=(h(v)-h(hi))/(h(lo)-h(hi));vOut.textContent=v.toFixed(3);world.innerHTML='<div class=\"rows\"><div class=\"row\"><strong>Stored-state space</strong><br>P(round to 0) = '+pState.toFixed(3)+'</div><div class=\"row\"><strong>Preconditioner space</strong><br>P(round to 0) = '+pUpdate.toFixed(3)+'</div></div><p class=\"lane warn\">Same endpoints and v; different notion of unbiased error.</p>';}vValue.oninput=quantPaint;quantPaint();",
+    "questions": [
+      [
+        "At v=.01 between 0 and .04, state-space P(round to 0)?",
+        [
+          ".25",
+          ".75",
+          "1.0"
+        ],
+        1,
+        "Linear interpolation leaves 75% weight on the lower level."
+      ],
+      [
+        "Why use preconditioner space?",
+        [
+          "It targets the transformed quantity used in the update",
+          "It guarantees all training improves",
+          "It removes AdamW"
+        ],
+        0,
+        "The optimizer feels the nonlinear preconditioner, not raw v directly."
+      ],
+      [
+        "What is the strongest safe conclusion today?",
+        [
+          "All 4-bit training should switch",
+          "The reported experiments support further reproduction",
+          "The toy proves 70% improvement"
+        ],
+        1,
+        "A recent study plus toy arithmetic is evidence to test, not a universal result."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "import math\nv,lo,hi,eps=0.01,0.0,0.04,0.01",
+          "note": "Set one synthetic second-moment value and two quantization levels."
+        },
+        {
+          "code": "p_zero_state=(hi-v)/(hi-lo)",
+          "note": "Match the expected stored value."
+        },
+        {
+          "code": "h=lambda x:1/(math.sqrt(x)+eps)\np_zero_update=(h(v)-h(hi))/(h(lo)-h(hi))",
+          "note": "Match the expected nonlinear preconditioner instead."
+        }
+      ],
+      "expect": {
+        "p_zero_state": 0.75,
+        "p_zero_update": 0.04545454545454546
+      },
+      "limit": "Executed local Python for one scalar. It did not implement the paper, run AdamW, or train a model.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "v": 0.01,
+            "lo": 0.0,
+            "hi": 0.04,
+            "eps": 0.01
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "v": 0.01,
+            "lo": 0.0,
+            "hi": 0.04,
+            "eps": 0.01,
+            "p_zero_state": 0.75
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "v": 0.01,
+            "lo": 0.0,
+            "hi": 0.04,
+            "eps": 0.01,
+            "p_zero_state": 0.75,
+            "p_zero_update": 0.04545454545454546
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Rounding in Preconditioner Space: Redesigning 4-bit AdamW Optimizer-State Quantization",
+        "https://arxiv.org/abs/2610.12444",
+        "Submitted 2026-10-08"
+      ],
+      [
+        "HTML paper version",
+        "https://arxiv.org/html/2610.12444v1",
+        "Version 1 · 2026-10-08"
+      ]
+    ],
+    "visual_explanation": "Both cards share the same scalar and endpoints; only the coordinate of expectation changes, making the probability shift the concept rather than decoration.",
+    "written_questions": [
+      "Which memory bottleneck would 4-bit optimizer state relieve in your training setup?",
+      "What reproduction result would be a stop signal despite lower memory use?"
+    ],
+    "source_checked_on": "2026-10-12"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "Build once, promote the same digest",
+    "goal": "Make production run the exact artifact that passed tests instead of rebuilding something merely similar.",
+    "tag": "Deployment · artifact identity",
+    "concept": "<p>A sealed meal is inspected, labeled, and sent to the dining room. If the kitchen cooks a new meal after inspection, the approval no longer applies.</p><p>CI should build an artifact once, compute its digest, test and attest that object, then promote the same digest through environments.</p>",
+    "example": "<p>Build produces image digest <code>sha256:aaa</code>. Staging tests it. A production job that rebuilds from the same commit pulls a changed transitive dependency and produces <code>sha256:bbb</code>. The commit matches; the bytes do not. Production is now running an untested artifact.</p>",
+    "use_case": {
+      "when": "Use immutable promotion for containers, packages, Lambda bundles, infrastructure plans, and other deployable outputs that cross environments.",
+      "example": "Build an API image, attest and test its digest, then deploy that digest to staging and production with environment approvals.",
+      "decision": "Promote immutable content when environments should differ only in configuration. Rebuild only when the target platform truly requires it, and then test/attest the rebuilt target separately."
+    },
+    "practice": "Choose promote or rebuild and change the production digest. See whether the staging evidence still applies.",
+    "boundary": "The browser compares short labels. Real provenance needs trusted builders, registry immutability, attestation verification, permission boundaries, retention, and environment-specific configuration management.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.timeline{display:grid;grid-template-columns:repeat(4,minmax(80px,1fr));gap:6px}.tick{min-height:75px;border-top:5px solid #759589;padding:7px;background:#eef4f0;border-radius:6px}select,input{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(2,1fr)}}\n</style><label for=\"deployMode\">Production path</label><select id=\"deployMode\"><option value=\"rebuild\">Rebuild from commit</option><option value=\"promote\">Promote tested digest</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function artifactPaint(){const same=deployMode.value==='promote';world.innerHTML='<svg viewBox=\"0 0 720 220\" role=\"img\" aria-label=\"Artifact digest through build, staging, and production\"><rect x=\"20\" y=\"60\" width=\"180\" height=\"90\" rx=\"14\" fill=\"#e4f3cf\" stroke=\"#287b64\" stroke-width=\"3\"/><text x=\"110\" y=\"95\" text-anchor=\"middle\">BUILD</text><text x=\"110\" y=\"125\" text-anchor=\"middle\">sha256:aaa</text><rect x=\"270\" y=\"60\" width=\"180\" height=\"90\" rx=\"14\" fill=\"#e4f3cf\" stroke=\"#287b64\" stroke-width=\"3\"/><text x=\"360\" y=\"95\" text-anchor=\"middle\">STAGING ✓</text><text x=\"360\" y=\"125\" text-anchor=\"middle\">sha256:aaa</text><rect x=\"520\" y=\"60\" width=\"180\" height=\"90\" rx=\"14\" fill=\"'+(same?'#e4f3cf':'#fff0e6')+'\" stroke=\"'+(same?'#287b64':'#a74a3d')+'\" stroke-width=\"3\"/><text x=\"610\" y=\"95\" text-anchor=\"middle\">PRODUCTION</text><text x=\"610\" y=\"125\" text-anchor=\"middle\">'+(same?'sha256:aaa':'sha256:bbb')+'</text><path d=\"M200 105 L270 105 M450 105 L520 105\" stroke=\"#54786f\" stroke-width=\"5\"/></svg><p class=\"lane '+(same?'good':'bad')+'\">'+(same?'The tested artifact crossed the boundary unchanged.':'Same source commit is not the same artifact bytes.')+'</p>';}deployMode.onchange=artifactPaint;artifactPaint();",
+    "questions": [
+      [
+        "Staging tested digest aaa; production rebuilt digest bbb. What is missing?",
+        [
+          "A commit hash",
+          "Evidence for artifact bbb",
+          "A YAML comment"
+        ],
+        1,
+        "The staging result applies to aaa, not a new object."
+      ],
+      [
+        "What should an environment approval authorize?",
+        [
+          "A named immutable artifact plus deployment context",
+          "Any future rebuild",
+          "A branch name forever"
+        ],
+        0,
+        "The decision must bind to the object being promoted."
+      ],
+      [
+        "When can rebuild be reasonable?",
+        [
+          "Never",
+          "A target platform requires a distinct build, followed by its own verification",
+          "Whenever caching is slow"
+        ],
+        1,
+        "A necessary new artifact needs new evidence."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "import hashlib\nbuild=b\"api-v22|locked-deps\"",
+          "note": "Represent one built artifact."
+        },
+        {
+          "code": "tested=hashlib.sha256(build).hexdigest()",
+          "note": "Bind test evidence to its digest."
+        },
+        {
+          "code": "production=build\ndeployed=hashlib.sha256(production).hexdigest()\nverified=(deployed==tested)",
+          "note": "Promote the same bytes and compare identity before deploy."
+        }
+      ],
+      "expect": {
+        "verified": true
+      },
+      "limit": "Executed local SHA-256 over synthetic bytes. It did not upload an artifact, issue an attestation, or deploy through GitHub Actions.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {
+            "tested": "9e526027740183fdd922f055b73b8a3c3664ddf179bc25989e0bcdce3de3a245"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "tested": "9e526027740183fdd922f055b73b8a3c3664ddf179bc25989e0bcdce3de3a245",
+            "deployed": "9e526027740183fdd922f055b73b8a3c3664ddf179bc25989e0bcdce3de3a245",
+            "verified": true
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions: workflow artifacts",
+        "https://docs.github.com/en/actions/concepts/workflows-and-actions/workflow-artifacts",
+        "Living documentation"
+      ],
+      [
+        "GitHub Actions: manage environments for deployment",
+        "https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments",
+        "Living documentation"
+      ],
+      [
+        "GitHub Actions: artifact attestations",
+        "https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The three large digest boxes make artifact identity visible across environments; rebuild mode changes only the production bytes and turns the evidence path red.",
+    "written_questions": [
+      "Where does your pipeline currently rebuild after tests?",
+      "Which digest should an approver see before authorizing production?"
+    ],
+    "source_checked_on": "2026-10-12"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "One idempotency key, one create effect",
+    "goal": "Make a retried create request return the original outcome while rejecting key reuse for different intent.",
+    "tag": "API reliability · idempotency",
+    "concept": "<p>A coat-check ticket identifies one stored coat. Presenting the same ticket again should return the same coat, not create another claim.</p><p>For a create API, the client sends an idempotency key. The server stores the key, a fingerprint of the intended request, and the result as one durable decision.</p>",
+    "example": "<p><code>POST /orders</code> with key <code>k-77</code> and amount $25 creates <code>o-900</code>. A network timeout hides the reply. Retrying the same key and payload returns <code>o-900</code> without a second order. Reusing <code>k-77</code> with $40 is rejected because the intent changed.</p>",
+    "use_case": {
+      "when": "Use idempotency keys for client-retried operations that create side effects and cannot safely depend on transport success.",
+      "example": "Order creation, payment initiation, job submission, or provisioning requests over an unreliable network.",
+      "decision": "Let the caller supply a unique intent key and validate a payload fingerprint. Do not use a server-generated key that the client cannot repeat after losing the response."
+    },
+    "practice": "Send the first request, a same-payload retry, and a changed-payload reuse. Watch stored state and side-effect count.",
+    "boundary": "The browser stores one key in memory. Production needs atomic persistence, scope/tenant binding, retention, concurrency control, response replay policy, authentication, and rules for failed/in-progress requests.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.timeline{display:grid;grid-template-columns:repeat(4,minmax(80px,1fr));gap:6px}.tick{min-height:75px;border-top:5px solid #759589;padding:7px;background:#eef4f0;border-radius:6px}select,input{font:inherit;max-width:100%;padding:8px}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}@media(max-width:520px){.mechanism svg{font-size:12px}.timeline{grid-template-columns:repeat(2,1fr)}}\n</style><label for=\"requestCase\">Request</label><select id=\"requestCase\"><option value=\"first\">k-77 · $25 · first</option><option value=\"retry\">k-77 · $25 · retry</option><option value=\"mismatch\">k-77 · $40 · changed intent</option><option value=\"new\">k-88 · $25 · new intent</option></select><button id=\"sendRequest\">Send</button><button id=\"clearRequests\">Clear</button><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "let keys={};let effects=0;function requestPaint(msg='No request sent'){world.innerHTML='<p class=\"lane '+(msg.startsWith('REJECT')?'bad':'good')+'\"><strong>'+msg+'</strong></p><div class=\"rows\"><div class=\"row\">stored keys<br><strong>'+Object.keys(keys).join(', ')+'</strong></div><div class=\"row\">orders created<br><strong>'+effects+'</strong></div></div>';}sendRequest.onclick=()=>{const c=requestCase.value,k=c==='new'?'k-88':'k-77',amount=c==='mismatch'?40:25,f=String(amount);if(!keys[k]){effects++;keys[k]={fingerprint:f,order:'o-'+(899+effects)};requestPaint('CREATE '+keys[k].order);}else if(keys[k].fingerprint===f){requestPaint('REPLAY '+keys[k].order+' · no new effect');}else requestPaint('REJECT key reuse with different payload');};clearRequests.onclick=()=>{keys={};effects=0;requestPaint()};requestPaint();",
+    "questions": [
+      [
+        "Retry k-77 with the same payload. Correct outcome?",
+        [
+          "Create another order",
+          "Return the stored result",
+          "Reject every retry"
+        ],
+        1,
+        "The repeated intent maps to the original effect and response."
+      ],
+      [
+        "Reuse k-77 with a different amount. Correct outcome?",
+        [
+          "Return the old result silently",
+          "Reject the mismatch",
+          "Create under the same key"
+        ],
+        1,
+        "A fingerprint prevents one key from ambiguously naming two intents."
+      ],
+      [
+        "Why should the client choose the key?",
+        [
+          "It can repeat the same intent after losing the response",
+          "It makes authentication unnecessary",
+          "It guarantees delivery"
+        ],
+        0,
+        "The server cannot give back a key if that very response was lost."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "store={}\neffects=[]\nkey,payload=\"k-77\",{\"amount\":25}",
+          "note": "Start one caller intent."
+        },
+        {
+          "code": "fingerprint=tuple(sorted(payload.items()))\nstore[key]={\"fingerprint\":fingerprint,\"response\":{\"order_id\":\"o-900\"}}\neffects.append(\"create o-900\")",
+          "note": "Atomically bind key, intent fingerprint, and result."
+        },
+        {
+          "code": "retry=store[key][\"response\"] if store[key][\"fingerprint\"]==fingerprint else None",
+          "note": "Replay the stored response for the same intent without another effect."
+        },
+        {
+          "code": "mismatch=tuple(sorted({\"amount\":40}.items()))!=store[key][\"fingerprint\"]",
+          "note": "Detect an unsafe reuse of the key."
+        }
+      ],
+      "expect": {
+        "retry": {
+          "order_id": "o-900"
+        },
+        "effects": [
+          "create o-900"
+        ],
+        "mismatch": true
+      },
+      "limit": "Executed local Python dictionary operations. It did not test durable concurrency, HTTP, authentication, or a real database.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "store": {},
+            "effects": [],
+            "key": "k-77",
+            "payload": {
+              "amount": 25
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "store": {
+              "k-77": {
+                "fingerprint": [
+                  [
+                    "amount",
+                    25
+                  ]
+                ],
+                "response": {
+                  "order_id": "o-900"
+                }
+              }
+            },
+            "effects": [
+              "create o-900"
+            ],
+            "key": "k-77",
+            "payload": {
+              "amount": 25
+            },
+            "fingerprint": [
+              [
+                "amount",
+                25
+              ]
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "store": {
+              "k-77": {
+                "fingerprint": [
+                  [
+                    "amount",
+                    25
+                  ]
+                ],
+                "response": {
+                  "order_id": "o-900"
+                }
+              }
+            },
+            "effects": [
+              "create o-900"
+            ],
+            "key": "k-77",
+            "payload": {
+              "amount": 25
+            },
+            "fingerprint": [
+              [
+                "amount",
+                25
+              ]
+            ],
+            "retry": {
+              "order_id": "o-900"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "store": {
+              "k-77": {
+                "fingerprint": [
+                  [
+                    "amount",
+                    25
+                  ]
+                ],
+                "response": {
+                  "order_id": "o-900"
+                }
+              }
+            },
+            "effects": [
+              "create o-900"
+            ],
+            "key": "k-77",
+            "payload": {
+              "amount": 25
+            },
+            "fingerprint": [
+              [
+                "amount",
+                25
+              ]
+            ],
+            "retry": {
+              "order_id": "o-900"
+            },
+            "mismatch": true
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "AWS Builders Library: Making retries safe with idempotent APIs",
+        "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/",
+        "Living article"
+      ],
+      [
+        "AWS Well-Architected: make operations idempotent",
+        "https://docs.aws.amazon.com/wellarchitected/latest/framework/rel_prevent_interaction_failure_idempotent.html",
+        "Living guidance"
+      ]
+    ],
+    "visual_explanation": "The store and side-effect counters change independently: a valid retry changes the response message but leaves the order count fixed; mismatched intent turns the decision red.",
+    "written_questions": [
+      "What identifies one caller intent in your create API?",
+      "How long must its idempotency record remain durable relative to retry windows?"
+    ],
+    "source_checked_on": "2026-10-12"
+  }
+]
