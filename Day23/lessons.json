@@ -1,0 +1,1106 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "minutes": 30,
+    "title": "Retrieval lab: choose the control from the symptom",
+    "goal": "Retrieve the first certification cycle without hints and separate delivered coverage from evidence still missing.",
+    "tag": "Certification retrieval + gap session · cycle 1 of 7",
+    "concept": "<p>This is the fire-drill day. You are given a symptom, not a feature name. Your job is to choose the next control and explain what evidence would prove it worked.</p><p>The six prior lessons covered recovery, access paths, pruning, nested data, orchestration gates, and one combined repair. Retrieval matters because an exam or incident will not label the chapter for you.</p>",
+    "example": "<p>Orders batch <code>B23</code> has four symptoms: a retry repeated output, an analyst cannot read the candidate, a date filter scans almost everything, and publish ran after validation failed. The correct response is not “optimize the pipeline.” Each symptom points to a different mechanism and a different proof.</p>",
+    "use_case": {
+      "when": "Use a retrieval-and-gap session after a run of focused lessons to test whether you can select controls from symptoms without feature-name prompts.",
+      "example": "Triage a failed orders pipeline by matching duplicate output, denied access, poor pruning, and unsafe publish to different remedies.",
+      "decision": "Count an area as delivered when the lesson exists. Count it as retained only after a fresh private answer or real sandbox action; silence is not evidence of mastery or failure."
+    },
+    "practice": "Choose one B23 symptom. Predict the control, reveal it, and name the missing vendor evidence before moving on.",
+    "boundary": "The browser is an open-book local JavaScript retrieval coach. It cannot measure memory, exam readiness, product UI skill, permissions, performance, or the result of vendor execution.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.meter{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.meter>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.mechanism svg{font-size:12px}}</style><label for=\"incidentSymptom\">B23 symptom</label><select id=\"incidentSymptom\"><option value=\"duplicate\">Retry repeated output rows</option><option value=\"denied\">Analyst cannot read candidate</option><option value=\"scan\">Date filter scans nearly everything</option><option value=\"publish\">Publish ran after validation failed</option></select><button id=\"revealControl\">Reveal control</button><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "const controls={duplicate:['Recovery identity','Preserve checkpoint/source position and distinguish replay from duplicate business events','Prove one intended effect after a replay'],denied:['Authorization path','Check principal → role/group → catalog/database → schema → table and compute path','Prove the intended principal can read and an unintended one cannot'],scan:['Pruning evidence','Inspect file/partition or micro-partition pruning before changing layout','Prove fewer bytes/partitions scanned for the target query'],publish:['Dependency gate','Make publish depend on validation success; keep failure handling separate','Prove publish stays blocked on a failed validation']};let revealed=false;function retrievalPaint(){const c=controls[incidentSymptom.value];world.innerHTML='<div class=\"rows\"><div class=\"row bad\"><strong>Symptom</strong><br>'+incidentSymptom.options?.[incidentSymptom.selectedIndex]?.textContent+'</div><div class=\"row '+(revealed?'good':'warn')+'\"><strong>Control</strong><br>'+(revealed?c[0]:'Predict before reveal')+'</div><div class=\"row '+(revealed?'good':'warn')+'\"><strong>Required evidence</strong><br>'+(revealed?c[2]:'Not revealed')+'</div></div>';}incidentSymptom.onchange=()=>{revealed=false;retrievalPaint()};revealControl.onclick=()=>{revealed=true;retrievalPaint()};retrievalPaint();",
+    "questions": [
+      [
+        "A date predicate scans every data chunk. First move?",
+        [
+          "Increase compute",
+          "Inspect pruning evidence and recorded ranges",
+          "Add a publish task"
+        ],
+        1,
+        "Measure whether layout metadata can exclude data before changing compute or clustering."
+      ],
+      [
+        "Validation failed but publish ran. Which boundary failed?",
+        [
+          "Orchestration dependency",
+          "JSON parsing",
+          "Table ownership only"
+        ],
+        0,
+        "The workflow allowed an unsafe transition."
+      ],
+      [
+        "What can this public retrieval page establish about personal mastery?",
+        [
+          "Complete readiness",
+          "Nothing without explicit fresh private evidence",
+          "A failed exam"
+        ],
+        1,
+        "Delivered curriculum and personal mastery remain separate."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "symptoms={\"duplicate\":\"recovery_identity\",\"denied\":\"authorization_path\",\"scan\":\"pruning_evidence\",\"publish\":\"dependency_gate\"}",
+          "note": "Map four incident signals to distinct control families."
+        },
+        {
+          "code": "evidence={\"duplicate\":\"one_effect_after_replay\",\"denied\":\"allow_and_deny_tests\",\"scan\":\"fewer_bytes_scanned\",\"publish\":\"blocked_on_failed_validation\"}",
+          "note": "Name the proof required for each control."
+        },
+        {
+          "code": "case=\"publish\"\ndecision={\"control\":symptoms[case],\"proof\":evidence[case]}",
+          "note": "Retrieve one decision from the symptom, not from a feature name."
+        }
+      ],
+      "expect": {
+        "decision": {
+          "control": "dependency_gate",
+          "proof": "blocked_on_failed_validation"
+        }
+      },
+      "limit": "Executed local Python over a synthetic retrieval map. It did not grade a learner or run either vendor platform.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "symptoms": {
+              "duplicate": "recovery_identity",
+              "denied": "authorization_path",
+              "scan": "pruning_evidence",
+              "publish": "dependency_gate"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "symptoms": {
+              "duplicate": "recovery_identity",
+              "denied": "authorization_path",
+              "scan": "pruning_evidence",
+              "publish": "dependency_gate"
+            },
+            "evidence": {
+              "duplicate": "one_effect_after_replay",
+              "denied": "allow_and_deny_tests",
+              "scan": "fewer_bytes_scanned",
+              "publish": "blocked_on_failed_validation"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "symptoms": {
+              "duplicate": "recovery_identity",
+              "denied": "authorization_path",
+              "scan": "pruning_evidence",
+              "publish": "dependency_gate"
+            },
+            "evidence": {
+              "duplicate": "one_effect_after_replay",
+              "denied": "allow_and_deny_tests",
+              "scan": "fewer_bytes_scanned",
+              "publish": "blocked_on_failed_validation"
+            },
+            "case": "publish",
+            "decision": {
+              "control": "dependency_gate",
+              "proof": "blocked_on_failed_validation"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks Data Engineer Associate certification",
+        "https://www.databricks.com/learn/certification/data-engineer-associate",
+        "Official page; checked 2026-10-13"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-05/databricks-certified-data-engineer-associate-exam-guide-may-2026-000.pdf",
+        "May 4, 2026 guide linked by program"
+      ],
+      [
+        "SnowPro Core COF-C03",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official page; checked 2026-10-13"
+      ]
+    ],
+    "visual_explanation": "The three columns force the decision sequence: observe the symptom, choose one control family, then demand proof. Changing the symptom replaces all three rather than decorating a fixed template.",
+    "written_questions": [
+      "Which of the four symptoms can you diagnose without reopening an earlier lesson?",
+      "Which vendor action still needs real sandbox evidence this week?"
+    ],
+    "source_checked_on": "2026-10-13",
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks retrieval: identify the next evidence-producing action",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> A Lakeflow job is green at ingest, but the gold result is wrong. Select the next evidence-producing action rather than naming random features.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production workspace, job identity, Unity Catalog objects, and a small synthetic batch. Compute can incur cost.</p><p>The SQL/YAML is <strong>unexecuted vendor practice</strong>.</p><pre class=\"codepanel\"><code><span id=\"dbLine0\">SELECT try_parse_json(payload) AS v FROM bronze.b23;</span><span id=\"dbLine1\">SELECT event_id, count(*) FROM bronze.b23 GROUP BY event_id HAVING count(*)&gt;1;</span><span id=\"dbLine2\">-- inspect job task: publish depends_on validate; run_if: ALL_SUCCESS</span><span id=\"dbLine3\">-- then compare candidate counts before promotion</span></code></pre><label for=\"dbGap\">Observed gap</label><select id=\"dbGap\"><option value=\"parse\">Malformed JSON</option><option value=\"duplicate\">Repeated event_id</option><option value=\"gate\">Publish after failed validation</option></select><button id=\"dbNext\">Reveal next action</button><div id=\"dbWorld\" class=\"mechanism\"></div><p id=\"dbState\" aria-live=\"polite\"></p><p><strong>Failure/fix.</strong> A green ingest task is weak evidence. Query the failing invariant, preserve the source/checkpoint, repair in isolation, and test that the publish dependency blocks failure. This does not assess workspace navigation or hands-on speed.</p>",
+        "markdown": "Authorized Databricks sandbox; SQL/YAML unexecuted.\n\n```sql\nSELECT try_parse_json(payload) AS v FROM bronze.b23;\nSELECT event_id, count(*) FROM bronze.b23 GROUP BY event_id HAVING count(*) > 1;\n-- publish depends on validate with ALL_SUCCESS\n```\n\nChoose the query/control from the symptom, then run it in a real sandbox separately.",
+        "javascript": "const dbGap=$('dbGap'),dbNext=$('dbNext');const dbActions={parse:['Run tolerant parse','Count NULL variants and quarantine them'],duplicate:['Group by stable event_id','Separate replay from duplicate business input'],gate:['Inspect dependency outcome','Force validation failure and verify publish is UPSTREAM_FAILED']};function dbPaint(show=false){const a=dbActions[dbGap.value];$('dbWorld').innerHTML='<div class=\"rows\"><div class=\"row bad\">'+dbGap.options?.[dbGap.selectedIndex]?.textContent+'</div><div class=\"row '+(show?'good':'warn')+'\">'+(show?a[0]:'Predict action')+'</div><div class=\"row '+(show?'good':'warn')+'\">'+(show?a[1]:'Predict proof')+'</div></div>';$('dbState').textContent=show?'Local retrieval reveal; no Databricks code ran.':'Choose before revealing.';}dbGap.onchange=()=>dbPaint(false);dbNext.onclick=()=>dbPaint(true);dbPaint(false);"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake retrieval: choose the query, privilege, or task evidence",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> The same B23 outcome can come from bad parsing, a missing privilege path, poor pruning, or an unsafe task graph. Retrieve the smallest diagnostic that separates them.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production database/schema, role, warehouse, and task graph. Warehouse and task execution can incur credits.</p><p>The SQL is <strong>unexecuted vendor practice</strong>.</p><pre class=\"codepanel\"><code><span id=\"sfLine0\">SELECT TRY_PARSE_JSON(payload) v FROM bronze.b23;</span><span id=\"sfLine1\">SHOW GRANTS TO ROLE b23_pipeline;</span><span id=\"sfLine2\">SELECT * FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY()) ORDER BY start_time DESC;</span><span id=\"sfLine3\">SELECT * FROM TABLE(INFORMATION_SCHEMA.COMPLETE_TASK_GRAPHS()) ORDER BY scheduled_time DESC;</span></code></pre><label for=\"sfGap\">Observed gap</label><select id=\"sfGap\"><option value=\"parse\">Malformed JSON</option><option value=\"denied\">Access denied</option><option value=\"task\">Publish task ran unexpectedly</option></select><button id=\"sfNext\">Reveal next action</button><div id=\"sfWorld\" class=\"mechanism\"></div><p id=\"sfState\" aria-live=\"polite\"></p><p><strong>Failure/fix.</strong> Granting broad ownership or increasing warehouse size can hide the symptom without proving the cause. Inspect the narrow path, then test both the intended success and denial/failure case.</p>",
+        "markdown": "Authorized Snowflake sandbox; SQL unexecuted.\n\n```sql\nSELECT TRY_PARSE_JSON(payload) AS v FROM bronze.b23;\nSHOW GRANTS TO ROLE b23_pipeline;\nSELECT * FROM TABLE(INFORMATION_SCHEMA.COMPLETE_TASK_GRAPHS());\n```\n\nChoose the narrow diagnostic and state what result would confirm the cause.",
+        "javascript": "const sfGap=$('sfGap'),sfNext=$('sfNext');const sfActions={parse:['TRY_PARSE_JSON','Count NULL results; do not silently drop them'],denied:['SHOW GRANTS','Trace active role plus database/schema/table and warehouse access'],task:['COMPLETE_TASK_GRAPHS','Verify failed predecessor and child status']};function sfPaint(show=false){const a=sfActions[sfGap.value];$('sfWorld').innerHTML='<div class=\"rows\"><div class=\"row bad\">'+sfGap.options?.[sfGap.selectedIndex]?.textContent+'</div><div class=\"row '+(show?'good':'warn')+'\">'+(show?a[0]:'Predict diagnostic')+'</div><div class=\"row '+(show?'good':'warn')+'\">'+(show?a[1]:'Predict proof')+'</div></div>';$('sfState').textContent=show?'Local retrieval reveal; no Snowflake SQL ran.':'Choose before revealing.';}sfGap.onchange=()=>sfPaint(false);sfNext.onclick=()=>sfPaint(true);sfPaint(false);"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Retrieval question</th><th>Databricks evidence</th><th>Snowflake evidence</th></tr></thead><tbody><tr><td>Bad JSON?</td><td><code>try_parse_json</code> + quarantine count</td><td><code>TRY_PARSE_JSON</code> + quarantine count</td></tr><tr><td>Denied read?</td><td>principal/group + Unity Catalog path + compute</td><td>active role + object grants + warehouse</td></tr><tr><td>Unsafe publish?</td><td>task outcomes + <code>ALL_SUCCESS</code></td><td>task graph history + predecessor status</td></tr><tr><td>What is still missing?</td><td>real workspace execution</td><td>real account execution</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Bad JSON | `try_parse_json` + quarantine count | `TRY_PARSE_JSON` + quarantine count |\n| Denied read | Unity Catalog path + compute | role grants + warehouse |\n| Unsafe publish | task outcome + `ALL_SUCCESS` | task graph history |\n| Missing evidence | real workspace run | real account run |"
+    },
+    "product_questions": [
+      [
+        "A product lesson exists but no sandbox action ran. What is true?",
+        [
+          "The objective is mastered",
+          "Curriculum coverage exists; execution skill is unassessed",
+          "The exam is ready to book"
+        ],
+        1,
+        "Delivery is not hands-on evidence."
+      ],
+      [
+        "Which retrieval response is strongest?",
+        [
+          "Name a feature",
+          "Choose a diagnostic and state confirming/disconfirming evidence",
+          "Increase compute"
+        ],
+        1,
+        "Diagnosis needs a falsifiable next observation."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks Lakeflow Jobs",
+        "https://docs.databricks.com/aws/en/jobs",
+        "Updated 2026-10-09"
+      ],
+      [
+        "Databricks task dependencies",
+        "https://docs.databricks.com/aws/en/jobs/run-if",
+        "Updated 2026-09-11"
+      ],
+      [
+        "Snowflake troubleshooting tasks",
+        "https://docs.snowflake.com/en/user-guide/tasks-ts",
+        "Living documentation"
+      ],
+      [
+        "Snowflake COMPLETE_TASK_GRAPHS",
+        "https://docs.snowflake.com/en/sql-reference/functions/complete_task_graphs",
+        "Living documentation"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-13",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "ingestion",
+          "transformation_modeling",
+          "governance_security",
+          "lakeflow_jobs",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Retrieval/gap session across delivered cycle-one material; retention and sandbox skill unassessed."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "domains": [
+          "loading_unloading_transformation",
+          "account_warehouse_access",
+          "performance",
+          "data_formats",
+          "data_protection"
+        ],
+        "scope": "Retrieval across planning groups only; full COF-C03 objective IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Silence raises suspicion; it does not prove a node is dead",
+    "goal": "Turn heartbeat delay into an adjustable suspicion score instead of one brittle timeout.",
+    "tag": "Foundation · distributed failure detection",
+    "concept": "<p>A friend who usually replies in one minute is concerning after five minutes. A friend who often replies in ten minutes is not. The same silence means different things because history differs.</p><p>A phi-accrual detector converts time since the last heartbeat into a suspicion score. The application chooses a threshold. A lower threshold reacts faster but causes more false suspicions.</p>",
+    "example": "<p>Node B normally replies around every 1 second. At 1.2 seconds, suspicion is modest. At 4 seconds, it is high. Under a noisy network with wider historical variation, the same 1.2-second pause should look less alarming.</p>",
+    "use_case": {
+      "when": "Use adaptive suspicion when cluster heartbeat timing varies and downstream policies need a continuous confidence signal.",
+      "example": "An Akka cluster monitors JVM nodes across a network where occasional pauses are normal.",
+      "decision": "Use phi to separate measurement from policy. Do not equate “unreachable” with “permanently failed”; membership removal still needs a coordinated policy."
+    },
+    "practice": "Change elapsed silence and network variability. Predict whether phi crosses the policy threshold.",
+    "boundary": "This browser uses the documented normal-distribution formula with a fixed mean and standard deviation. Real detectors learn a sample window and add acceptable pause/minimum-deviation controls.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.meter{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.meter>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.mechanism svg{font-size:12px}}</style><label for=\"silence\">Silence after last heartbeat: <output id=\"silenceOut\">1.2</output>s</label><input id=\"silence\" type=\"range\" min=\"5\" max=\"50\" value=\"12\"><label for=\"jitter\">Observed jitter</label><select id=\"jitter\"><option value=\"10\">steady · σ=0.10s</option><option value=\"50\">noisy · σ=0.50s</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function erf(x){const s=Math.sign(x),a=Math.abs(x),t=1/(1+.3275911*a);return s*(1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+.254829592)*Math.exp(-a*a));}function phiPaint(){const elapsed=Number(silence.value)/10,sd=Number(jitter.value)/100,z=(elapsed-1)/(sd*Math.sqrt(2)),cdf=.5*(1+erf(z)),phi=-Math.log10(Math.max(1e-9,1-cdf)),threshold=3;silenceOut.textContent=elapsed.toFixed(1);world.innerHTML='<div class=\"meter\"><span style=\"width:'+Math.min(100,phi/6*100)+'%\">phi '+phi.toFixed(2)+'</span></div><p class=\"lane '+(phi>=threshold?'bad':'good')+'\">Threshold 3: '+(phi>=threshold?'SUSPECT':'AVAILABLE')+'. Same silence is judged against observed variability.</p>';}silence.oninput=phiPaint;jitter.onchange=phiPaint;phiPaint();",
+    "questions": [
+      [
+        "Lowering the phi threshold does what?",
+        [
+          "Slower detection and fewer false suspicions",
+          "Faster detection and more false suspicions",
+          "Creates consensus"
+        ],
+        1,
+        "The policy fires on less evidence."
+      ],
+      [
+        "Why can noisy history lower suspicion for the same delay?",
+        [
+          "The delay is less statistically surprising",
+          "The clock stops",
+          "Heartbeats become durable"
+        ],
+        0,
+        "Phi is calibrated to the observed arrival distribution."
+      ],
+      [
+        "What does phi not decide?",
+        [
+          "Suspicion level",
+          "Permanent membership removal policy",
+          "Heartbeat timing"
+        ],
+        1,
+        "Measurement and cluster action are different layers."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "double mean=1.0, sd=0.5, elapsed=1.2;",
+          "note": "Set learned timing parameters and current silence."
+        },
+        {
+          "code": "double z=(elapsed-mean)/sd;\ndouble cdf=1.0/(1.0+Math.exp(-1.702*z));",
+          "note": "Approximate the normal CDF for this small teaching trace."
+        },
+        {
+          "code": "double phi=-Math.log10(Math.max(1e-9,1-cdf));\nboolean suspect=phi>=3.0;",
+          "note": "Convert tail probability into suspicion and apply policy."
+        }
+      ],
+      "expect": {
+        "suspect": "false"
+      },
+      "limit": "Executed on local Java 17 using synthetic timing parameters and a logistic CDF approximation. It did not instantiate Akka or learn heartbeat samples.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "mean": "1.0"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "mean": "1.0",
+            "z": "0.3999999999999999",
+            "cdf": "0.6639172257204139"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "mean": "1.0",
+            "z": "0.3999999999999999",
+            "cdf": "0.6639172257204139",
+            "phi": "0.473553746462499",
+            "suspect": "false"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Akka PhiAccrualFailureDetector API",
+        "https://doc.akka.io/api/akka-core/current/akka/remote/PhiAccrualFailureDetector.html",
+        "Akka core current docs; checked 2026-10-13"
+      ],
+      [
+        "JAIST: The phi accrual failure detector",
+        "https://dspace.jaist.ac.jp/dspace/handle/10119/4784",
+        "Original 2004 research report"
+      ]
+    ],
+    "visual_explanation": "The suspicion meter changes with both elapsed silence and historical jitter, making the central idea visible: the same delay is not equally surprising in every network.",
+    "written_questions": [
+      "Which pause in your runtime would create legitimate heartbeat delay?",
+      "Who should own the policy that turns suspicion into traffic removal?"
+    ],
+    "source_checked_on": "2026-10-13"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Let the new system observe production before production observes it",
+    "goal": "Use shadow traffic to compare a migration target without letting its responses affect customers.",
+    "tag": "Migration strategy · evidence before cutover",
+    "concept": "<p>A trainee can prepare every restaurant order beside the chef while only the chef’s plate reaches the customer. You learn from real demand without exposing the trainee’s mistakes.</p><p>Shadowing copies requests to the new path. The old path still owns the response. Compare outputs, latency, errors, and side effects before moving real traffic.</p>",
+    "example": "<p>The legacy pricing API returns $25 for request <code>r-23</code>. The new API returns $27. Customers still receive $25. The mismatch becomes evidence to investigate, not an accidental rollout.</p>",
+    "use_case": {
+      "when": "Use shadowing when a replacement can process representative production inputs safely and you need evidence beyond synthetic tests.",
+      "example": "Run a new lineage parser beside the existing parser and compare emitted edges without publishing the candidate graph.",
+      "decision": "Shadow read-only or isolated behavior first. If the candidate can trigger payments, emails, writes, or quotas, stub or redirect those effects before copying traffic."
+    },
+    "practice": "Toggle whether candidate side effects are isolated, then compare a matching and mismatching response.",
+    "boundary": "Shadowing does not test customer-visible behavior, writes, long-term state, authorization differences, or full load unless explicitly designed. Duplicating traffic can add cost and privacy risk.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.meter{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.meter>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.mechanism svg{font-size:12px}}</style><label for=\"shadowOutput\">Candidate output</label><select id=\"shadowOutput\"><option value=\"27\">$27 · mismatch</option><option value=\"25\">$25 · match</option></select><label for=\"effects\">Candidate side effects</label><select id=\"effects\"><option value=\"isolated\">isolated</option><option value=\"live\">live</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function shadowPaint(){const match=shadowOutput.value==='25',safe=effects.value==='isolated';world.innerHTML='<svg viewBox=\"0 0 700 270\" role=\"img\" aria-label=\"One request copied to legacy and shadow paths\"><rect x=\"20\" y=\"95\" width=\"130\" height=\"65\" rx=\"12\" fill=\"#fff5cf\" stroke=\"#d18621\" stroke-width=\"3\"/><text x=\"85\" y=\"133\" text-anchor=\"middle\">request r-23</text><path d=\"M150 125 L300 70 M150 130 L300 205\" stroke=\"#54786f\" stroke-width=\"4\"/><rect x=\"300\" y=\"30\" width=\"180\" height=\"80\" rx=\"12\" fill=\"#e4f3cf\" stroke=\"#287b64\" stroke-width=\"3\"/><text x=\"390\" y=\"62\" text-anchor=\"middle\">LEGACY · $25</text><text x=\"390\" y=\"88\" text-anchor=\"middle\">customer response</text><rect x=\"300\" y=\"165\" width=\"180\" height=\"80\" rx=\"12\" fill=\"'+(safe?'#eef4f0':'#fff0e6')+'\" stroke=\"'+(safe?'#54786f':'#a74a3d')+'\" stroke-width=\"3\"/><text x=\"390\" y=\"197\" text-anchor=\"middle\">SHADOW · $'+shadowOutput.value+'</text><text x=\"390\" y=\"223\" text-anchor=\"middle\">'+(safe?'effects isolated':'LIVE EFFECT RISK')+'</text><path d=\"M480 70 L650 70\" stroke=\"#287b64\" stroke-width=\"5\"/><text x=\"565\" y=\"58\" text-anchor=\"middle\">only this returns</text></svg><p class=\"lane '+(!safe?'bad':match?'good':'warn')+'\">'+(!safe?'Unsafe shadow: copied request can duplicate effects.':match?'Comparable output matched.':'Safe mismatch evidence; customer still received legacy result.')+'</p>';}shadowOutput.onchange=shadowPaint;effects.onchange=shadowPaint;shadowPaint();",
+    "questions": [
+      [
+        "Shadow returns $27; legacy returns $25. What sees the customer?",
+        [
+          "$27",
+          "$25",
+          "Both"
+        ],
+        1,
+        "The legacy path still owns the response."
+      ],
+      [
+        "What must be isolated before shadowing a create call?",
+        [
+          "Side effects",
+          "Metrics",
+          "Request IDs"
+        ],
+        0,
+        "Copied writes can duplicate real-world actions."
+      ],
+      [
+        "What does a perfect shadow comparison not prove?",
+        [
+          "Candidate handled observed inputs",
+          "Customer-visible cutover and stateful writes are safe",
+          "Outputs matched"
+        ],
+        1,
+        "Shadowing deliberately omits some production effects."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "request={\"id\":\"r-23\",\"sku\":\"A\"}\nlegacy={\"price\":25}\nshadow={\"price\":27}",
+          "note": "Record one request and both outputs."
+        },
+        {
+          "code": "customer_response=legacy\ndiff={k:(legacy.get(k),shadow.get(k)) for k in legacy if legacy.get(k)!=shadow.get(k)}",
+          "note": "Keep legacy authoritative while computing differences."
+        },
+        {
+          "code": "decision=\"INVESTIGATE\" if diff else \"EVIDENCE_OK\"",
+          "note": "Turn disagreement into migration evidence, not customer exposure."
+        }
+      ],
+      "expect": {
+        "customer_response": {
+          "price": 25
+        },
+        "diff": {
+          "price": [
+            25,
+            27
+          ]
+        },
+        "decision": "INVESTIGATE"
+      },
+      "limit": "Executed local Python over synthetic responses. It did not mirror network traffic or isolate real side effects.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "request": {
+              "id": "r-23",
+              "sku": "A"
+            },
+            "legacy": {
+              "price": 25
+            },
+            "shadow": {
+              "price": 27
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "request": {
+              "id": "r-23",
+              "sku": "A"
+            },
+            "legacy": {
+              "price": 25
+            },
+            "shadow": {
+              "price": 27
+            },
+            "customer_response": {
+              "price": 25
+            },
+            "diff": {
+              "price": [
+                25,
+                27
+              ]
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "request": {
+              "id": "r-23",
+              "sku": "A"
+            },
+            "legacy": {
+              "price": 25
+            },
+            "shadow": {
+              "price": 27
+            },
+            "customer_response": {
+              "price": 25
+            },
+            "diff": {
+              "price": [
+                25,
+                27
+              ]
+            },
+            "decision": "INVESTIGATE"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS SageMaker shadow tests",
+        "https://docs.aws.amazon.com/sagemaker/latest/dg/shadow-tests.html",
+        "Living documentation"
+      ],
+      [
+        "AWS CloudFront zero-downtime API migration",
+        "https://aws.amazon.com/blogs/migration-and-modernization/migrating-and-decomposing-apis-with-zero-downtime-using-cloudfront/",
+        "Published 2026"
+      ]
+    ],
+    "visual_explanation": "The request forks, but only the upper legacy arrow reaches the customer. The lower box turns red when effects are live, revealing the central migration boundary.",
+    "written_questions": [
+      "Which side effect makes one of your services unsafe to shadow today?",
+      "What mismatch rate and categories would justify a cutover decision?"
+    ],
+    "source_checked_on": "2026-10-13"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Return “input required,” then retry the same tool call",
+    "goal": "Understand MCP multi-round-trip requests without hidden transport session state.",
+    "tag": "Harness engineering · MCP 2026-07-28",
+    "concept": "<p>A clerk pauses an application and hands back a numbered form for the missing signature. You return the signed form with the same case number.</p><p>In MCP 2026-07-28, a server can return <code>input_required</code> with requests and opaque <code>requestState</code>. The client fulfills them and retries the original method with <code>inputResponses</code>.</p>",
+    "example": "<p><code>book_table(date=Friday)</code> lacks party size. The server returns an elicitation plus state <code>s23</code>. The client asks the user, receives 4, and retries the same tool call with that answer and state. The server then returns the final booking.</p>",
+    "use_case": {
+      "when": "Use MRTR when a tool, prompt, or resource needs user input, sampling, or roots during one logical operation over a stateless protocol.",
+      "example": "A booking tool requests party size only after checking that Friday has availability.",
+      "decision": "Use explicit input-required rounds for protocol-visible interaction. Use a separate durable task when work is long-running, and never auto-answer sensitive elicitation without user-facing policy."
+    },
+    "practice": "Step through initial call, input-required result, user response, and retry. Watch what the server must carry explicitly.",
+    "boundary": "The model omits protocol negotiation, cancellation, max-round limits, authentication, sensitive-field UI, errors, and SDK-specific callback behavior.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.meter{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.meter>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.mechanism svg{font-size:12px}}</style><button id=\"mrtrNext\">Next protocol message</button><button id=\"mrtrReset\">Reset</button><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "let mrtrStep=0;const msgs=[['Client → server','tools/call book_table(Friday)'],['Server → client','input_required · party_size? · state=s23'],['Client → user','How many people? → 4'],['Client → server','retry same call · inputResponses=4 · state=s23'],['Server → client','final booking b-900']];function mrtrPaint(){world.innerHTML='<svg viewBox=\"0 0 700 260\" role=\"img\" aria-label=\"Stateless multi-round-trip request\"><line x1=\"120\" y1=\"35\" x2=\"120\" y2=\"235\" stroke=\"#54786f\" stroke-width=\"4\"/><line x1=\"580\" y1=\"35\" x2=\"580\" y2=\"235\" stroke=\"#54786f\" stroke-width=\"4\"/><text x=\"120\" y=\"25\" text-anchor=\"middle\">CLIENT / USER</text><text x=\"580\" y=\"25\" text-anchor=\"middle\">SERVER</text>'+msgs.map((m,i)=>'<path d=\"M'+(m[0].startsWith('Server')?'580':'120')+' '+(65+i*38)+' L'+(m[0].startsWith('Server')?'120':'580')+' '+(65+i*38)+'\" stroke=\"'+(i===mrtrStep?'#d18621':'#9bb0a8')+'\" stroke-width=\"'+(i===mrtrStep?6:3)+'\"/><text x=\"350\" y=\"'+(58+i*38)+'\" text-anchor=\"middle\">'+m[1]+'</text>').join('')+'</svg><p class=\"lane '+(mrtrStep===4?'good':'warn')+'\"><strong>'+msgs[mrtrStep][0]+':</strong> '+msgs[mrtrStep][1]+'</p>';mrtrNext.disabled=mrtrStep===4;}mrtrNext.onclick=()=>{mrtrStep=Math.min(4,mrtrStep+1);mrtrPaint()};mrtrReset.onclick=()=>{mrtrStep=0;mrtrPaint()};mrtrPaint();",
+    "questions": [
+      [
+        "What does the client retry after fulfilling input?",
+        [
+          "A new unrelated method",
+          "The original request with inputResponses and requestState",
+          "Only a websocket"
+        ],
+        1,
+        "MRTR continues one logical operation by retrying the original request."
+      ],
+      [
+        "Why echo opaque requestState?",
+        [
+          "To expose secrets to the model",
+          "To carry server continuation state explicitly",
+          "To replace authentication"
+        ],
+        1,
+        "The stateless transport does not hide continuation state."
+      ],
+      [
+        "When is MRTR the wrong mechanism?",
+        [
+          "One missing user parameter",
+          "A long-running durable job needing independent lifecycle",
+          "One sampling request"
+        ],
+        1,
+        "Durable asynchronous work belongs in a task lifecycle."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "request={\"method\":\"tools/call\",\"args\":{\"date\":\"Friday\"}}",
+          "note": "Create the initial tool call."
+        },
+        {
+          "code": "first={\"resultType\":\"input_required\",\"requestState\":\"s23\",\"inputRequests\":{\"party_size\":\"elicit\"}}",
+          "note": "Server returns explicit continuation state and a requested input."
+        },
+        {
+          "code": "retry={**request,\"inputResponses\":{\"party_size\":4},\"requestState\":first[\"requestState\"]}",
+          "note": "Client retries the original call with the answer and state."
+        },
+        {
+          "code": "final={\"resultType\":\"final\",\"booking_id\":\"b-900\"} if retry[\"inputResponses\"][\"party_size\"] else None",
+          "note": "Server produces the final result."
+        }
+      ],
+      "expect": {
+        "final": {
+          "resultType": "final",
+          "booking_id": "b-900"
+        }
+      },
+      "limit": "Executed local Python over synthetic protocol dictionaries. It did not use an MCP SDK or contact a server.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "request": {
+              "method": "tools/call",
+              "args": {
+                "date": "Friday"
+              }
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "request": {
+              "method": "tools/call",
+              "args": {
+                "date": "Friday"
+              }
+            },
+            "first": {
+              "resultType": "input_required",
+              "requestState": "s23",
+              "inputRequests": {
+                "party_size": "elicit"
+              }
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "request": {
+              "method": "tools/call",
+              "args": {
+                "date": "Friday"
+              }
+            },
+            "first": {
+              "resultType": "input_required",
+              "requestState": "s23",
+              "inputRequests": {
+                "party_size": "elicit"
+              }
+            },
+            "retry": {
+              "method": "tools/call",
+              "args": {
+                "date": "Friday"
+              },
+              "inputResponses": {
+                "party_size": 4
+              },
+              "requestState": "s23"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "request": {
+              "method": "tools/call",
+              "args": {
+                "date": "Friday"
+              }
+            },
+            "first": {
+              "resultType": "input_required",
+              "requestState": "s23",
+              "inputRequests": {
+                "party_size": "elicit"
+              }
+            },
+            "retry": {
+              "method": "tools/call",
+              "args": {
+                "date": "Friday"
+              },
+              "inputResponses": {
+                "party_size": 4
+              },
+              "requestState": "s23"
+            },
+            "final": {
+              "resultType": "final",
+              "booking_id": "b-900"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP 2026-07-28 release",
+        "https://blog.modelcontextprotocol.io/posts/2026-07-28/",
+        "Published 2026-07-28"
+      ],
+      [
+        "MCP TypeScript SDK support for 2026-07-28",
+        "https://ts.sdk.modelcontextprotocol.io/v2/migration/support-2026-07-28",
+        "Current v2 docs"
+      ]
+    ],
+    "visual_explanation": "The sequence diagram shows the original call returning rather than holding a stream. State and answers visibly travel back on the retry.",
+    "written_questions": [
+      "Which of your tools currently hides continuation state in a session?",
+      "What elicitation must always stop for explicit user review?"
+    ],
+    "source_checked_on": "2026-10-13"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Scan the room, train in its twin, then try the real pickup",
+    "goal": "Understand the evidence and transfer boundary in Splat2Act scene-personalized robot manipulation.",
+    "tag": "New research · submitted 2026-10-09",
+    "concept": "<p>A driving student can practice in a model of the exact neighborhood before touching the real car. Splat2Act applies that idea to robot manipulation.</p><p>A phone scan builds a photorealistic scene and collision geometry. A simulation oracle generates successful demonstrations. A VLA policy is adapted in two stages, then deployed back into the captured environment.</p>",
+    "example": "<p>The paper reports 0% pickup success for an unadapted generalist policy in captured deployment scenes. Its strongest personalized policy reached 62.5% aggregate pickup success. On a 12-task subset, reported real-robot success was 63.9% versus 66.7% in simulation.</p>",
+    "use_case": {
+      "when": "Potentially useful when a robot must adapt to a specific building and object set, while collecting many real demonstrations is expensive.",
+      "example": "Personalize a mobile manipulator for shelves and counters in one office using phone scans and object images.",
+      "decision": "Treat this as recent research. Require safety review, new-scene replication, failure analysis, and real-world evaluation before operational use."
+    },
+    "practice": "Move through capture, synthetic demonstrations, personalization, and real deployment. Notice which stages generate evidence versus assumptions.",
+    "boundary": "The browser replays reported aggregate metrics and pipeline stages. It does not reconstruct a scene, simulate physics, train a VLA, measure safety, or reproduce the paper.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.meter{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.meter>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.mechanism svg{font-size:12px}}</style><label for=\"robotStage\">Pipeline stage</label><input id=\"robotStage\" type=\"range\" min=\"0\" max=\"4\" value=\"0\"><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "const stages=[['Capture','phone scan + object images'],['Twin','Gaussian splat + collision geometry'],['Demonstrate','simulation oracle creates successful pickups'],['Personalize','two-stage VLA fine-tuning'],['Deploy','real Stretch 3 evaluation']];function robotPaint(){const n=Number(robotStage.value);world.innerHTML='<div class=\"rows\">'+stages.map((s,i)=>'<div class=\"row '+(i===n?'active':i<n?'good':'')+'\"><strong>'+s[0]+'</strong><br>'+s[1]+'</div>').join('')+'</div><p class=\"lane '+(n===4?'warn':'good')+'\">'+(n===4?'Transfer boundary: simulation success is evidence, not a guarantee of safe real behavior.':'Current artifact: '+stages[n][1])+'</p>';}robotStage.oninput=robotPaint;robotPaint();",
+    "questions": [
+      [
+        "What human input starts the pipeline?",
+        [
+          "Real demonstrations for every task",
+          "Phone scene scan and object images",
+          "A production guarantee"
+        ],
+        1,
+        "The method automates demonstration generation after capture."
+      ],
+      [
+        "Why compare simulation and real results?",
+        [
+          "To inspect transfer, not assume it",
+          "To prove all scenes work",
+          "To remove collision geometry"
+        ],
+        0,
+        "The sim-to-real gap is an empirical boundary."
+      ],
+      [
+        "What does 62.5% aggregate success justify?",
+        [
+          "Unsupervised deployment",
+          "Further reproduction and failure study",
+          "Perfect personalization"
+        ],
+        1,
+        "The reported research result is promising but incomplete."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "reported={\"generalist_captured\":0.0,\"personalized_target\":62.5,\"subset_sim\":66.7,\"subset_real\":63.9}",
+          "note": "Record the paper’s reported aggregate percentages."
+        },
+        {
+          "code": "sim_to_real_gap=reported[\"subset_sim\"]-reported[\"subset_real\"]",
+          "note": "Compute the reported subset percentage-point gap."
+        },
+        {
+          "code": "claim=\"close_tracking_in_reported_subset\" if abs(sim_to_real_gap)<5 else \"large_gap\"",
+          "note": "Apply a transparent toy label to the reported values."
+        }
+      ],
+      "expect": {
+        "sim_to_real_gap": 2.799999999999997,
+        "claim": "close_tracking_in_reported_subset"
+      },
+      "limit": "Executed local arithmetic on reported percentages. It did not reproduce the policy, tasks, trials, or statistical uncertainty.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "reported": {
+              "generalist_captured": 0.0,
+              "personalized_target": 62.5,
+              "subset_sim": 66.7,
+              "subset_real": 63.9
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "reported": {
+              "generalist_captured": 0.0,
+              "personalized_target": 62.5,
+              "subset_sim": 66.7,
+              "subset_real": 63.9
+            },
+            "sim_to_real_gap": 2.8000000000000043
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "reported": {
+              "generalist_captured": 0.0,
+              "personalized_target": 62.5,
+              "subset_sim": 66.7,
+              "subset_real": 63.9
+            },
+            "sim_to_real_gap": 2.8000000000000043,
+            "claim": "close_tracking_in_reported_subset"
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Splat2Act: From Captured Scenes to Personalized VLA Manipulation",
+        "https://arxiv.org/abs/2610.13945",
+        "Submitted 2026-10-09"
+      ],
+      [
+        "Splat2Act HTML paper",
+        "https://arxiv.org/html/2610.13945v1",
+        "Version 1"
+      ]
+    ],
+    "visual_explanation": "The stage slider follows the causal production of artifacts—from capture to real evaluation—and ends by exposing the transfer boundary rather than celebrating one metric.",
+    "written_questions": [
+      "Which new scene would most stress the reported method?",
+      "What real-robot failure category matters more than aggregate pickup success?"
+    ],
+    "source_checked_on": "2026-10-13"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "Rollback is another deployment—of the last known-good digest",
+    "goal": "Restore a known artifact through the same protected path instead of rebuilding or bypassing controls.",
+    "tag": "Deployment strategy · rollback",
+    "concept": "<p>A restaurant recalls today’s sauce and reopens yesterday’s sealed batch. It does not try to recreate yesterday’s sauce from memory during the incident.</p><p>A rollback selects the last known-good immutable digest and deploys it through the production environment gate. It records a new deployment event. It does not erase history.</p>",
+    "example": "<p>Production runs <code>sha256:bad23</code>. Error rate crosses the rollback threshold. The workflow selects recorded digest <code>sha256:good22</code>, requires production approval, deploys it, and verifies recovery. Rebuilding commit 22 could create different bytes.</p>",
+    "use_case": {
+      "when": "Use artifact rollback when the previous version remains compatible with current data, schema, and external contracts.",
+      "example": "Restore the prior API container after a new image raises 5xx errors.",
+      "decision": "Rollback code only when backward compatibility holds. Use roll-forward or explicit data repair when migrations or irreversible side effects make the old artifact unsafe."
+    },
+    "practice": "Toggle schema compatibility and choose rollback or roll-forward. Watch whether the previous digest is actually safe.",
+    "boundary": "The browser models artifact selection and compatibility as two values. Production rollback needs health criteria, deployment history, approvals, credentials, traffic strategy, data checks, and post-restore verification.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.meter{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.meter>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.mechanism svg{font-size:12px}}</style><label for=\"schemaCompat\">Current state compatible with good22?</label><select id=\"schemaCompat\"><option value=\"no\">No · destructive migration applied</option><option value=\"yes\">Yes · additive-compatible state</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function rollbackPaint(){const safe=schemaCompat.value==='yes';world.innerHTML='<svg viewBox=\"0 0 700 220\" role=\"img\" aria-label=\"Rollback deploys a previous immutable digest\"><rect x=\"30\" y=\"65\" width=\"180\" height=\"90\" rx=\"14\" fill=\"#e4f3cf\" stroke=\"#287b64\" stroke-width=\"3\"/><text x=\"120\" y=\"100\" text-anchor=\"middle\">good22</text><text x=\"120\" y=\"128\" text-anchor=\"middle\">sha256:good22</text><rect x=\"275\" y=\"65\" width=\"180\" height=\"90\" rx=\"14\" fill=\"#fff0e6\" stroke=\"#a74a3d\" stroke-width=\"3\"/><text x=\"365\" y=\"100\" text-anchor=\"middle\">bad23 · current</text><text x=\"365\" y=\"128\" text-anchor=\"middle\">sha256:bad23</text><path d=\"M455 110 C560 25 200 20 205 65\" fill=\"none\" stroke=\"'+(safe?'#287b64':'#a74a3d')+'\" stroke-width=\"6\"/><text x=\"350\" y=\"32\" text-anchor=\"middle\">'+(safe?'deploy good22 again':'BLOCK: old code cannot read state')+'</text></svg><p class=\"lane '+(safe?'good':'bad')+'\">'+(safe?'Rollback is a new protected deployment of good22.':'Choose roll-forward or data-compatible recovery; digest identity alone is insufficient.')+'</p>';}schemaCompat.onchange=rollbackPaint;rollbackPaint();",
+    "questions": [
+      [
+        "Why not rebuild the old commit during rollback?",
+        [
+          "It can produce different bytes",
+          "Git forbids it",
+          "Approvals disappear"
+        ],
+        0,
+        "The verified object is the immutable prior artifact."
+      ],
+      [
+        "Destructive schema migration broke old-code compatibility. Best default?",
+        [
+          "Deploy old code anyway",
+          "Roll forward or repair compatibility first",
+          "Delete history"
+        ],
+        1,
+        "Artifact rollback cannot undo incompatible state."
+      ],
+      [
+        "What should GitHub environment history show?",
+        [
+          "Only the original deployment",
+          "A new rollback deployment and its result",
+          "No record"
+        ],
+        1,
+        "Rollback is an auditable production action."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "history=[{\"digest\":\"good22\",\"healthy\":True},{\"digest\":\"bad23\",\"healthy\":False}]\nschema_compatible=True",
+          "note": "Record immutable deployment history and state compatibility."
+        },
+        {
+          "code": "candidate=next(x for x in reversed(history) if x[\"healthy\"])",
+          "note": "Select the last known-good artifact."
+        },
+        {
+          "code": "decision={\"action\":\"DEPLOY_EXISTING_DIGEST\",\"digest\":candidate[\"digest\"]} if schema_compatible else {\"action\":\"ROLL_FORWARD\"}",
+          "note": "Choose rollback only when the old artifact can run against current state."
+        }
+      ],
+      "expect": {
+        "decision": {
+          "action": "DEPLOY_EXISTING_DIGEST",
+          "digest": "good22"
+        }
+      },
+      "limit": "Executed local Python over synthetic history. It did not trigger GitHub Actions or deploy an artifact.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "history": [
+              {
+                "digest": "good22",
+                "healthy": true
+              },
+              {
+                "digest": "bad23",
+                "healthy": false
+              }
+            ],
+            "schema_compatible": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "history": [
+              {
+                "digest": "good22",
+                "healthy": true
+              },
+              {
+                "digest": "bad23",
+                "healthy": false
+              }
+            ],
+            "schema_compatible": true,
+            "candidate": {
+              "digest": "good22",
+              "healthy": true
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "history": [
+              {
+                "digest": "good22",
+                "healthy": true
+              },
+              {
+                "digest": "bad23",
+                "healthy": false
+              }
+            ],
+            "schema_compatible": true,
+            "candidate": {
+              "digest": "good22",
+              "healthy": true
+            },
+            "decision": {
+              "action": "DEPLOY_EXISTING_DIGEST",
+              "digest": "good22"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions deployment management",
+        "https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments",
+        "Living documentation"
+      ],
+      [
+        "GitHub deployment environments",
+        "https://docs.github.com/en/actions/concepts/workflows-and-actions/deployment-environments",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The curved arrow points from the failing deployment to the exact prior digest; compatibility changes whether that arrow is green or blocked.",
+    "written_questions": [
+      "Which data migration would make your last release unsafe to restore?",
+      "Where is the exact last known-good digest recorded today?"
+    ],
+    "source_checked_on": "2026-10-13"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Deprecated is a warning; Sunset is the shutdown date",
+    "goal": "Signal API lifecycle separately: when use became discouraged and when service is expected to stop.",
+    "tag": "HTTP API evolution · RFC 9745 + RFC 8594",
+    "concept": "<p>A train station can announce “this route is being retired” before it posts “last train: December 1.” Those are different facts.</p><p>The HTTP <code>Deprecation</code> response header signals that a resource is or will be deprecated. <code>Sunset</code> communicates when it is expected to become unresponsive. A <code>Link</code> can point to migration guidance.</p>",
+    "example": "<p><code>GET /v1/orders</code> returns <code>Deprecation: @1790812800</code>, <code>Sunset: Tue, 01 Dec 2026 00:00:00 GMT</code>, and a link to the v2 guide. Clients can warn owners before the deadline instead of discovering removal through a 404.</p>",
+    "use_case": {
+      "when": "Use lifecycle headers when an API version or resource has active consumers that need machine-readable migration notice.",
+      "example": "A gateway inventories callers still using <code>/v1/orders</code> and alerts teams before the announced sunset.",
+      "decision": "Headers complement—not replace—direct owner communication, telemetry, compatibility testing, and a rollback plan. Do not announce a date you cannot support operationally."
+    },
+    "practice": "Move the current date before deprecation, between deprecation and sunset, and after sunset. Observe the client action.",
+    "boundary": "The browser uses fixed dates. RFC 9745 does not force a server to stop at sunset, guarantee client support, or define organization-specific enforcement and communication.",
+    "sim": "<style>.mechanism{background:#f4f8f3;color:#183a35;border-radius:12px;padding:14px;margin-top:15px;overflow:hidden}.mechanism svg{width:100%;height:auto;display:block;font-size:15px}.lane{margin:8px 0;border-left:8px solid #4e8275;padding:9px;background:#eef4f0}.bad{border-color:#a74a3d;background:#fff0e6}.good{border-color:#287b64;background:#e4f3cf}.warn{border-color:#d18621;background:#fff5cf}.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.row{border:2px solid #54786f;border-radius:9px;padding:10px;background:#eef4f0}.active{background:#d6f4b5!important;border-color:#d18621!important}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.meter{height:28px;background:#dce6df;border-radius:7px;overflow:hidden}.meter>span{display:block;height:100%;background:#247a68;color:white;padding-left:8px;white-space:nowrap}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.mechanism svg{font-size:12px}}</style><label for=\"lifecycleDay\">Date</label><select id=\"lifecycleDay\"><option value=\"before\">2026-09-01</option><option value=\"deprecated\">2026-10-15</option><option value=\"sunset\">2026-12-02</option></select><div id=\"world\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "function lifecyclePaint(){const v=lifecycleDay.value,state=v==='before'?['SUPPORTED','No lifecycle action yet','good']:v==='deprecated'?['DEPRECATED','Warn owner; migrate before Dec 1','warn']:['PAST SUNSET','Do not assume availability; use v2','bad'];world.innerHTML='<svg viewBox=\"0 0 700 190\" role=\"img\" aria-label=\"API timeline from deprecation to sunset\"><line x1=\"70\" y1=\"90\" x2=\"630\" y2=\"90\" stroke=\"#54786f\" stroke-width=\"6\"/><circle cx=\"260\" cy=\"90\" r=\"15\" fill=\"#d18621\"/><text x=\"260\" y=\"60\" text-anchor=\"middle\">Deprecation · Oct 1</text><circle cx=\"530\" cy=\"90\" r=\"15\" fill=\"#a74a3d\"/><text x=\"530\" y=\"60\" text-anchor=\"middle\">Sunset · Dec 1</text><text x=\"350\" y=\"145\" text-anchor=\"middle\">'+lifecycleDay.options?.[lifecycleDay.selectedIndex]?.textContent+' → '+state[0]+'</text></svg><p class=\"lane '+state[2]+'\">'+state[1]+'</p>';}lifecycleDay.onchange=lifecyclePaint;lifecyclePaint();",
+    "questions": [
+      [
+        "What does Deprecation communicate?",
+        [
+          "The resource is discouraged now or from a stated time",
+          "The exact shutdown is guaranteed",
+          "Authentication"
+        ],
+        0,
+        "Deprecation and shutdown time are separate signals."
+      ],
+      [
+        "Which header communicates expected unresponsiveness?",
+        [
+          "ETag",
+          "Sunset",
+          "Retry-After"
+        ],
+        1,
+        "Sunset carries the lifecycle end date."
+      ],
+      [
+        "Why keep direct consumer outreach?",
+        [
+          "Headers guarantee every client reacts",
+          "Many clients do not inspect lifecycle headers",
+          "RFCs forbid links"
+        ],
+        1,
+        "Machine-readable notice is one layer of migration management."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "from datetime import datetime, timezone\ndeprecation=datetime(2026,10,1,tzinfo=timezone.utc)\nsunset=datetime(2026,12,1,tzinfo=timezone.utc)",
+          "note": "Define the two independent lifecycle times."
+        },
+        {
+          "code": "now=datetime(2026,10,15,tzinfo=timezone.utc)",
+          "note": "Place the client between them."
+        },
+        {
+          "code": "state=\"PAST_SUNSET\" if now>=sunset else \"DEPRECATED\" if now>=deprecation else \"SUPPORTED\"",
+          "note": "Derive the action window."
+        }
+      ],
+      "expect": {
+        "state": "DEPRECATED"
+      },
+      "limit": "Executed local Python datetime comparison. It did not send HTTP traffic or test client support.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {}
+        },
+        {
+          "step": 2,
+          "state": {
+            "state": "DEPRECATED"
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "RFC 9745: Deprecation HTTP Response Header",
+        "https://www.rfc-editor.org/rfc/rfc9745.html",
+        "Published 2025-03"
+      ],
+      [
+        "RFC 8594: Sunset HTTP Header",
+        "https://www.rfc-editor.org/rfc/rfc8594.html",
+        "Published 2019-05"
+      ]
+    ],
+    "visual_explanation": "The timeline keeps deprecation and sunset as two distinct markers; changing the current date moves the client’s required action between them.",
+    "written_questions": [
+      "Which current API needs a machine-readable deprecation signal?",
+      "What consumer evidence must be zero before its sunset date?"
+    ],
+    "source_checked_on": "2026-10-13"
+  }
+]
