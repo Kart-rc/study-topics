@@ -2,7 +2,7 @@
   "schema_version": 1,
   "created_on": "2026-10-08",
   "target_date": "2026-12-31",
-  "source_checked_on": "2026-10-08",
+  "source_checked_on": "2026-10-14",
   "guide_recheck": "weekly and before booking",
   "time_budget_minutes": 30,
   "tracks": [
@@ -244,6 +244,36 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day24/data-engineering",
+      "product_material_added_on": "2026-10-14",
+      "session_type": "focused",
+      "cycle_position": 1,
+      "cycle_origin": "Day24",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "ingestion",
+        "troubleshooting_optimization"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Full objective IDs and weights unverified; planning group only",
+      "snowflake_planning_groups": [
+        "loading_unloading_transformation"
+      ],
+      "source_checked_on": "2026-10-14",
+      "source_versions": {
+        "databricks": "Auto Loader docs updated 2026-09-11; checked 2026-10-14",
+        "snowflake": "Snowpipe introduction and management docs checked 2026-10-14"
+      },
+      "depth": "Focused immutable-file identity, checkpoint/load-metadata and correction-path decisions; not complete ingestion coverage",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -278,6 +308,11 @@
       "day_number": 23,
       "date": "2026-10-13",
       "key": "Day18/data-engineering+products+3"
+    },
+    {
+      "day_number": 24,
+      "date": "2026-10-14",
+      "key": "Day20/data-engineering+products+1"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
@@ -303,7 +338,7 @@
       "6": "consolidation_case",
       "7": "retrieval_gap"
     },
-    "next_consolidation_day": 22,
-    "next_retrieval_day": 23
+    "next_consolidation_day": 29,
+    "next_retrieval_day": 30
   }
 }

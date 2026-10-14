@@ -1,0 +1,964 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "minutes": 30,
+    "title": "A file's path is its ticket: retries are safe, overwrites are not",
+    "goal": "Explain file-ingestion identity, then implement and compare it in Databricks Auto Loader and Snowflake Snowpipe.",
+    "tag": "Focused certification lesson · cycle 2, position 1",
+    "concept": "<p>Imagine a concert usher who marks each ticket number as used. The same ticket can be scanned twice without admitting two people. But if someone changes the name printed on an already-used ticket, the usher still sees the same ticket number and refuses it.</p><p>File ingestion works similarly: the service remembers a file identity, usually its path/name. Duplicate notifications do not necessarily create duplicate loads. Replacing the contents at the same path is dangerous because the ingestion memory can still say “already seen.”</p>",
+    "example": "<p>The first event for <code>orders/2026-10-14-18.json</code> loads rows O-7 and O-8. A repeated event for that path is skipped. A corrected file uploaded to the <em>same</em> path can also be skipped. Uploading the correction as <code>...-18-v2.json</code> gives it a new identity; downstream logic can then reconcile O-7 rather than blindly appending another order.</p>",
+    "use_case": {
+      "when": "Use managed file ingestion when producers land immutable files in object storage and the pipeline must recover from duplicate notifications or restarts.",
+      "example": "An S3 producer writes hourly order files. A notification is retried after a network timeout, and one batch later needs a correction.",
+      "decision": "Treat source files as immutable, keep ingestion state durable, and publish corrections under a new path. Add business-key reconciliation because file-level exactly-once does not remove duplicates across different files."
+    },
+    "practice": "Choose each arrival scenario and predict LOAD or SKIP before revealing the remembered identity.",
+    "boundary": "This local JavaScript model reduces identity to a path string. Real products have checkpoints/load metadata, permissions, retention, schema handling, concurrency and downstream table semantics. It does not contact Databricks, Snowflake or object storage.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:14px;padding:16px;margin:16px 0;overflow:hidden}.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:stretch}.node{border:2px solid #54786f;border-radius:10px;padding:12px;background:#eef4f0;overflow-wrap:anywhere}.node.good{background:#dff2cf;border-color:#287b64}.node.bad{background:#ffe9df;border-color:#a74a3d}.node.warn{background:#fff4c9;border-color:#d18621}.node.active{outline:4px solid #d18621}.arrow{font-weight:800;text-align:center}.bar{height:26px;border-radius:6px;background:#d8e3dc;overflow:hidden;margin:5px 0}.bar span{display:block;height:100%;background:#247a68;color:white;padding-left:7px;white-space:nowrap}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.flow{grid-template-columns:1fr}}\n</style><label for=\"fileCase\">Arrival</label><select id=\"fileCase\"><option value=\"first\">first event: orders-18.json</option><option value=\"retry\">duplicate event: orders-18.json</option><option value=\"overwrite\">corrected bytes, same path</option><option value=\"version\">correction: orders-18-v2.json</option></select><button id=\"fileReveal\">Reveal decision</button><div id=\"fileWorld\" class=\"mechanism\" aria-live=\"polite\"></div>",
+    "js": "const fileFacts={first:['orders-18.json','not seen','LOAD','remember path'],retry:['orders-18.json','seen','SKIP','no second file load'],overwrite:['orders-18.json','seen','SKIP','same identity hides correction'],version:['orders-18-v2.json','not seen','LOAD','then reconcile O-7']};let fileShown=false;function paintFile(){const f=fileFacts[fileCase.value];fileWorld.innerHTML='<div class=\"flow\"><div class=\"node\"><strong>Arrival</strong><br>'+f[0]+'</div><div class=\"node '+(fileShown?(f[1]==='seen'?'warn':'good'):'')+'\"><strong>Memory</strong><br>'+(fileShown?f[1]:'predict')+'</div><div class=\"node '+(fileShown?(f[2]==='LOAD'?'good':'bad'):'')+'\"><strong>Decision</strong><br>'+(fileShown?f[2]:'?')+'</div><div class=\"node\"><strong>Next</strong><br>'+(fileShown?f[3]:'explain why')+'</div></div>';}fileCase.onchange=()=>{fileShown=false;paintFile()};fileReveal.onclick=()=>{fileShown=true;paintFile()};paintFile();",
+    "questions": [
+      [
+        "A producer sends the same object-store notification twice. What should durable file-ingestion state normally do?",
+        [
+          "Load the path twice",
+          "Recognize the path and skip a second file load",
+          "Delete the table"
+        ],
+        1,
+        "Durable state turns notification retries into a path-level no-op."
+      ],
+      [
+        "A correction replaces bytes at an already-loaded path. Safest publishing rule?",
+        [
+          "Reuse the same path",
+          "Write a versioned path and reconcile business keys",
+          "Disable checkpoints"
+        ],
+        1,
+        "A new identity makes the correction observable; reconciliation controls row effects."
+      ],
+      [
+        "What does file-level exactly-once fail to prove?",
+        [
+          "A path is not reprocessed",
+          "Two different files cannot contain the same order",
+          "A checkpoint exists"
+        ],
+        1,
+        "Business duplicates can arrive under different paths."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "seen=set()\npath='orders/2026-10-14-18.json'",
+          "note": "Start with empty ingestion memory and one immutable path."
+        },
+        {
+          "code": "first_action='LOAD' if path not in seen else 'SKIP'\nseen.add(path)",
+          "note": "The first arrival loads, then the path is remembered."
+        },
+        {
+          "code": "retry_action='SKIP' if path in seen else 'LOAD'",
+          "note": "A repeated event for the same identity is skipped."
+        },
+        {
+          "code": "corrected='orders/2026-10-14-18-v2.json'\ncorrection_action='LOAD' if corrected not in seen else 'SKIP'",
+          "note": "A versioned correction has a new identity and can load."
+        }
+      ],
+      "expect": {
+        "first_action": "LOAD",
+        "retry_action": "SKIP",
+        "correction_action": "LOAD"
+      },
+      "limit": "Executed local Python over path strings. No object store, notification service, vendor checkpoint, pipe or table was used.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "path": "orders/2026-10-14-18.json"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "path": "orders/2026-10-14-18.json",
+            "first_action": "LOAD"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "path": "orders/2026-10-14-18.json",
+            "first_action": "LOAD",
+            "retry_action": "SKIP"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "path": "orders/2026-10-14-18.json",
+            "first_action": "LOAD",
+            "retry_action": "SKIP",
+            "corrected": "orders/2026-10-14-18-v2.json",
+            "correction_action": "LOAD"
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks Auto Loader overview",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Snowflake Snowpipe overview",
+        "https://docs.snowflake.com/en/user-guide/data-load-snowpipe-intro",
+        "Living documentation"
+      ],
+      [
+        "Snowflake managing Snowpipe",
+        "https://docs.snowflake.com/en/user-guide/data-load-snowpipe-manage",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "Read left to right: an arrival presents a path, ingestion memory answers seen/not-seen, and that answer selects LOAD or SKIP. The versioned correction changes the identity rather than decorating the same path.",
+    "written_questions": [
+      "Why is an immutable source-path rule valuable even when the producer can overwrite objects?",
+      "Where would you reconcile duplicate order IDs that arrive in two different files?"
+    ],
+    "source_checked_on": "2026-10-14",
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: Auto Loader remembers files in its checkpoint",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Continuously ingest immutable JSON files from S3 into a Delta bronze table and resume after a job failure.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production workspace, external location and durable checkpoint. The SQL is <strong>unexecuted vendor practice</strong>; the visual below is a local teaching model.</p><pre class=\"codepanel\"><code><span>CREATE OR REFRESH STREAMING TABLE bronze_orders</span><span>AS SELECT *, _metadata.file_path AS source_file</span><span>FROM STREAM read_files(</span><span>  's3://acme-study/orders/', format =&gt; 'json');</span></code></pre><label for=\"dbArrival\">Object-store event</label><select id=\"dbArrival\"><option value=\"first\">new orders-18.json</option><option value=\"retry\">retry orders-18.json</option><option value=\"same\">corrected bytes at orders-18.json</option><option value=\"new\">orders-18-v2.json</option></select><button id=\"dbStep\">Trace Auto Loader</button><div id=\"dbWorld\" class=\"mechanism\"></div><p id=\"dbState\" aria-live=\"polite\"></p><p><strong>Failure/fix.</strong> Reusing the same source path can hide a correction. Keep files immutable, use a new path, and use a downstream <code>MERGE</code> on business identity if the correction must replace earlier rows. A separate source should use a separate checkpoint.</p>",
+        "markdown": "Use an authorized non-production workspace. SQL is unexecuted vendor practice.\n\n```sql\nCREATE OR REFRESH STREAMING TABLE bronze_orders AS\nSELECT *, _metadata.file_path AS source_file\nFROM STREAM read_files('s3://acme-study/orders/', format => 'json');\n```\n\nAuto Loader persists discovered-file state in its checkpoint and can resume after failure. Keep inputs immutable; use a new path for a correction and reconcile downstream.",
+        "javascript": "const dbArrival=$('dbArrival'),dbStep=$('dbStep'),dbWorld=$('dbWorld'),dbState=$('dbState');const dbCases={first:['notification','not in checkpoint','LOAD','checkpoint adds orders-18.json'],retry:['notification retry','orders-18.json seen','SKIP','Delta unchanged'],same:['same path, new bytes','orders-18.json seen','SKIP','correction invisible'],new:['versioned path','orders-18-v2.json unseen','LOAD','reconcile business key']};function dbPaint(show=false){const x=dbCases[dbArrival.value];dbWorld.innerHTML='<div class=\"flow\">'+x.map((v,i)=>'<div class=\"node '+(show?(i===2?(v==='LOAD'?'good':'bad'):''):'')+'\"><strong>'+['Event','Checkpoint','Action','Table effect'][i]+'</strong><br>'+(show?v:(i===0?v:'?'))+'</div>').join('')+'</div>';dbState.textContent=show?'Local model only; no Databricks code ran.':'Predict checkpoint and action.';}dbArrival.onchange=()=>dbPaint(false);dbStep.onclick=()=>dbPaint(true);dbPaint(false);"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: Snowpipe remembers loaded filenames for a limited window",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Auto-ingest immutable staged CSV files into a landing table while tolerating duplicate cloud events.</p><p><strong>Prepared real lab.</strong> Use an authorized non-production database, stage, integration and warehouse context. The SQL is <strong>unexecuted vendor practice</strong>; the visual is local JavaScript.</p><pre class=\"codepanel\"><code><span>CREATE PIPE orders_pipe AUTO_INGEST=TRUE AS</span><span>COPY INTO bronze_orders</span><span>FROM @orders_stage FILE_FORMAT=(TYPE=CSV);</span><span>SELECT * FROM TABLE(INFORMATION_SCHEMA.COPY_HISTORY(</span><span>  TABLE_NAME=&gt;'BRONZE_ORDERS', START_TIME=&gt;DATEADD('hour',-1,CURRENT_TIMESTAMP())));</span></code></pre><label for=\"sfArrival\">Arrival</label><select id=\"sfArrival\"><option value=\"retry\">duplicate event inside metadata window</option><option value=\"same\">corrected bytes, same filename inside window</option><option value=\"late\">same name after metadata expires</option><option value=\"overlap\">Snowpipe plus bulk COPY</option></select><button id=\"sfStep\">Trace Snowpipe</button><div id=\"sfWorld\" class=\"mechanism\"></div><p id=\"sfState\" aria-live=\"polite\"></p><p><strong>Failure/fix.</strong> Snowpipe load metadata records file path/name for 14 days. The same filename can be ignored inside that window even if bytes changed; after metadata expires it can load again. Use immutable, versioned names and do not mix Snowpipe with bulk <code>COPY</code> for the same files unless duplication is deliberately controlled.</p>",
+        "markdown": "Use an authorized non-production account. SQL is unexecuted vendor practice.\n\n```sql\nCREATE PIPE orders_pipe AUTO_INGEST=TRUE AS\nCOPY INTO bronze_orders FROM @orders_stage FILE_FORMAT=(TYPE=CSV);\nSELECT * FROM TABLE(INFORMATION_SCHEMA.COPY_HISTORY(\n  TABLE_NAME=>'BRONZE_ORDERS', START_TIME=>DATEADD('hour',-1,CURRENT_TIMESTAMP())));\n```\n\nSnowpipe keeps load metadata for 14 days. Use immutable, versioned names; avoid overlapping Snowpipe and bulk COPY metadata.",
+        "javascript": "const sfArrival=$('sfArrival'),sfStep=$('sfStep'),sfWorld=$('sfWorld'),sfState=$('sfState');const sfCases={retry:['same path/name','inside 14-day memory','SKIP','no second Snowpipe load'],same:['changed bytes, same name','inside 14-day memory','SKIP','correction hidden'],late:['same path/name','metadata expired','MAY LOAD','duplicate risk'],overlap:['same file','separate load metadata','MAY LOAD TWICE','duplicate + extra cost']};function sfPaint(show=false){const x=sfCases[sfArrival.value];sfWorld.innerHTML='<div class=\"flow\">'+x.map((v,i)=>'<div class=\"node '+(show?(i===2?(v==='SKIP'?'warn':'bad'):''):'')+'\"><strong>'+['Identity','Memory','Action','Risk'][i]+'</strong><br>'+(show?v:(i===0?v:'?'))+'</div>').join('')+'</div>';sfState.textContent=show?'Local model only; no Snowflake SQL ran.':'Predict the load-metadata decision.';}sfArrival.onchange=()=>sfPaint(false);sfStep.onclick=()=>sfPaint(true);sfPaint(false);"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks Auto Loader</th><th>Snowflake Snowpipe</th></tr></thead><tbody><tr><td>Memory</td><td>Discovered-file state in checkpoint</td><td>File path/name in pipe load metadata</td></tr><tr><td>Recovery</td><td>Resume from durable checkpoint</td><td>Cloud event queue + managed COPY</td></tr><tr><td>Same-path overwrite</td><td>Normally already seen; avoid</td><td>Ignored inside 14-day metadata window; avoid</td></tr><tr><td>Distinct-file row duplicates</td><td>Need downstream business-key logic</td><td>Need downstream business-key logic</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks Auto Loader | Snowflake Snowpipe |\n|---|---|---|\n| Memory | checkpoint file state | pipe load metadata |\n| Recovery | resume checkpoint | queued event + managed COPY |\n| Same-path overwrite | avoid; path already seen | avoid; name ignored inside 14 days |\n| Different files, same order | reconcile downstream | reconcile downstream |"
+    },
+    "product_questions": [
+      [
+        "A corrected source file keeps the already-loaded name. Best cross-product action?",
+        [
+          "Overwrite it",
+          "Publish a versioned name, then reconcile business keys",
+          "Delete ingestion history"
+        ],
+        1,
+        "Both products treat file identity as ingestion memory; immutability makes corrections visible."
+      ],
+      [
+        "Two different files contain order O-7. What does file-level deduplication guarantee?",
+        [
+          "Only one O-7 row",
+          "Each unseen file can load once; business-key dedup is separate",
+          "The second file is automatically deleted"
+        ],
+        1,
+        "The file identity and business identity are different layers."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks Auto Loader overview",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Databricks Auto Loader options",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/options",
+        "Living documentation"
+      ],
+      [
+        "Snowflake Snowpipe introduction",
+        "https://docs.snowflake.com/en/user-guide/data-load-snowpipe-intro",
+        "Living documentation"
+      ],
+      [
+        "Snowflake managing Snowpipe",
+        "https://docs.snowflake.com/en/user-guide/data-load-snowpipe-manage",
+        "Living documentation"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-14",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "ingestion",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Focused Auto Loader file identity, checkpoint recovery and immutable-source decisions; not complete ingestion-domain coverage."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "domains": [
+          "loading_unloading_transformation"
+        ],
+        "scope": "Focused Snowpipe file-load metadata, duplicate-event and overwrite decisions; planning group only because full COF-C03 objective IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "An interrupt is a stop request—do not erase it",
+    "goal": "Preserve Java cancellation by understanding that InterruptedException clears the thread's interrupt flag.",
+    "tag": "Java concurrency · cancellation",
+    "concept": "<p>An interrupt is like a hotel wake-up call: it asks the sleeper to stop waiting and check what to do next. In Java, blocking calls such as <code>sleep</code> throw <code>InterruptedException</code> and clear the interrupt status. If code catches the exception and does nothing, the outer loop may never learn that shutdown was requested.</p><p>If this layer cannot finish the cancellation itself, either rethrow <code>InterruptedException</code> or restore the flag with <code>Thread.currentThread().interrupt()</code>.</p>",
+    "example": "<p>A worker polls Kafka, batches records, then sleeps for backoff. Deployment shutdown interrupts it. The bad catch logs and retries forever. The fixed catch restores the flag, and the outer loop exits before starting another batch.</p>",
+    "use_case": {
+      "when": "Use cooperative interruption for executor cancellation, service shutdown and bounded background work.",
+      "example": "A rolling deployment interrupts a worker during retry backoff so it can stop before its termination grace period expires.",
+      "decision": "Rethrow when the method contract allows it; otherwise restore the flag and return or let an outer owner decide. Do not use interrupt as a force-kill or assume arbitrary code will stop."
+    },
+    "practice": "Toggle the catch behavior and watch the flag after sleep, after catch, and at the loop boundary.",
+    "boundary": "The browser visual is a state machine, not a Java VM or scheduler. The recorded Java example proves the documented flag changes on this runtime, not application safety under every race.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:14px;padding:16px;margin:16px 0;overflow:hidden}.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:stretch}.node{border:2px solid #54786f;border-radius:10px;padding:12px;background:#eef4f0;overflow-wrap:anywhere}.node.good{background:#dff2cf;border-color:#287b64}.node.bad{background:#ffe9df;border-color:#a74a3d}.node.warn{background:#fff4c9;border-color:#d18621}.node.active{outline:4px solid #d18621}.arrow{font-weight:800;text-align:center}.bar{height:26px;border-radius:6px;background:#d8e3dc;overflow:hidden;margin:5px 0}.bar span{display:block;height:100%;background:#247a68;color:white;padding-left:7px;white-space:nowrap}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.flow{grid-template-columns:1fr}}\n</style><label><input id=\"restoreFlag\" type=\"checkbox\" checked> catch restores interrupt flag</label><button id=\"runInterrupt\">Replay cancellation</button><div id=\"interruptWorld\" class=\"mechanism\"></div>",
+    "js": "function paintInterrupt(){const restore=restoreFlag.checked;interruptWorld.innerHTML='<div class=\"flow\"><div class=\"node\">running<br>flag=false</div><div class=\"node warn\">interrupt requested<br>flag=true</div><div class=\"node bad\">sleep throws<br>flag cleared</div><div class=\"node '+(restore?'good':'bad')+'\">catch<br>flag='+(restore?'true':'false')+'</div><div class=\"node '+(restore?'good':'bad')+'\">outer loop<br>'+(restore?'STOP':'CONTINUE')+'</div></div>';}runInterrupt.onclick=paintInterrupt;restoreFlag.onchange=paintInterrupt;paintInterrupt();",
+    "questions": [
+      [
+        "What happens to interrupt status when sleep throws InterruptedException?",
+        [
+          "It remains set",
+          "It is cleared",
+          "The process exits"
+        ],
+        1,
+        "The blocking method clears status when it throws."
+      ],
+      [
+        "A catch cannot rethrow InterruptedException. What usually preserves cancellation?",
+        [
+          "Ignore it",
+          "Restore status with Thread.currentThread().interrupt()",
+          "Start a new thread"
+        ],
+        1,
+        "Restoring status lets outer code observe the request."
+      ],
+      [
+        "What does interrupt guarantee?",
+        [
+          "Immediate forceful termination",
+          "A cooperative signal that code must handle",
+          "Database rollback"
+        ],
+        1,
+        "Interruption is cooperative, not a kill switch."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "Thread.currentThread().interrupt(); boolean beforeSleep=Thread.currentThread().isInterrupted();",
+          "note": "Set the current thread's interrupt flag."
+        },
+        {
+          "code": "boolean caught=false;\ntry { Thread.sleep(1); } catch (InterruptedException e) { caught=true; }; boolean afterCatch=Thread.currentThread().isInterrupted();",
+          "note": "Sleep detects the flag, throws, and clears it."
+        },
+        {
+          "code": "Thread.currentThread().interrupt();\nboolean restored=Thread.currentThread().isInterrupted();\nString action=restored ? \"stop\" : \"continue\";",
+          "note": "Restore the flag so the outer owner chooses stop."
+        }
+      ],
+      "expect": {
+        "beforeSleep": "true",
+        "caught": "true",
+        "afterCatch": "false",
+        "restored": "true",
+        "action": "stop"
+      },
+      "limit": "Executed on the build Java runtime using the current thread; no executor, I/O, Kafka client or shutdown race was involved.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "beforeSleep": "true"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "beforeSleep": "true",
+            "caught": "true",
+            "afterCatch": "false"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "beforeSleep": "true",
+            "caught": "true",
+            "afterCatch": "false",
+            "restored": "true",
+            "action": "stop"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java SE 26 InterruptedException",
+        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/InterruptedException.html",
+        "Java SE 26 API"
+      ],
+      [
+        "Java SE 25 Thread interrupt",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/Thread.html#interrupt()",
+        "Java SE 25 API"
+      ]
+    ],
+    "visual_explanation": "The flag is high when interruption is requested, drops when sleep throws, and rises again only if the catch restores it. The last node shows the application consequence.",
+    "written_questions": [
+      "Where in your worker should cancellation ownership live?",
+      "What cleanup must happen before the worker returns?"
+    ],
+    "source_checked_on": "2026-10-14"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A migration ends when the old path can be removed",
+    "goal": "Turn migration completion into an evidence-based decommission gate rather than a launch milestone.",
+    "tag": "Migration strategy · decommissioning",
+    "concept": "<p>Moving apartments is not finished when the new keys work. It is finished when mail is redirected, the old utilities are off, the inspection passes, and returning the old keys is safe.</p><p>A production migration needs the same exit gate: zero intended traffic on the old path, no unknown dependencies, reconciled data, a completed rollback window, named owners and stakeholder approval. Keeping the old system “just in case” indefinitely preserves cost and hidden coupling.</p>",
+    "example": "<p>Checkout moved to a new cell. Traffic reached 100%, but a monthly finance export still reads the old database. The dependency scan blocks retirement. After the export moves, reconciliation stays green for 14 days and the fallback window closes, the gate can approve deletion.</p>",
+    "use_case": {
+      "when": "Use a decommission gate after cutover for databases, services, queues, regions or vendor migrations.",
+      "example": "Retire an old Kafka cluster only after producers, consumers, ACL automation, backups and disaster-recovery procedures no longer depend on it.",
+      "decision": "Require measurable exit criteria and an accountable approver. Extend the window for high-impact uncertainty; do not keep the source alive merely because no owner will sign."
+    },
+    "practice": "Change old traffic, unknown dependencies and stable days. Observe which single unmet condition blocks retirement.",
+    "boundary": "This model treats five gates as Boolean facts. Real migration evidence has sampling error, long-tail jobs, legal retention, asset disposal, security and rollback trade-offs.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:14px;padding:16px;margin:16px 0;overflow:hidden}.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:stretch}.node{border:2px solid #54786f;border-radius:10px;padding:12px;background:#eef4f0;overflow-wrap:anywhere}.node.good{background:#dff2cf;border-color:#287b64}.node.bad{background:#ffe9df;border-color:#a74a3d}.node.warn{background:#fff4c9;border-color:#d18621}.node.active{outline:4px solid #d18621}.arrow{font-weight:800;text-align:center}.bar{height:26px;border-radius:6px;background:#d8e3dc;overflow:hidden;margin:5px 0}.bar span{display:block;height:100%;background:#247a68;color:white;padding-left:7px;white-space:nowrap}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.flow{grid-template-columns:1fr}}\n</style><label>Old-path traffic % <input id=\"oldTraffic\" type=\"range\" min=\"0\" max=\"10\" value=\"0\"><span id=\"oldTrafficValue\"></span></label><label>Unknown dependencies <input id=\"unknownDeps\" type=\"range\" min=\"0\" max=\"4\" value=\"1\"><span id=\"unknownDepsValue\"></span></label><label>Stable days <input id=\"stableDays\" type=\"range\" min=\"0\" max=\"21\" value=\"14\"><span id=\"stableDaysValue\"></span></label><button id=\"checkRetire\">Evaluate gate</button><div id=\"retireWorld\" class=\"mechanism\"></div>",
+    "js": "function paintRetire(){const traffic=+oldTraffic.value,deps=+unknownDeps.value,days=+stableDays.value;oldTrafficValue.textContent=traffic;unknownDepsValue.textContent=deps;stableDaysValue.textContent=days;const gates=[['old traffic = 0',traffic===0],['unknown dependencies = 0',deps===0],['stable ≥ 14 days',days>=14],['data reconciled',true],['owner approves',true]];retireWorld.innerHTML='<div class=\"flow\">'+gates.map(g=>'<div class=\"node '+(g[1]?'good':'bad')+'\">'+g[0]+'<br><strong>'+(g[1]?'PASS':'BLOCK')+'</strong></div>').join('')+'</div><p><strong>'+(gates.every(g=>g[1])?'RETIRE':'KEEP OLD PATH')+'</strong></p>';}[oldTraffic,unknownDeps,stableDays].forEach(x=>x.oninput=paintRetire);checkRetire.onclick=paintRetire;paintRetire();",
+    "questions": [
+      [
+        "New-system traffic is 100%, but one old dependency remains. Decision?",
+        [
+          "Retire",
+          "Keep and move the dependency",
+          "Ignore it"
+        ],
+        1,
+        "Cutover percentage alone does not prove removability."
+      ],
+      [
+        "Why set a rollback window?",
+        [
+          "To keep dual systems forever",
+          "To time-box fallback while evidence accumulates",
+          "To avoid reconciliation"
+        ],
+        1,
+        "A time-box creates a deliberate point for closing fallback."
+      ],
+      [
+        "Strongest retirement signal?",
+        [
+          "Launch succeeded",
+          "Exit criteria pass with named approval",
+          "No alerts today"
+        ],
+        1,
+        "Multiple independent criteria reduce hidden dependency risk."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "old_traffic_pct=0\nunknown_dependencies=0\nstable_days=14",
+          "note": "Capture measurable retirement evidence."
+        },
+        {
+          "code": "data_reconciled=True\nowner_approved=True",
+          "note": "Add correctness and accountability gates."
+        },
+        {
+          "code": "eligible=(old_traffic_pct==0 and unknown_dependencies==0 and stable_days>=14 and data_reconciled and owner_approved)\ndecision='RETIRE' if eligible else 'KEEP'",
+          "note": "Retire only when every required gate passes."
+        }
+      ],
+      "expect": {
+        "eligible": true,
+        "decision": "RETIRE"
+      },
+      "limit": "Executed local Python over declared facts; it did not discover dependencies, compare data or retire infrastructure.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "old_traffic_pct": 0,
+            "unknown_dependencies": 0,
+            "stable_days": 14
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "old_traffic_pct": 0,
+            "unknown_dependencies": 0,
+            "stable_days": 14,
+            "data_reconciled": true,
+            "owner_approved": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "old_traffic_pct": 0,
+            "unknown_dependencies": 0,
+            "stable_days": 14,
+            "data_reconciled": true,
+            "owner_approved": true,
+            "eligible": true,
+            "decision": "RETIRE"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Google Cloud migration best practices",
+        "https://cloud.google.com/architecture/migration-to-google-cloud-best-practices",
+        "Living architecture guidance"
+      ],
+      [
+        "AWS application retirement best practices",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/application-portfolio-assessment-guide/application-retirement.html",
+        "AWS Prescriptive Guidance"
+      ]
+    ],
+    "visual_explanation": "Each box is an independent veto. The final decision changes only when every red blocker turns green, emphasizing that retirement is an AND gate.",
+    "written_questions": [
+      "Which long-tail dependency in your estate is least visible to traffic dashboards?",
+      "Who is accountable for approving irreversible deletion?"
+    ],
+    "source_checked_on": "2026-10-14"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "A deprecation warning is a migration clock",
+    "goal": "Respond to deprecated MCP Sampling by moving new server-side model calls to a direct provider API.",
+    "tag": "Harness engineering · MCP evolution",
+    "concept": "<p>A shop can honor an old coupon while refusing to issue new ones. “Deprecated” means the path may still work, but new designs should not depend on it and existing users need a migration plan.</p><p>In the 2026-07-28 MCP specification, Sampling is deprecated. Its server-to-client backchannel does not fit the modern protocol direction. New MCP servers that need a model should call a provider API directly under explicit server-owned credentials, policy, telemetry and tests.</p>",
+    "example": "<p>A tool server previously asked the client to sample a model. The replacement isolates a <code>ModelGateway</code> behind the server: production uses a provider adapter; tests inject a fake. The tool contract stays stable while auth, budgets and retries become observable.</p>",
+    "use_case": {
+      "when": "Use this migration when an MCP server performs model reasoning as part of a tool operation or when upgrading to the modern MCP protocol.",
+      "example": "A catalog tool summarizes schema drift after reading metadata. The server calls its configured model provider instead of asking the MCP client to sample.",
+      "decision": "For new work, use a direct provider API. For existing Sampling users, inventory clients, add telemetry, introduce an adapter, migrate gradually and remove only after compatibility evidence."
+    },
+    "practice": "Switch between legacy and modern protocol modes and compare Sampling with a direct provider route.",
+    "boundary": "The browser never calls an MCP client or model provider. It visualizes protocol direction and ownership, not SDK compatibility, auth, latency, model quality or cost.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:14px;padding:16px;margin:16px 0;overflow:hidden}.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:stretch}.node{border:2px solid #54786f;border-radius:10px;padding:12px;background:#eef4f0;overflow-wrap:anywhere}.node.good{background:#dff2cf;border-color:#287b64}.node.bad{background:#ffe9df;border-color:#a74a3d}.node.warn{background:#fff4c9;border-color:#d18621}.node.active{outline:4px solid #d18621}.arrow{font-weight:800;text-align:center}.bar{height:26px;border-radius:6px;background:#d8e3dc;overflow:hidden;margin:5px 0}.bar span{display:block;height:100%;background:#247a68;color:white;padding-left:7px;white-space:nowrap}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.flow{grid-template-columns:1fr}}\n</style><label>Protocol <select id=\"mcpEra\"><option value=\"legacy\">legacy connection</option><option value=\"modern\">2026-07-28 modern connection</option></select></label><label>Design <select id=\"modelRoute\"><option value=\"sampling\">MCP Sampling</option><option value=\"provider\">direct provider API</option></select></label><button id=\"runRoute\">Trace route</button><div id=\"routeWorld\" class=\"mechanism\"></div>",
+    "js": "function paintRoute(){const modern=mcpEra.value==='modern',sampling=modelRoute.value==='sampling';const result=sampling?(modern?'NO BACKCHANNEL':'WORKS, BUT DEPRECATED'):'EXPLICIT SERVER CALL';routeWorld.innerHTML='<div class=\"flow\"><div class=\"node\">tool server</div><div class=\"node '+(sampling&&modern?'bad':'good')+'\">'+(sampling?'server → client Sampling':'server → provider adapter')+'</div><div class=\"node '+(result.includes('NO')?'bad':result.includes('DEPRECATED')?'warn':'good')+'\"><strong>'+result+'</strong></div><div class=\"node\">'+(sampling?'migration clock running':'credentials + policy owned here')+'</div></div>';}[mcpEra,modelRoute].forEach(x=>x.onchange=paintRoute);runRoute.onclick=paintRoute;paintRoute();",
+    "questions": [
+      [
+        "Should a new MCP server adopt Sampling after the 2026-07-28 deprecation?",
+        [
+          "Yes by default",
+          "No; prefer direct provider API",
+          "Only without tests"
+        ],
+        1,
+        "The specification says new implementations should not adopt deprecated features."
+      ],
+      [
+        "What should stay stable during migration?",
+        [
+          "The tool's user-facing contract where possible",
+          "Every internal credential",
+          "The deprecated backchannel"
+        ],
+        0,
+        "An adapter can change model transport without needlessly changing the tool contract."
+      ],
+      [
+        "What proves migration readiness?",
+        [
+          "One successful call",
+          "Client inventory, telemetry and compatibility tests",
+          "A warning was logged"
+        ],
+        1,
+        "Evidence must cover real consumers and failure paths."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "protocol='2026-07-28'\nnew_design=True",
+          "note": "Describe the protocol generation and design decision."
+        },
+        {
+          "code": "sampling_deprecated=True\nbackchannel_available=False",
+          "note": "Record the protocol constraints."
+        },
+        {
+          "code": "route='provider_api' if new_design or not backchannel_available else 'mcp_sampling'\nresult='server_owned_provider_call' if route=='provider_api' else 'client_sampling'",
+          "note": "Choose the supported route explicitly."
+        }
+      ],
+      "expect": {
+        "route": "provider_api",
+        "result": "server_owned_provider_call"
+      },
+      "limit": "Executed local Python decision logic; it did not initialize an MCP SDK, authenticate or call a model.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "protocol": "2026-07-28",
+            "new_design": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "protocol": "2026-07-28",
+            "new_design": true,
+            "sampling_deprecated": true,
+            "backchannel_available": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "protocol": "2026-07-28",
+            "new_design": true,
+            "sampling_deprecated": true,
+            "backchannel_available": false,
+            "route": "provider_api",
+            "result": "server_owned_provider_call"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP 2026-07-28 deprecated features",
+        "https://modelcontextprotocol.io/specification/2026-07-28/changelog",
+        "MCP specification 2026-07-28"
+      ],
+      [
+        "MCP Python SDK deprecated features",
+        "https://github.com/modelcontextprotocol/python-sdk/blob/main/docs/deprecated-features.md",
+        "Official SDK repository"
+      ]
+    ],
+    "visual_explanation": "The center arrow is the concept: legacy Sampling points back to the client; the replacement points from the server to a provider adapter with explicit ownership.",
+    "written_questions": [
+      "Which policy controls must move into the server-owned provider adapter?",
+      "How would you measure remaining Sampling traffic before removal?"
+    ],
+    "source_checked_on": "2026-10-14"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "A wider optical cone prints smaller features—but narrows focus",
+    "goal": "Use the Rayleigh relationships to understand the promise and trade-off of Hyper-NA EUV research.",
+    "tag": "Research deep dive · lithography",
+    "concept": "<p>A camera with a wider lens opening gathers light from steeper angles and can reveal finer detail, but the region that stays sharply focused becomes thinner. EUV lithography has the same qualitative trade-off.</p><p>In the simplified Rayleigh relationships, printable size scales like <code>k₁λ/NA</code>, while depth of focus scales roughly like <code>λ/NA²</code>. Raising numerical aperture improves resolution, but focus control becomes less forgiving.</p>",
+    "example": "<p>Holding wavelength at 13.5 nm and using a teaching value <code>k₁=0.28</code>, NA 0.33 gives about 11.45 nm, NA 0.55 about 6.87 nm, and research-level NA 0.75 about 5.04 nm. The arithmetic is illustrative—not a scanner specification or production claim.</p>",
+    "use_case": {
+      "when": "Use these relationships to reason about why lithography roadmaps raise NA and why process integration becomes harder.",
+      "example": "Compare a hypothetical Hyper-NA concept with High-NA for a layer whose single-exposure resolution is limiting.",
+      "decision": "Treat Hyper-NA as research until imaging, masks, resist, overlay, focus control, throughput and economics are demonstrated together."
+    },
+    "practice": "Move NA from 0.33 to 0.75. Watch resolution improve while relative focus tolerance shrinks.",
+    "boundary": "This is a two-equation teaching calculator with a fixed k₁. It omits resist chemistry, aberrations, mask 3D effects, stochastic defects, overlay, throughput and cost. Hyper-NA is research, not a production scanner claim.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:14px;padding:16px;margin:16px 0;overflow:hidden}.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:stretch}.node{border:2px solid #54786f;border-radius:10px;padding:12px;background:#eef4f0;overflow-wrap:anywhere}.node.good{background:#dff2cf;border-color:#287b64}.node.bad{background:#ffe9df;border-color:#a74a3d}.node.warn{background:#fff4c9;border-color:#d18621}.node.active{outline:4px solid #d18621}.arrow{font-weight:800;text-align:center}.bar{height:26px;border-radius:6px;background:#d8e3dc;overflow:hidden;margin:5px 0}.bar span{display:block;height:100%;background:#247a68;color:white;padding-left:7px;white-space:nowrap}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.flow{grid-template-columns:1fr}}\n</style><label>Numerical aperture <input id=\"na\" type=\"range\" min=\"33\" max=\"75\" value=\"55\"><span id=\"naValue\"></span></label><div id=\"opticsWorld\" class=\"mechanism\"></div>",
+    "js": "function paintOptics(){const v=+na.value/100;naValue.textContent=v.toFixed(2);const cd=.28*13.5/v,focus=(.33/v)**2;opticsWorld.innerHTML='<p><strong>Smaller is better for printable size</strong></p><div class=\"bar\"><span style=\"width:'+Math.min(100,cd/12*100)+'%\">'+cd.toFixed(2)+' nm</span></div><p><strong>Relative focus tolerance (NA 0.33 = 100%)</strong></p><div class=\"bar\"><span style=\"width:'+focus*100+'%\">'+(focus*100).toFixed(1)+'%</span></div><div class=\"flow\"><div class=\"node good\">NA rises → finer resolution</div><div class=\"node bad\">NA rises → thinner focus window</div></div>';}na.oninput=paintOptics;paintOptics();",
+    "questions": [
+      [
+        "In the simplified model, increasing NA does what to printable size?",
+        [
+          "Increases it",
+          "Decreases it",
+          "No effect"
+        ],
+        1,
+        "Resolution scales inversely with NA."
+      ],
+      [
+        "Why is higher NA not a free win?",
+        [
+          "Depth of focus shrinks",
+          "Wavelength disappears",
+          "Masks are unnecessary"
+        ],
+        0,
+        "The focus window scales roughly with inverse NA squared."
+      ],
+      [
+        "What is the status of Hyper-NA here?",
+        [
+          "Production guarantee",
+          "Research direction with system-level evidence still needed",
+          "Consumer camera feature"
+        ],
+        1,
+        "The cited work evaluates a potential extension, not a deployed production system."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "wavelength_nm=13.5\nk1=0.28\nna=0.75",
+          "note": "Set illustrative EUV inputs."
+        },
+        {
+          "code": "resolution_nm=k1*wavelength_nm/na",
+          "note": "Compute the simplified critical-dimension estimate."
+        },
+        {
+          "code": "dof_relative=(0.33/na)**2",
+          "note": "Compare focus tolerance with NA 0.33."
+        }
+      ],
+      "expect": {
+        "resolution_nm": 5.04,
+        "dof_relative": 0.1936
+      },
+      "limit": "Executed local arithmetic only. The equations and chosen k₁ are simplified teaching inputs, not process qualification or vendor performance.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "wavelength_nm": 13.5,
+            "k1": 0.28,
+            "na": 0.75
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "wavelength_nm": 13.5,
+            "k1": 0.28,
+            "na": 0.75,
+            "resolution_nm": 5.04
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "wavelength_nm": 13.5,
+            "k1": 0.28,
+            "na": 0.75,
+            "resolution_nm": 5.04,
+            "dof_relative": 0.1936
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "SPIE: Hyper-NA at 13.5 nm",
+        "https://www.spiedigitallibrary.org/conference-proceedings-of-spie/13735/1373502/Hyper-NA-at-135-nm-a-natural-next-step-to/10.1117/12.3063080.short",
+        "Published April 22, 2026"
+      ],
+      [
+        "ASML: Rayleigh criterion and lithography",
+        "https://www.asml.com/en/technology/lithography-principles/lenses-and-mirrors",
+        "Official technical explainer"
+      ]
+    ],
+    "visual_explanation": "Two bars move in opposite directions. The first gets shorter as printable size improves; the second collapses faster because focus tolerance scales with NA squared.",
+    "written_questions": [
+      "Which omitted process effect could erase the arithmetic advantage?",
+      "What evidence would move Hyper-NA from research claim to roadmap commitment?"
+    ],
+    "source_checked_on": "2026-10-14"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A merge queue needs tests for the merge group",
+    "goal": "Configure GitHub Actions so required checks run on the exact candidate the merge queue intends to merge.",
+    "tag": "GitHub Actions · merge queue",
+    "concept": "<p>Two musicians can sound fine alone and clash when they play together. A pull request test checks one musician; a merge-group test checks the temporary combination queued for the branch.</p><p>When required checks protect a branch that uses GitHub merge queue, the workflow must listen for <code>merge_group</code>. Otherwise the required status may never be reported for the queued candidate, or the combined changes may go untested.</p>",
+    "example": "<p>PR A changes a schema and PR B changes a client. Each passes against <code>main</code>. The merge queue forms one temporary SHA containing both; its contract test fails. Testing only <code>pull_request</code> misses the interaction.</p>",
+    "use_case": {
+      "when": "Use <code>merge_group</code> when a protected branch requires checks and GitHub merge queue is enabled.",
+      "example": "A busy monorepo queues multiple approved PRs whose generated clients and schemas can interact.",
+      "decision": "Run the same required check name on both pull-request and merge-group events; ensure checkout and caches key off the event SHA, and avoid assuming PR-only fields exist."
+    },
+    "practice": "Switch the workflow trigger set and see whether the required check reaches the merge-group SHA.",
+    "boundary": "The browser models event matching only. It does not parse YAML, create a queue, run GitHub Actions, verify permissions or reproduce concurrency and cancellation.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:14px;padding:16px;margin:16px 0;overflow:hidden}.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:stretch}.node{border:2px solid #54786f;border-radius:10px;padding:12px;background:#eef4f0;overflow-wrap:anywhere}.node.good{background:#dff2cf;border-color:#287b64}.node.bad{background:#ffe9df;border-color:#a74a3d}.node.warn{background:#fff4c9;border-color:#d18621}.node.active{outline:4px solid #d18621}.arrow{font-weight:800;text-align:center}.bar{height:26px;border-radius:6px;background:#d8e3dc;overflow:hidden;margin:5px 0}.bar span{display:block;height:100%;background:#247a68;color:white;padding-left:7px;white-space:nowrap}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.flow{grid-template-columns:1fr}}\n</style><label>Workflow triggers <select id=\"ghaTrigger\"><option value=\"pr\">pull_request only</option><option value=\"both\">pull_request + merge_group</option></select></label><button id=\"queueRun\">Form merge group A+B</button><div id=\"queueWorld\" class=\"mechanism\"></div><pre><code>on:\n  pull_request:\n  merge_group:\n    types: [checks_requested]</code></pre>",
+    "js": "function paintQueue(){const both=ghaTrigger.value==='both';queueWorld.innerHTML='<div class=\"flow\"><div class=\"node good\">PR A SHA<br>PASS</div><div class=\"node good\">PR B SHA<br>PASS</div><div class=\"node warn\">merge-group SHA<br>A+B</div><div class=\"node '+(both?'bad':'warn')+'\">required test<br>'+(both?'RUNS → catches conflict':'NOT REPORTED')+'</div></div>';}ghaTrigger.onchange=paintQueue;queueRun.onclick=paintQueue;paintQueue();",
+    "questions": [
+      [
+        "Which event makes Actions run for a GitHub merge queue candidate?",
+        [
+          "push only",
+          "merge_group",
+          "workflow_dispatch only"
+        ],
+        1,
+        "The merge_group event targets the temporary queued candidate."
+      ],
+      [
+        "Why can two green PR checks still produce a red merge group?",
+        [
+          "Combined changes can interact",
+          "GitHub deletes tests",
+          "YAML cannot have two events"
+        ],
+        0,
+        "The candidate contains a composition not tested by either PR alone."
+      ],
+      [
+        "What should checkout test in a merge-group run?",
+        [
+          "A random PR head",
+          "The event's merge-group SHA",
+          "Last release tag"
+        ],
+        1,
+        "Required status must describe the exact queued candidate."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "events={'pull_request'}\nmerge_group_sha='mg-A-B'",
+          "note": "Start with a PR-only workflow and a queued combined SHA."
+        },
+        {
+          "code": "required_reported='merge_group' in events",
+          "note": "The queued event does not match the workflow."
+        },
+        {
+          "code": "events.add('merge_group')\nrequired_reported='merge_group' in events\ntested_sha=merge_group_sha if required_reported else None",
+          "note": "Add the event so the exact merge-group SHA is tested."
+        }
+      ],
+      "expect": {
+        "required_reported": true,
+        "tested_sha": "mg-A-B"
+      },
+      "limit": "Executed local Python set membership, not GitHub's event engine or a workflow.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "merge_group_sha": "mg-A-B"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "merge_group_sha": "mg-A-B",
+            "required_reported": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "merge_group_sha": "mg-A-B",
+            "required_reported": true,
+            "tested_sha": "mg-A-B"
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Docs: merge queue",
+        "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue",
+        "Official documentation"
+      ],
+      [
+        "GitHub Docs: merge_group event",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group",
+        "Official documentation"
+      ]
+    ],
+    "visual_explanation": "The first two boxes are individually tested PRs; the third is a new combined SHA. Only the second trigger choice connects the required check to that candidate.",
+    "written_questions": [
+      "Which workflow fields in your CI assume a pull_request payload?",
+      "How will cache keys prevent artifacts from one SHA being mistaken for another?"
+    ],
+    "source_checked_on": "2026-10-14"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "One trace ID joins the call path; it does not authenticate it",
+    "goal": "Read and propagate W3C traceparent while keeping tracing separate from authentication and authorization.",
+    "tag": "Distributed tracing · W3C Trace Context",
+    "concept": "<p>A baggage tag lets airport staff follow one suitcase across flights. It does not prove the person carrying it owns the suitcase. A trace ID similarly joins spans across services; it is correlation context, not identity or permission.</p><p>A <code>traceparent</code> carries version, trace ID, parent span ID and flags. Each receiving service keeps the trace ID, creates its own span ID, and passes that new parent onward. Invalid or unsafe input must be handled deliberately.</p>",
+    "example": "<p>Gateway, Orders and Payment share trace ID <code>4bf9…</code>. Orders records Gateway's span as parent, creates span <code>b7ad…</code>, and sends that as Payment's parent. JWT validation and authorization still happen independently.</p>",
+    "use_case": {
+      "when": "Use Trace Context across synchronous and asynchronous service boundaries to correlate latency, errors and retries.",
+      "example": "Find whether a slow checkout spent time in the gateway, Orders, Payment or a downstream database.",
+      "decision": "Propagate valid context through trusted instrumentation, create a new span per operation, and keep auth decisions on verified credentials. Apply sampling, privacy and abuse controls at trust boundaries."
+    },
+    "practice": "Toggle a valid versus all-zero trace ID and compare propagation with authentication status.",
+    "boundary": "This browser validates only a tiny subset of the traceparent grammar. It does not create telemetry, enforce trust boundaries, sample traces, verify signatures or authorize requests.",
+    "sim": "<style>\n.mechanism{background:#f4f8f3;color:#183a35;border-radius:14px;padding:16px;margin:16px 0;overflow:hidden}.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:stretch}.node{border:2px solid #54786f;border-radius:10px;padding:12px;background:#eef4f0;overflow-wrap:anywhere}.node.good{background:#dff2cf;border-color:#287b64}.node.bad{background:#ffe9df;border-color:#a74a3d}.node.warn{background:#fff4c9;border-color:#d18621}.node.active{outline:4px solid #d18621}.arrow{font-weight:800;text-align:center}.bar{height:26px;border-radius:6px;background:#d8e3dc;overflow:hidden;margin:5px 0}.bar span{display:block;height:100%;background:#247a68;color:white;padding-left:7px;white-space:nowrap}.codepanel span{display:block;padding:5px;white-space:pre-wrap;overflow-wrap:anywhere}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.product-lesson table,#productComparison table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.9rem}.product-lesson th,.product-lesson td,#productComparison th,#productComparison td{border:1px solid #b6c7bd;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.flow{grid-template-columns:1fr}}\n</style><label>Incoming context <select id=\"traceCase\"><option value=\"valid\">valid traceparent</option><option value=\"zero\">all-zero trace-id</option></select></label><label><input id=\"authOk\" type=\"checkbox\"> valid bearer credential</label><button id=\"traceRun\">Handle request</button><div id=\"traceWorld\" class=\"mechanism\"></div>",
+    "js": "function paintTraceContext(){const valid=traceCase.value==='valid',auth=authOk.checked;traceWorld.innerHTML='<div class=\"flow\"><div class=\"node '+(valid?'good':'bad')+'\">incoming trace<br>'+(valid?'accept trace-id':'invalid → start/reject per policy')+'</div><div class=\"node good\">Orders<br>new span-id</div><div class=\"node good\">Payment<br>same trace-id</div><div class=\"node '+(auth?'good':'bad')+'\">authorization<br>'+(auth?'ALLOW':'DENY')+'</div></div><p>Trace result and auth result are independent.</p>';}[traceCase,authOk].forEach(x=>x.onchange=paintTraceContext);traceRun.onclick=paintTraceContext;paintTraceContext();",
+    "questions": [
+      [
+        "What stays the same across spans in one distributed trace?",
+        [
+          "span ID",
+          "trace ID",
+          "service name"
+        ],
+        1,
+        "The shared trace ID correlates the path; each span has its own ID."
+      ],
+      [
+        "Can a valid traceparent authorize a payment?",
+        [
+          "Yes",
+          "No",
+          "Only if sampled"
+        ],
+        1,
+        "Trace context is observability metadata, not an authenticated principal."
+      ],
+      [
+        "An all-zero trace ID is received. What does the W3C format say?",
+        [
+          "It is invalid",
+          "It is an admin trace",
+          "It means success"
+        ],
+        0,
+        "All-zero trace and parent IDs are forbidden by the format."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "traceparent='00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'\nparts=traceparent.split('-')",
+          "note": "Split version, trace ID, parent span ID and flags."
+        },
+        {
+          "code": "version,trace_id,parent_span_id,flags=parts\nvalid=(len(trace_id)==32 and int(trace_id,16)!=0 and len(parent_span_id)==16 and int(parent_span_id,16)!=0)",
+          "note": "Check essential identity constraints for this known version."
+        },
+        {
+          "code": "orders_span_id='b7ad6b7169203331'\noutgoing=f'{version}-{trace_id}-{orders_span_id}-{flags}'\nauthorized=False",
+          "note": "Create a child span while keeping authorization separate."
+        }
+      ],
+      "expect": {
+        "valid": true,
+        "authorized": false,
+        "outgoing": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
+      },
+      "limit": "Executed local string parsing with a simplified validator. Production libraries must implement the full specification, limits, forwarding, sampling and security guidance.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "parts": [
+              "00",
+              "4bf92f3577b34da6a3ce929d0e0e4736",
+              "00f067aa0ba902b7",
+              "01"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "parts": [
+              "00",
+              "4bf92f3577b34da6a3ce929d0e0e4736",
+              "00f067aa0ba902b7",
+              "01"
+            ],
+            "version": "00",
+            "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+            "parent_span_id": "00f067aa0ba902b7",
+            "flags": "01",
+            "valid": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "parts": [
+              "00",
+              "4bf92f3577b34da6a3ce929d0e0e4736",
+              "00f067aa0ba902b7",
+              "01"
+            ],
+            "version": "00",
+            "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+            "parent_span_id": "00f067aa0ba902b7",
+            "flags": "01",
+            "valid": true,
+            "orders_span_id": "b7ad6b7169203331",
+            "outgoing": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01",
+            "authorized": false
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "W3C Trace Context Recommendation",
+        "https://www.w3.org/TR/trace-context/",
+        "W3C Recommendation, November 23, 2021"
+      ],
+      [
+        "OpenTelemetry context propagation",
+        "https://opentelemetry.io/docs/concepts/context-propagation/",
+        "Official documentation"
+      ]
+    ],
+    "visual_explanation": "The first three boxes share correlation context, while the authorization box changes independently. This makes the non-authentication boundary visible rather than burying it in prose.",
+    "written_questions": [
+      "At which ingress boundaries will you accept, replace or annotate incoming trace context?",
+      "Which credentials—not trace headers—authorize the downstream call?"
+    ],
+    "source_checked_on": "2026-10-14"
+  }
+]
