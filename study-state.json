@@ -21,7 +21,7 @@
     30
   ],
   "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
-  "last_generated_day": 24,
+  "last_generated_day": 25,
   "days": [
     {
       "number": 1,
@@ -545,6 +545,29 @@
         "apis-microservices"
       ],
       "validation": "Recorded examples, 148 walkthroughs, seven mechanism checks, 15 policy tests, scoring, review scheduling, save/export structure and links passed locally. Local Playwright browser launch was unavailable; repository Browser smoke remains the native-browser gate. Product SQL/YAML was not executed; personal mastery was not assessed."
+    },
+    {
+      "number": 25,
+      "folder": "Day25",
+      "date": "2026-10-15",
+      "generation_key": "2026-10-15",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day16+7",
+        "Day21+1",
+        "Day9+14"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs",
+        "ci-cd-github-actions",
+        "apis-microservices"
+      ],
+      "validation": "Recorded examples, 155 walkthroughs, seven mechanism checks, 15 policy tests, scoring, review scheduling, save/export structure and links passed locally. Local Playwright browser launch was unavailable; repository Browser smoke remains the native-browser gate. Product SQL was not executed; personal mastery was not assessed."
     }
   ],
   "submitted_assessments": [],

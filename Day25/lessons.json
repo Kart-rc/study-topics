@@ -1,0 +1,1138 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Share live data without copying it",
+    "goal": "Explain provider-owned live sharing, then compare Databricks OpenSharing with Snowflake Secure Data Sharing.",
+    "tag": "Focused certification lesson · cycle 2, position 2",
+    "concept": "<p>Think of a library card. The library keeps one book; readers receive permission to read it. A shared table works the same way: the provider keeps the governed data and grants read access. The recipient queries the provider-owned data instead of receiving a frozen export.</p><p>This removes scheduled copy jobs, but it does not remove authorization, query cost, egress, schema-change risk, or the need to know who may see each row.</p>",
+    "example": "<p>The fraud team owns <code>risk.daily_scores</code>. A partner needs current scores for five regions. A nightly CSV is twelve hours stale and becomes an unmanaged copy. A share keeps one provider-owned table current; a dynamic view can expose only approved rows and columns.</p>",
+    "use_case": {
+      "when": "Use live sharing when another team or organization needs current governed data but should not own an independent extract pipeline.",
+      "example": "A bank shares daily risk scores with a claims partner while keeping the source table, policy and audit trail under provider control.",
+      "decision": "Choose a live share when freshness and centralized revocation outweigh cross-region egress and provider coupling. Use a materialized export when the recipient needs isolation, offline processing or a stable historical snapshot."
+    },
+    "practice": "Change the provider version, access state and region. Predict whether the reader sees current rows, stale rows, or no rows.",
+    "boundary": "The browser model represents one table version and one grant. Real sharing adds identity federation, object eligibility, regions/clouds, billing, auditing, schema evolution and product-specific limitations. Vendor SQL below was not executed.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.wire{height:12px;background:#d9e5de;border-radius:9px;overflow:hidden}.wire span{display:block;height:100%;background:#247a68}.matrix{display:grid;grid-template-columns:repeat(4,minmax(48px,1fr));gap:5px;max-width:520px}.cell{padding:8px;text-align:center;border-radius:6px;background:#dce7df}.kept{background:#dff3ce}.discard{background:#ffe4dc}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.matrix{font-size:.82rem}}</style><label>Provider table version <input id=\"shareVersion\" type=\"range\" min=\"1\" max=\"4\" value=\"3\"></label><label><input id=\"shareGrant\" type=\"checkbox\" checked> recipient still has access</label><label><input id=\"crossRegion\" type=\"checkbox\"> recipient is cross-region/cloud</label><div id=\"shareWorld\" class=\"world\" aria-live=\"polite\"></div>",
+    "js": "function paintShare(){const v=Number(shareVersion.value),ok=shareGrant.checked,cross=crossRegion.checked;shareWorld.innerHTML='<div class=\"lane\"><div class=\"box\"><strong>Provider</strong><br>one table · v'+v+'</div><div class=\"box '+(ok?'good':'bad')+'\"><strong>Grant</strong><br>'+(ok?'READ allowed':'REVOKED')+'</div><div class=\"box '+(ok?'good':'bad')+'\"><strong>Recipient</strong><br>'+(ok?'queries v'+v:'no rows')+'</div><div class=\"box '+(cross?'warn':'')+'\"><strong>Boundary</strong><br>'+(cross?'egress/region cost':'same-region path')+'</div></div><p><strong>Copies created by the share:</strong> 0. The recipient query is live, not a scheduled export.</p>';}[shareVersion,shareGrant,crossRegion].forEach(x=>x.oninput=paintShare);paintShare();",
+    "questions": [
+      [
+        "The provider updates its table from v3 to v4. With access intact, what should a live-share reader query?",
+        [
+          "The old CSV forever",
+          "The current shared data, subject to platform refresh semantics",
+          "A private copy it owns"
+        ],
+        1,
+        "The share exposes provider-owned data rather than a detached export."
+      ],
+      [
+        "Why can live sharing improve governance?",
+        [
+          "The provider can centralize grants and revoke access",
+          "The recipient automatically becomes owner",
+          "Network cost disappears"
+        ],
+        0,
+        "One governed object and provider-controlled grants reduce unmanaged copies."
+      ],
+      [
+        "When is an export a better fit?",
+        [
+          "The consumer needs an isolated historical snapshot",
+          "The provider wants immediate revocation",
+          "Freshness must be near real time"
+        ],
+        0,
+        "A materialized snapshot decouples the consumer from later provider changes."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "provider={'version':3,'rows':120}\ngrant=True",
+          "note": "Start with one provider-owned table and an active read grant."
+        },
+        {
+          "code": "recipient_version=provider['version'] if grant else None",
+          "note": "The recipient resolves the provider version; no table copy is created."
+        },
+        {
+          "code": "provider['version']=4\nrecipient_version=provider['version'] if grant else None",
+          "note": "A provider update becomes the version the reader sees."
+        },
+        {
+          "code": "grant=False\nafter_revoke=provider['version'] if grant else None",
+          "note": "Revocation stops the next read; it does not delete data the recipient previously exported."
+        }
+      ],
+      "expect": {
+        "recipient_version": 4,
+        "after_revoke": null
+      },
+      "limit": "The browser model represents one table version and one grant. Real sharing adds identity federation, object eligibility, regions/clouds, billing, auditing, schema evolution and product-specific limitations. Vendor SQL below was not executed.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "provider": {
+              "version": 3,
+              "rows": 120
+            },
+            "grant": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "provider": {
+              "version": 3,
+              "rows": 120
+            },
+            "grant": true,
+            "recipient_version": 3
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "provider": {
+              "version": 4,
+              "rows": 120
+            },
+            "grant": true,
+            "recipient_version": 4
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "provider": {
+              "version": 4,
+              "rows": 120
+            },
+            "grant": false,
+            "recipient_version": 4,
+            "after_revoke": null
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks OpenSharing overview",
+        "https://docs.databricks.com/aws/en/opensharing/",
+        "Living documentation"
+      ],
+      [
+        "Databricks OpenSharing concepts",
+        "https://docs.databricks.com/aws/en/opensharing/index.html",
+        "Living documentation"
+      ],
+      [
+        "Snowflake Secure Data Sharing introduction",
+        "https://docs.snowflake.com/en/user-guide/data-sharing-intro",
+        "Living documentation"
+      ],
+      [
+        "Snowflake data providers",
+        "https://docs.snowflake.com/en/user-guide/data-sharing-provider",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "Follow the ownership line: there is one provider table, one permission gate, and a recipient query. Moving the version slider changes the shared object, not a copied dataset.",
+    "written_questions": [
+      "What operational dependency does a live share introduce for the recipient?",
+      "Which access and egress evidence would you require before sharing regulated data?"
+    ],
+    "source_checked_on": "2026-10-15",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: share a Unity Catalog object",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Give a partner read access to a governed table without building a second ingestion pipeline.</p><p><strong>Unexecuted vendor practice.</strong> Run only in an authorized workspace. The browser visual is a local model.</p><pre class=\"codepanel\"><code><span>CREATE SHARE risk_partner;</span><span>ALTER SHARE risk_partner ADD TABLE risk.daily_scores;</span><span>CREATE RECIPIENT claims_partner;</span><span>GRANT SELECT ON SHARE risk_partner TO RECIPIENT claims_partner;</span></code></pre><label for=\"dbMode\">Sharing mode</label><select id=\"dbMode\"><option value=\"open\">OpenSharing recipient</option><option value=\"d2d\">Databricks-to-Databricks</option><option value=\"revoked\">recipient revoked</option></select><button id=\"dbShareStep\">Trace Databricks path</button><div id=\"dbShareWorld\" class=\"world\"></div><p id=\"dbShareState\"></p><p><strong>Failure/fix.</strong> A long-lived bearer token can be copied. Prefer OIDC where supported, restrict recipients and views, rotate credentials, audit reads, and account for cross-region egress. Databricks-to-Databricks sharing uses Unity Catalog identities instead of a recipient bearer token.</p>",
+        "markdown": "SQL is unexecuted vendor practice. Create a share, add the governed object, create the recipient, and grant access. OpenSharing works across platforms; Databricks-to-Databricks uses Unity Catalog identities. Prefer OIDC over copied bearer tokens where supported.",
+        "javascript": "const dbMode=$('dbMode'),dbShareStep=$('dbShareStep'),dbShareWorld=$('dbShareWorld'),dbShareState=$('dbShareState');const dbModes={open:['Unity Catalog table','share','OIDC/token recipient','read-only current data'],d2d:['Unity Catalog table','share','UC recipient identity','read-only current data'],revoked:['Unity Catalog table','share','recipient removed','DENY']};function dbPaint(){const x=dbModes[dbMode.value];dbShareWorld.innerHTML='<div class=\"lane\">'+x.map((v,i)=>'<div class=\"box '+(v==='DENY'?'bad':'')+'\"><strong>'+['Provider','Share','Identity','Result'][i]+'</strong><br>'+v+'</div>').join('')+'</div>';dbShareState.textContent='Local teaching model; no Databricks command ran.';}dbMode.onchange=dbPaint;dbShareStep.onclick=dbPaint;dbPaint();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: a share becomes a read-only imported database",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Share selected database objects with another Snowflake account without copying their storage.</p><p><strong>Unexecuted vendor practice.</strong> Use an authorized provider and consumer account. The browser visual is local JavaScript.</p><pre class=\"codepanel\"><code><span>CREATE SHARE risk_partner;</span><span>GRANT USAGE ON DATABASE risk TO SHARE risk_partner;</span><span>GRANT SELECT ON TABLE risk.public.daily_scores TO SHARE risk_partner;</span><span>ALTER SHARE risk_partner ADD ACCOUNTS = consumer_org.consumer;</span><span>-- consumer: CREATE DATABASE risk_shared FROM SHARE provider_org.provider.risk_partner;</span></code></pre><label for=\"sfShareCase\">Consumer action</label><select id=\"sfShareCase\"><option value=\"read\">SELECT current rows</option><option value=\"write\">UPDATE shared table</option><option value=\"revoke\">provider removes account</option></select><button id=\"sfShareStep\">Trace Snowflake path</button><div id=\"sfShareWorld\" class=\"world\"></div><p id=\"sfShareState\"></p><p><strong>Failure/fix.</strong> The imported database is read-only; the consumer pays query compute while the provider keeps storage. One share is associated with one database. Use secure views or database roles to narrow exposure; use reader accounts for consumers without Snowflake accounts.</p>",
+        "markdown": "SQL is unexecuted vendor practice. The provider creates a share and grants objects; the consumer creates an imported read-only database. No storage copy is created by the share. The consumer pays query compute.",
+        "javascript": "const sfShareCase=$('sfShareCase'),sfShareStep=$('sfShareStep'),sfShareWorld=$('sfShareWorld'),sfShareState=$('sfShareState');const sfCases={read:['provider table','share grants','imported database','SELECT current rows'],write:['provider table','share grants','read-only database','UPDATE DENIED'],revoke:['provider table','account removed','imported database','ACCESS DENIED']};function sfPaint(){const x=sfCases[sfShareCase.value];sfShareWorld.innerHTML='<div class=\"lane\">'+x.map((v,i)=>'<div class=\"box '+(v.includes('DENIED')?'bad':'')+'\"><strong>'+['Owner','Control','Consumer object','Outcome'][i]+'</strong><br>'+v+'</div>').join('')+'</div>';sfShareState.textContent='Local teaching model; no Snowflake SQL ran.';}sfShareCase.onchange=sfPaint;sfShareStep.onclick=sfPaint;sfPaint();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks OpenSharing</th><th>Snowflake Secure Data Sharing</th></tr></thead><tbody><tr><td>Owned data</td><td>Provider Unity Catalog object</td><td>Provider database object</td></tr><tr><td>Recipient path</td><td>Open protocol or D2D</td><td>Imported read-only database</td></tr><tr><td>Write through share</td><td>No</td><td>No</td></tr><tr><td>Important boundary</td><td>Token/OIDC choice and egress</td><td>One database per share; consumer compute</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Owner | provider UC object | provider DB object |\n| Recipient | open protocol or D2D | imported read-only DB |\n| Writes | no | no |\n| Boundary | identity and egress | one DB/share; consumer compute |"
+    },
+    "product_questions": [
+      [
+        "A consumer needs current rows but must not own a writable copy. Best common mechanism?",
+        [
+          "Live read-only share",
+          "Nightly attachment",
+          "Grant ownership"
+        ],
+        0,
+        "Both products expose provider-owned data through read-only sharing."
+      ],
+      [
+        "What survives after a recipient exported shared rows before revocation?",
+        [
+          "Nothing anywhere",
+          "The recipient-created export may remain",
+          "The provider table is deleted"
+        ],
+        1,
+        "Revocation stops future shared access; it cannot recall an independent copy already made."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks OpenSharing overview",
+        "https://docs.databricks.com/aws/en/opensharing/",
+        "Living documentation"
+      ],
+      [
+        "Databricks OpenSharing concepts",
+        "https://docs.databricks.com/aws/en/opensharing/index.html",
+        "Living documentation"
+      ],
+      [
+        "Snowflake Secure Data Sharing introduction",
+        "https://docs.snowflake.com/en/user-guide/data-sharing-intro",
+        "Living documentation"
+      ],
+      [
+        "Snowflake data providers",
+        "https://docs.snowflake.com/en/user-guide/data-sharing-provider",
+        "Living documentation"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-15",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "governance_security"
+        ],
+        "scope": "Focused OpenSharing ownership, recipient identity, revocation and egress decisions; not complete governance coverage."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "domains": [
+          "collaboration_protection"
+        ],
+        "scope": "Focused Secure Data Sharing provider/consumer and read-only database decisions; planning group only because full COF-C03 objective IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "One lock order breaks the deadlock cycle",
+    "goal": "Prevent a two-resource deadlock by requiring every transaction to acquire locks in the same order.",
+    "tag": "Concurrency · deadlock prevention",
+    "concept": "<p>Two people enter a narrow hallway from opposite ends. Each waits for the other to move. A database deadlock is the same shape: transaction A holds account 7 and waits for 9; transaction B holds 9 and waits for 7.</p><p>A consistent lock order removes the circle. If every transfer locks the smaller account ID first, only one transaction can enter the pair; the other waits without holding the second half of a cycle.</p>",
+    "example": "<p>Transfer T1 moves $10 from account 7 to 9. Transfer T2 moves $5 from 9 to 7. The broken version locks “from” first and deadlocks. The fixed version locks <code>min(7,9)</code> then <code>max(7,9)</code>.</p>",
+    "use_case": {
+      "when": "Use a lock-order rule when transactions routinely lock more than one shared row or object and deadlocks appear under concurrency.",
+      "example": "Two account transfers touch the same pair in opposite directions.",
+      "decision": "Prefer a simple global order when the lock set is known. Still catch and retry deadlock victims because dynamic queries, indexes and other code paths can introduce cycles."
+    },
+    "practice": "Toggle ordered locking and step through both transfers. Find the exact wait-for cycle.",
+    "boundary": "This deterministic browser schedule illustrates one interleaving. A real database chooses locks from query plans and may deadlock through indexes, predicates or unrelated code. Consistent ordering reduces a class of deadlocks; it does not replace bounded retries.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.wire{height:12px;background:#d9e5de;border-radius:9px;overflow:hidden}.wire span{display:block;height:100%;background:#247a68}.matrix{display:grid;grid-template-columns:repeat(4,minmax(48px,1fr));gap:5px;max-width:520px}.cell{padding:8px;text-align:center;border-radius:6px;background:#dce7df}.kept{background:#dff3ce}.discard{background:#ffe4dc}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.matrix{font-size:.82rem}}</style><label><input id=\"orderedLocks\" type=\"checkbox\"> use smaller account ID first</label><button id=\"lockStep\">Next scheduling step</button><button id=\"lockReset\">Reset</button><div id=\"lockWorld\" class=\"world\"></div>",
+    "js": "let lockI=0;function lockStates(){return orderedLocks.checked?[['T1 locks 7','T2 waits for 7'],['T1 locks 9','T2 still waits'],['T1 commits','T2 locks 7 then 9']]:[['T1 locks 7','T2 locks 9'],['T1 waits for 9','T2 waits for 7'],['cycle detected','database aborts one']];}function lockPaint(){const s=lockStates()[Math.min(lockI,2)];lockWorld.innerHTML='<div class=\"lane\"><div class=\"box\"><strong>T1</strong><br>'+s[0]+'</div><div class=\"box '+(s.join(' ').includes('cycle')||s.join(' ').includes('waits for 7')&&!orderedLocks.checked?'bad':'')+'\"><strong>T2</strong><br>'+s[1]+'</div><div class=\"box\"><strong>Result</strong><br>'+(orderedLocks.checked?'wait chain, no cycle':lockI===1?'7 → 9 → 7':'opposite order')+'</div></div>';}lockStep.onclick=()=>{lockI=Math.min(2,lockI+1);lockPaint()};lockReset.onclick=()=>{lockI=0;lockPaint()};orderedLocks.onchange=()=>{lockI=0;lockPaint()};lockPaint();",
+    "questions": [
+      [
+        "T1 holds 7 and waits for 9; T2 holds 9 and waits for 7. What exists?",
+        [
+          "A queue only",
+          "A wait-for cycle",
+          "A read skew"
+        ],
+        1,
+        "Each transaction waits for a resource held by the other."
+      ],
+      [
+        "Which rule prevents this two-row cycle?",
+        [
+          "Lock the source account first",
+          "Both lock the smaller account ID first",
+          "Sleep before commit"
+        ],
+        1,
+        "A shared total order prevents opposite acquisition order."
+      ],
+      [
+        "Why keep retry logic?",
+        [
+          "Deadlocks can still arise through other lock paths",
+          "Ordering makes commits optional",
+          "Retries unlock rows"
+        ],
+        0,
+        "The rule covers only lock paths that follow it; databases may find other cycles."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "int t1First=7; int t1Second=9;\nint t2First=9; int t2Second=7;",
+          "note": "The broken paths request the same rows in opposite orders."
+        },
+        {
+          "code": "boolean cycle=(t1First==t2Second && t2First==t1Second);",
+          "note": "Each holds what the other wants, forming a cycle."
+        },
+        {
+          "code": "int orderedFirst=Math.min(7,9);\nint orderedSecond=Math.max(7,9);",
+          "note": "Both transactions now request 7 before 9."
+        },
+        {
+          "code": "boolean sameOrder=(orderedFirst==7 && orderedSecond==9);",
+          "note": "One may wait, but it waits before holding the second half of a cycle."
+        }
+      ],
+      "expect": {
+        "cycle": "true",
+        "sameOrder": "true"
+      },
+      "limit": "This deterministic browser schedule illustrates one interleaving. A real database chooses locks from query plans and may deadlock through indexes, predicates or unrelated code. Consistent ordering reduces a class of deadlocks; it does not replace bounded retries.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "t1First": "7",
+            "t1Second": "9",
+            "t2First": "9",
+            "t2Second": "7"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "t1First": "7",
+            "t1Second": "9",
+            "t2First": "9",
+            "t2Second": "7",
+            "cycle": "true"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "t1First": "7",
+            "t1Second": "9",
+            "t2First": "9",
+            "t2Second": "7",
+            "cycle": "true",
+            "orderedFirst": "7",
+            "orderedSecond": "9"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "t1First": "7",
+            "t1Second": "9",
+            "t2First": "9",
+            "t2Second": "7",
+            "cycle": "true",
+            "orderedFirst": "7",
+            "orderedSecond": "9",
+            "sameOrder": "true"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "PostgreSQL explicit locking and deadlocks",
+        "https://www.postgresql.org/docs/current/explicit-locking.html",
+        "PostgreSQL current documentation"
+      ],
+      [
+        "PostgreSQL LOCK",
+        "https://www.postgresql.org/docs/current/sql-lock.html",
+        "PostgreSQL current documentation"
+      ]
+    ],
+    "visual_explanation": "In the broken view, trace the arrows 7 → T1 → 9 → T2 → 7. Ordering both requests as 7 then 9 removes the circular wait; waiting can remain, but the cycle cannot.",
+    "written_questions": [
+      "Where would you enforce a lock-order contract in a large codebase?",
+      "What retry limit and metric would reveal that prevention is incomplete?"
+    ],
+    "source_checked_on": "2026-10-15"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A 99.9% service cannot make a 99.9% chain",
+    "goal": "Compose dependency reliability and allocate an end-to-end SLO budget instead of giving every component the user target.",
+    "tag": "Reliability strategy · SLO composition",
+    "concept": "<p>A trip with two 99%-reliable flights succeeds only when both flights succeed. The chance is roughly 99% × 99% = 98.01%. A request that needs several services behaves the same way when their failures are independent.</p><p>The user journey owns the SLO. Component objectives are budget allocations, not copies of the end-to-end number.</p>",
+    "example": "<p>Checkout requires Orders, Payments and Inventory. At 99.95% each, the independent-path estimate is <code>0.9995³ = 99.8501%</code>, below a 99.9% checkout target. The design needs stronger components, redundancy, or a degraded path that removes a hard dependency.</p>",
+    "use_case": {
+      "when": "Use end-to-end SLO composition when one user action synchronously depends on several services, queues or data stores.",
+      "example": "Checkout calls Orders, Payments and Inventory before returning success.",
+      "decision": "Model the critical path, measure the actual journey, and allocate component budgets according to leverage. Do not multiply blindly when failures are correlated or fallbacks change the path."
+    },
+    "practice": "Change dependency count and component availability. Predict the end-to-end estimate and remaining error budget.",
+    "boundary": "The calculator assumes identical independent availability and a serial all-required path. Real incidents are correlated, latency matters, traffic weights differ, and fallbacks can change the graph. Measure the user SLI; use this only as a planning check.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.wire{height:12px;background:#d9e5de;border-radius:9px;overflow:hidden}.wire span{display:block;height:100%;background:#247a68}.matrix{display:grid;grid-template-columns:repeat(4,minmax(48px,1fr));gap:5px;max-width:520px}.cell{padding:8px;text-align:center;border-radius:6px;background:#dce7df}.kept{background:#dff3ce}.discard{background:#ffe4dc}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.matrix{font-size:.82rem}}</style><label>Required dependencies <input id=\"depCount\" type=\"range\" min=\"1\" max=\"6\" value=\"3\"></label><label>Each availability (%) <input id=\"depAvail\" type=\"number\" min=\"90\" max=\"99.999\" step=\"0.001\" value=\"99.95\"></label><div id=\"sloWorld\" class=\"world\"></div>",
+    "js": "function paintSlo(){const n=Number(depCount.value),a=Number(depAvail.value)/100,end=Math.pow(a,n)*100,target=99.9,budget=Math.max(0,100-end);sloWorld.innerHTML='<p><strong>Path:</strong> '+Array.from({length:n},(_,i)=>'S'+(i+1)).join(' AND ')+'</p><div class=\"wire\"><span style=\"width:'+end+'%\"></span></div><p><strong>Estimated success:</strong> '+end.toFixed(4)+'% · <strong>failure budget used:</strong> '+budget.toFixed(4)+'%</p><p class=\"'+(end>=target?'good':'bad')+' box\">99.9% journey target: '+(end>=target?'fits estimate':'misses estimate')+'</p>';}depCount.oninput=paintSlo;depAvail.oninput=paintSlo;paintSlo();",
+    "questions": [
+      [
+        "Three independent required services are each 99.95% available. Is the path exactly 99.95%?",
+        [
+          "Yes",
+          "No; required probabilities compound",
+          "Only during deploys"
+        ],
+        1,
+        "All required steps must succeed, so the path estimate is the product."
+      ],
+      [
+        "Best source of truth for the checkout SLO?",
+        [
+          "Average component uptime",
+          "The measured checkout user journey",
+          "The most reliable dependency"
+        ],
+        1,
+        "The SLI must describe what users experience."
+      ],
+      [
+        "When is multiplication misleading?",
+        [
+          "Failures are correlated or a fallback changes the path",
+          "All steps are independent",
+          "There is one dependency"
+        ],
+        0,
+        "Shared failure domains and conditional paths violate the simple model."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "component=0.9995\ncount=3",
+          "note": "Model three independent required services."
+        },
+        {
+          "code": "path_success=component**count",
+          "note": "All three must succeed, so probabilities multiply."
+        },
+        {
+          "code": "path_failure=1-path_success",
+          "note": "Convert the path estimate into a user-visible failure budget."
+        },
+        {
+          "code": "meets_999=path_success>=0.999",
+          "note": "Compare the composed estimate with the 99.9% journey target."
+        }
+      ],
+      "expect": {
+        "meets_999": false
+      },
+      "limit": "The calculator assumes identical independent availability and a serial all-required path. Real incidents are correlated, latency matters, traffic weights differ, and fallbacks can change the graph. Measure the user SLI; use this only as a planning check.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "component": 0.9995,
+            "count": 3
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "component": 0.9995,
+            "count": 3,
+            "path_success": 0.9985007498750001
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "component": 0.9995,
+            "count": 3,
+            "path_success": 0.9985007498750001,
+            "path_failure": 0.0014992501249998513
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "component": 0.9995,
+            "count": 3,
+            "path_success": 0.9985007498750001,
+            "path_failure": 0.0014992501249998513,
+            "meets_999": false
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Google SRE Workbook: Implementing SLOs",
+        "https://sre.google/workbook/implementing-slos/",
+        "Foundation"
+      ],
+      [
+        "Google SRE: Service Level Objectives",
+        "https://sre.google/sre-book/service-level-objectives/",
+        "Foundation"
+      ],
+      [
+        "Google SRE Workbook: Error Budget Policy",
+        "https://sre.google/workbook/error-budget-policy/",
+        "Foundation"
+      ]
+    ],
+    "visual_explanation": "The horizontal bar uses one consistent 0–100% scale. Adding a required dependency shortens the success portion even when every component keeps the same availability.",
+    "written_questions": [
+      "Which dependency would receive the tightest budget in your current critical path, and why?",
+      "What evidence would tell you failures are correlated rather than independent?"
+    ],
+    "source_checked_on": "2026-10-15"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Compare candidates on the same cases",
+    "goal": "Build a paired agent evaluation so case difficulty cannot masquerade as a model improvement.",
+    "tag": "Harness engineering · paired evaluation",
+    "concept": "<p>If two runners use different tracks, the faster time may come from the track. Agent candidates have the same problem: a new prompt tested on easier cases can look better by accident.</p><p>A paired eval runs baseline A and candidate B on the same case, reset from the same starting state. Record A win, B win, tie, or both fail. Inspect disagreements; the average alone hides which behavior changed.</p>",
+    "example": "<p>On five support cases, A passes 3 and B passes 4. The paired table reveals B wins two cases, A wins one, and two tie. The net is +1 case—not “B is 33% better.” Re-run with more representative cases and stable graders.</p>",
+    "use_case": {
+      "when": "Use paired evaluations before changing a model, prompt, tool schema, retrieval policy or harness limit.",
+      "example": "Compare an existing support agent with a new tool-routing prompt on the same frozen tickets and sandbox snapshots.",
+      "decision": "Pair cases and initial state when the question is “did this change help?” Use separate holdouts to detect overfitting and human review for consequential disagreements."
+    },
+    "practice": "Toggle baseline and candidate outcomes for five cases. Watch wins, losses, ties and net change update.",
+    "boundary": "The browser counts binary synthetic outcomes. It does not call a model, run tools, estimate statistical significance, validate grader quality, or prevent contamination. Paired results are evidence, not automatic shipping authority.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.wire{height:12px;background:#d9e5de;border-radius:9px;overflow:hidden}.wire span{display:block;height:100%;background:#247a68}.matrix{display:grid;grid-template-columns:repeat(4,minmax(48px,1fr));gap:5px;max-width:520px}.cell{padding:8px;text-align:center;border-radius:6px;background:#dce7df}.kept{background:#dff3ce}.discard{background:#ffe4dc}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.matrix{font-size:.82rem}}</style><p>Change candidate B: <select id=\"pairCase\"><option value=\"base\">original outcomes</option><option value=\"refundFail\">regress refund</option><option value=\"addressFix\">fix address</option></select></p><div id=\"pairWorld\" class=\"world\" aria-live=\"polite\"></div>",
+    "js": "const pairBase=[['refund',1,1],['address',1,0],['cancel',0,1],['policy',0,1],['fraud',1,1]];function paintPairs(){const cases=pairBase.map(x=>[...x]);if(pairCase.value==='refundFail')cases[0][2]=0;if(pairCase.value==='addressFix')cases[1][2]=1;const labels=cases.map(c=>c[1]===c[2]?'tie':c[2]?'B win':'A win'),bw=labels.filter(x=>x==='B win').length,aw=labels.filter(x=>x==='A win').length;pairWorld.innerHTML='<div class=\"lane\">'+cases.map((c,i)=>'<div class=\"box '+(labels[i]==='B win'?'good':labels[i]==='A win'?'bad':'')+'\"><strong>'+c[0]+'</strong><br>A '+c[1]+' · B '+c[2]+'<br>'+labels[i]+'</div>').join('')+'</div><p><strong>B wins '+bw+'</strong> · A wins '+aw+' · net '+(bw-aw)+'</p>';}pairCase.onchange=paintPairs;paintPairs();",
+    "questions": [
+      [
+        "Why run A and B on the same cases?",
+        [
+          "To remove case-mix difficulty as an explanation",
+          "To guarantee significance",
+          "To eliminate grader errors"
+        ],
+        0,
+        "Pairing controls which scenario each candidate sees."
+      ],
+      [
+        "A passes 3/5 and B passes 4/5. What is still essential?",
+        [
+          "Inspect the paired disagreements",
+          "Declare a 33% improvement",
+          "Delete the baseline"
+        ],
+        0,
+        "The same aggregate can hide very different wins and regressions."
+      ],
+      [
+        "What must reset between candidate runs?",
+        [
+          "Only the UI color",
+          "Tool/data state that could leak prior effects",
+          "The case ID"
+        ],
+        1,
+        "Shared mutable state can give the second candidate an unfair advantage."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "A=[1,1,0,0,1]\nB=[1,0,1,1,1]",
+          "note": "Store outcomes for the same five cases in the same order."
+        },
+        {
+          "code": "b_wins=sum(a==0 and b==1 for a,b in zip(A,B))",
+          "note": "Count cases improved by B."
+        },
+        {
+          "code": "a_wins=sum(a==1 and b==0 for a,b in zip(A,B))",
+          "note": "Count regressions where A wins."
+        },
+        {
+          "code": "net=b_wins-a_wins",
+          "note": "Net paired wins summarizes direction without claiming significance."
+        }
+      ],
+      "expect": {
+        "b_wins": 2,
+        "a_wins": 1,
+        "net": 1
+      },
+      "limit": "The browser counts binary synthetic outcomes. It does not call a model, run tools, estimate statistical significance, validate grader quality, or prevent contamination. Paired results are evidence, not automatic shipping authority.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "A": [
+              1,
+              1,
+              0,
+              0,
+              1
+            ],
+            "B": [
+              1,
+              0,
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "A": [
+              1,
+              1,
+              0,
+              0,
+              1
+            ],
+            "B": [
+              1,
+              0,
+              1,
+              1,
+              1
+            ],
+            "b_wins": 2
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "A": [
+              1,
+              1,
+              0,
+              0,
+              1
+            ],
+            "B": [
+              1,
+              0,
+              1,
+              1,
+              1
+            ],
+            "b_wins": 2,
+            "a_wins": 1
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "A": [
+              1,
+              1,
+              0,
+              0,
+              1
+            ],
+            "B": [
+              1,
+              0,
+              1,
+              1,
+              1
+            ],
+            "b_wins": 2,
+            "a_wins": 1,
+            "net": 1
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI evaluation best practices",
+        "https://platform.openai.com/docs/guides/evaluation-best-practices",
+        "Living documentation"
+      ],
+      [
+        "OpenAI Evals guide",
+        "https://platform.openai.com/docs/guides/evals",
+        "Living documentation"
+      ],
+      [
+        "OpenAI Graders API",
+        "https://platform.openai.com/docs/api-reference/graders",
+        "Living API reference"
+      ]
+    ],
+    "visual_explanation": "Each column is one frozen case. Read down the case before comparing totals: green is a candidate-only success, red is a baseline-only success, and neutral is a tie.",
+    "written_questions": [
+      "Which mutable tools or stores must your harness reset for a fair pair?",
+      "What disagreement would block deployment even if B wins overall?"
+    ],
+    "source_checked_on": "2026-10-15"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "FlashAttention: keep tiles, not the whole attention matrix",
+    "goal": "Understand how exact tiled attention reduces high-bandwidth-memory traffic without changing the attention result.",
+    "tag": "Research deep dive · established result",
+    "concept": "<p>Standard attention compares every query token with every key token. The score grid grows as sequence length squared. Writing that whole grid to slow, large GPU memory and reading it back can dominate runtime.</p><p>FlashAttention tiles the grid. It loads small query/key/value blocks into fast on-chip memory, updates a running softmax summary, and discards each score tile. The final answer is exact up to normal floating-point effects; the full score matrix never has to live in high-bandwidth memory.</p>",
+    "example": "<p>For four query tokens and four key tokens, the conceptual score grid has 16 cells. With a 2×2 tile, the algorithm handles four cells at a time, updates running maximum/sum/output values, then reuses the scratch space.</p>",
+    "use_case": {
+      "when": "Use FlashAttention through a supported framework/kernel when long-sequence exact attention is limited by GPU memory traffic.",
+      "example": "A transformer processes an 8k-token document and cannot afford to materialize every attention score in HBM.",
+      "decision": "Use supported kernels and benchmark your shapes/hardware. It does not make quadratic arithmetic linear, and small or unsupported workloads may not benefit."
+    },
+    "practice": "Change sequence length and tile size. Compare full score cells with peak teaching-model tile cells.",
+    "boundary": "This is a memory-shape teaching model, not a GPU kernel. It omits heads, batch, bytes per element, backward pass, kernel fusion, hardware constraints and measured speed. The paper reports experimental claims; production gains depend on implementation and hardware.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.wire{height:12px;background:#d9e5de;border-radius:9px;overflow:hidden}.wire span{display:block;height:100%;background:#247a68}.matrix{display:grid;grid-template-columns:repeat(4,minmax(48px,1fr));gap:5px;max-width:520px}.cell{padding:8px;text-align:center;border-radius:6px;background:#dce7df}.kept{background:#dff3ce}.discard{background:#ffe4dc}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.matrix{font-size:.82rem}}</style><label>Sequence length <input id=\"seqN\" type=\"range\" min=\"4\" max=\"16\" step=\"4\" value=\"8\"></label><label>Tile edge <input id=\"tileN\" type=\"range\" min=\"2\" max=\"8\" step=\"2\" value=\"4\"></label><div id=\"flashWorld\" class=\"world\"></div>",
+    "js": "function paintFlash(){const n=+seqN.value,t=Math.min(+tileN.value,n),full=n*n,tile=t*t;flashWorld.innerHTML='<div class=\"matrix\">'+Array.from({length:Math.min(full,64)},(_,i)=>'<div class=\"cell '+(i<tile?'kept':'discard')+'\">'+(i<tile?'tile':'not kept')+'</div>').join('')+'</div><p><strong>Full score cells:</strong> '+full+' · <strong>peak tile cells in this model:</strong> '+tile+' · arithmetic comparisons still '+full+'</p>';}seqN.oninput=paintFlash;tileN.oninput=paintFlash;paintFlash();",
+    "questions": [
+      [
+        "What does FlashAttention avoid materializing in HBM?",
+        [
+          "The entire attention score matrix",
+          "All query vectors",
+          "The model weights"
+        ],
+        0,
+        "It computes score blocks and maintains online softmax summaries."
+      ],
+      [
+        "Does tiling remove quadratic attention arithmetic?",
+        [
+          "Yes, always linear",
+          "No; it mainly reduces memory traffic for exact attention",
+          "Only for four tokens"
+        ],
+        1,
+        "All query-key comparisons still exist in exact dense attention."
+      ],
+      [
+        "Why keep a running maximum during tiled softmax?",
+        [
+          "For numerically stable rescaling as new tiles arrive",
+          "To select one token only",
+          "To compress model weights"
+        ],
+        0,
+        "Online softmax must safely combine blocks without overflow."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "n=8\ntile=4",
+          "note": "Model an 8×8 score grid processed in 4×4 tiles."
+        },
+        {
+          "code": "full_cells=n*n\npeak_tile_cells=tile*tile",
+          "note": "Compare materializing 64 scores with a 16-score scratch tile."
+        },
+        {
+          "code": "tiles=(n//tile)**2",
+          "note": "Four tiles cover the conceptual score grid."
+        },
+        {
+          "code": "comparisons=tiles*peak_tile_cells",
+          "note": "The comparison count remains 64 even though peak score storage is smaller."
+        }
+      ],
+      "expect": {
+        "full_cells": 64,
+        "peak_tile_cells": 16,
+        "comparisons": 64
+      },
+      "limit": "This is a memory-shape teaching model, not a GPU kernel. It omits heads, batch, bytes per element, backward pass, kernel fusion, hardware constraints and measured speed. The paper reports experimental claims; production gains depend on implementation and hardware.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "n": 8,
+            "tile": 4
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "n": 8,
+            "tile": 4,
+            "full_cells": 64,
+            "peak_tile_cells": 16
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "n": 8,
+            "tile": 4,
+            "full_cells": 64,
+            "peak_tile_cells": 16,
+            "tiles": 4
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "n": 8,
+            "tile": 4,
+            "full_cells": 64,
+            "peak_tile_cells": 16,
+            "tiles": 4,
+            "comparisons": 64
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "FlashAttention paper",
+        "https://arxiv.org/abs/2205.14135",
+        "Submitted May 27, 2022; revised June 23, 2022"
+      ],
+      [
+        "NeurIPS 2022 paper page",
+        "https://proceedings.neurips.cc/paper_files/paper/2022/hash/3f1162e4a1c9658a5a4c12b47f35e7c2-Abstract-Conference.html",
+        "NeurIPS 2022"
+      ]
+    ],
+    "visual_explanation": "Green cells are the current scratch tile; red cells belong to other tiles and need not stay resident. The count below separates storage reduction from unchanged dense comparisons.",
+    "written_questions": [
+      "Why can fewer HBM reads improve speed even with the same comparison count?",
+      "Which benchmark dimensions must match your production workload before adopting a kernel?"
+    ],
+    "source_checked_on": "2026-10-15"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A rerun keeps the run ID but increments the attempt",
+    "goal": "Name logs and deployment evidence with both GitHub Actions run identity and attempt identity.",
+    "tag": "Pipeline observability · reruns",
+    "concept": "<p>A support ticket keeps the same ticket number when reopened, but the reopen count changes. GitHub Actions reruns follow that shape: <code>GITHUB_RUN_ID</code> stays the same, while <code>GITHUB_RUN_ATTEMPT</code> starts at 1 and increments.</p><p>If an external dashboard keys only by run ID, a rerun can overwrite the first failure and erase useful evidence.</p>",
+    "example": "<p>Run 815 fails on attempt 1, then passes on attempt 2. Store evidence as <code>815/1</code> and <code>815/2</code>. The commit SHA stays the same for the rerun, so the comparison isolates environment or nondeterminism rather than a code change.</p>",
+    "use_case": {
+      "when": "Use attempt-aware keys whenever workflow reruns publish logs, test reports, metrics or deployment evidence outside GitHub.",
+      "example": "A flaky integration job fails, is rerun, and passes without a new commit.",
+      "decision": "Keep run ID for the logical workflow execution and append attempt for immutable observations. Do not treat a passing rerun as proof that the first failure was harmless."
+    },
+    "practice": "Select an attempt and compare the unsafe run-only key with the safe run/attempt key.",
+    "boundary": "The browser does not run GitHub Actions. Retention, artifact naming conflicts, APIs and permissions differ by workflow. A unique attempt key preserves evidence but does not diagnose why attempts disagree.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.wire{height:12px;background:#d9e5de;border-radius:9px;overflow:hidden}.wire span{display:block;height:100%;background:#247a68}.matrix{display:grid;grid-template-columns:repeat(4,minmax(48px,1fr));gap:5px;max-width:520px}.cell{padding:8px;text-align:center;border-radius:6px;background:#dce7df}.kept{background:#dff3ce}.discard{background:#ffe4dc}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.matrix{font-size:.82rem}}</style><label>Attempt <input id=\"attemptNo\" type=\"range\" min=\"1\" max=\"3\" value=\"2\"></label><div id=\"attemptWorld\" class=\"world\"></div>",
+    "js": "function paintAttempt(){const a=+attemptNo.value,run=815;attemptWorld.innerHTML='<div class=\"lane\"><div class=\"box\"><strong>Logical run</strong><br>'+run+'</div><div class=\"box warn\"><strong>Attempt</strong><br>'+a+'</div><div class=\"box bad\"><strong>Unsafe key</strong><br>ci/'+run+' (overwrites)</div><div class=\"box good\"><strong>Evidence key</strong><br>ci/'+run+'/'+a+'</div></div>';}attemptNo.oninput=paintAttempt;paintAttempt();",
+    "questions": [
+      [
+        "What changes when the same workflow run is rerun?",
+        [
+          "GITHUB_RUN_ID",
+          "GITHUB_RUN_ATTEMPT",
+          "The triggering SHA"
+        ],
+        1,
+        "Attempt increments; run ID and the rerun SHA/ref stay the same."
+      ],
+      [
+        "Best external evidence key?",
+        [
+          "run_id only",
+          "run_id/run_attempt",
+          "branch name"
+        ],
+        1,
+        "It preserves each attempt under the same logical run."
+      ],
+      [
+        "A rerun passes. What can you conclude?",
+        [
+          "The first failure never happened",
+          "The same commit passed on a later attempt; investigate the disagreement",
+          "The commit SHA changed"
+        ],
+        1,
+        "A later pass does not erase earlier evidence or explain nondeterminism."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "run_id=815\nattempt=1\nkeys=[]",
+          "note": "Start the logical run at attempt 1."
+        },
+        {
+          "code": "keys.append(f'{run_id}/{attempt}')",
+          "note": "Persist the first observation with both identifiers."
+        },
+        {
+          "code": "attempt+=1\nkeys.append(f'{run_id}/{attempt}')",
+          "note": "A rerun keeps run ID and increments attempt."
+        },
+        {
+          "code": "preserved=(keys==['815/1','815/2'])",
+          "note": "Both failed and passing attempts remain addressable."
+        }
+      ],
+      "expect": {
+        "preserved": true
+      },
+      "limit": "The browser does not run GitHub Actions. Retention, artifact naming conflicts, APIs and permissions differ by workflow. A unique attempt key preserves evidence but does not diagnose why attempts disagree.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "run_id": 815,
+            "attempt": 1,
+            "keys": []
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "run_id": 815,
+            "attempt": 1,
+            "keys": [
+              "815/1"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "run_id": 815,
+            "attempt": 2,
+            "keys": [
+              "815/1",
+              "815/2"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "run_id": 815,
+            "attempt": 2,
+            "keys": [
+              "815/1",
+              "815/2"
+            ],
+            "preserved": true
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions variables reference",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/variables",
+        "Living documentation"
+      ],
+      [
+        "Re-running workflows and jobs",
+        "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "Run ID is the outer box; attempts are immutable observations inside it. The unsafe key points both attempts at one location, while the compound key preserves the sequence.",
+    "written_questions": [
+      "Which observability backend keys currently collapse reruns in your pipelines?",
+      "What policy should a deployment gate apply when attempt 1 fails and attempt 2 passes?"
+    ],
+    "source_checked_on": "2026-10-15"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "A field mask says exactly what PATCH may change",
+    "goal": "Use FieldMask to distinguish an omitted field from an intentional clear or default value.",
+    "tag": "API evolution · partial updates",
+    "concept": "<p>A repair form has two parts: the new value and a checklist of which rooms workers may enter. Sending <code>display_name: \"\"</code> without the checklist is ambiguous—is it an intentional clear or a serialization default?</p><p>A field mask is that checklist. The server changes only listed paths. Values outside the mask are ignored or rejected by contract, so adding future fields does not accidentally erase them.</p>",
+    "example": "<p>Current user: <code>{name: \"Kai\", timezone: \"UTC\", alerts: true}</code>. Request body sends <code>{timezone: \"America/New_York\", alerts: false}</code> with mask <code>timezone</code>. Only timezone changes; <code>alerts</code> stays true.</p>",
+    "use_case": {
+      "when": "Use field masks for partial updates when resources have optional/default values, nested fields, or will evolve with new fields.",
+      "example": "A profile client changes timezone without overwriting alert settings added by a newer server.",
+      "decision": "Use PATCH plus an explicit update mask for selective change. Use full replacement only when clients intentionally own every field and concurrency control protects lost updates."
+    },
+    "practice": "Select a mask and payload. Predict the resource after the patch, including an intentional clear.",
+    "boundary": "This local model supports flat fields only. Real protobuf FieldMask paths can be nested and have rules for repeated/map fields, immutable fields, wildcards, unknown paths, validation, etags and authorization.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.wire{height:12px;background:#d9e5de;border-radius:9px;overflow:hidden}.wire span{display:block;height:100%;background:#247a68}.matrix{display:grid;grid-template-columns:repeat(4,minmax(48px,1fr));gap:5px;max-width:520px}.cell{padding:8px;text-align:center;border-radius:6px;background:#dce7df}.kept{background:#dff3ce}.discard{background:#ffe4dc}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.matrix{font-size:.82rem}}</style><label for=\"maskChoice\">update_mask</label><select id=\"maskChoice\"><option value=\"timezone\">timezone</option><option value=\"alerts\">alerts</option><option value=\"name\">display_name</option><option value=\"both\">timezone,alerts</option></select><label><input id=\"clearName\" type=\"checkbox\"> send empty display_name</label><div id=\"maskWorld\" class=\"world\"></div>",
+    "js": "function paintMask(){const before={display_name:'Kai',timezone:'UTC',alerts:true},payload={display_name:clearName.checked?'':'Mira',timezone:'America/New_York',alerts:false},paths=maskChoice.value==='both'?['timezone','alerts']:[maskChoice.value],map={name:'display_name'},after={...before};paths.forEach(p=>{p=map[p]||p;after[p]=payload[p]});maskWorld.innerHTML='<table><tr><th>Field</th><th>Before</th><th>Payload</th><th>After</th></tr>'+Object.keys(before).map(k=>'<tr class=\"'+(paths.includes(k)||paths.map(p=>map[p]||p).includes(k)?'good':'')+'\"><td>'+k+'</td><td>'+before[k]+'</td><td>'+payload[k]+'</td><td>'+after[k]+'</td></tr>').join('')+'</table><p>Only masked paths changed.</p>';}maskChoice.onchange=paintMask;clearName.onchange=paintMask;paintMask();",
+    "questions": [
+      [
+        "Payload contains alerts=false, but update_mask is timezone. What happens to alerts?",
+        [
+          "It becomes false",
+          "It stays unchanged",
+          "The field is deleted"
+        ],
+        1,
+        "Only paths named in the mask participate in the update."
+      ],
+      [
+        "How do you intentionally clear display_name?",
+        [
+          "Omit it",
+          "Include display_name in the mask and send its clear/default value",
+          "Use GET"
+        ],
+        1,
+        "Mask membership carries intent; the value carries the new state."
+      ],
+      [
+        "Why is full replacement risky as schemas evolve?",
+        [
+          "Older clients may overwrite fields they do not know",
+          "PATCH cannot be authorized",
+          "Field masks copy databases"
+        ],
+        0,
+        "An older client cannot preserve unknown fields if it replaces the whole resource."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "resource={'display_name':'Kai','timezone':'UTC','alerts':True}",
+          "note": "Start with the stored resource."
+        },
+        {
+          "code": "payload={'timezone':'America/New_York','alerts':False}\nmask=['timezone']",
+          "note": "The payload carries two values, but the mask authorizes one path."
+        },
+        {
+          "code": "for field in mask: resource[field]=payload[field]",
+          "note": "Apply only masked fields."
+        },
+        {
+          "code": "alerts_preserved=(resource['alerts'] is True)",
+          "note": "The unmasked alerts value remains unchanged."
+        }
+      ],
+      "expect": {
+        "alerts_preserved": true
+      },
+      "limit": "This local model supports flat fields only. Real protobuf FieldMask paths can be nested and have rules for repeated/map fields, immutable fields, wildcards, unknown paths, validation, etags and authorization.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "resource": {
+              "display_name": "Kai",
+              "timezone": "UTC",
+              "alerts": true
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "resource": {
+              "display_name": "Kai",
+              "timezone": "UTC",
+              "alerts": true
+            },
+            "payload": {
+              "timezone": "America/New_York",
+              "alerts": false
+            },
+            "mask": [
+              "timezone"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "resource": {
+              "display_name": "Kai",
+              "timezone": "America/New_York",
+              "alerts": true
+            },
+            "payload": {
+              "timezone": "America/New_York",
+              "alerts": false
+            },
+            "mask": [
+              "timezone"
+            ],
+            "field": "timezone"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "resource": {
+              "display_name": "Kai",
+              "timezone": "America/New_York",
+              "alerts": true
+            },
+            "payload": {
+              "timezone": "America/New_York",
+              "alerts": false
+            },
+            "mask": [
+              "timezone"
+            ],
+            "field": "timezone",
+            "alerts_preserved": true
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "Google AIP-134: Standard methods Update",
+        "https://google.aip.dev/134",
+        "Changelog updated October 3, 2025"
+      ],
+      [
+        "Google AIP-161: Field masks",
+        "https://google.aip.dev/161",
+        "Foundation"
+      ],
+      [
+        "Protocol Buffers FieldMask reference",
+        "https://protobuf.dev/reference/protobuf/google.protobuf/#field-mask",
+        "Living reference"
+      ]
+    ],
+    "visual_explanation": "The table holds before, payload and after side by side. Green rows are named by the mask; unhighlighted payload values do not cross into stored state.",
+    "written_questions": [
+      "How should authorization interact with a mask that names a restricted field?",
+      "What concurrency check would you pair with a partial update to avoid lost updates?"
+    ],
+    "source_checked_on": "2026-10-15"
+  }
+]
