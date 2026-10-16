@@ -1,0 +1,1159 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Scale for one heavy query—or for many waiting queries",
+    "goal": "Separate query-size capacity from query-concurrency capacity, then make the choice in Databricks and Snowflake.",
+    "tag": "Focused certification lesson · cycle 2, position 3",
+    "concept": "<p>Imagine a supermarket. A wider checkout lane helps one shopper with a huge cart. Opening more lanes helps many shoppers who are waiting. Data warehouses have the same two controls: <strong>make a worker larger</strong> for a heavy query, or <strong>add workers/clusters</strong> for concurrency.</p><p>Do not resize first and ask why later. Look at the symptom: one query spills or runs slowly, or many otherwise healthy queries sit in a queue.</p>",
+    "example": "<p>At 09:00, one finance query needs 70 capacity units. At 10:00, twelve dashboard queries each need 10. A 40-unit worker cannot run the finance query efficiently; a single 80-unit worker can. But twelve dashboard requests still queue behind one another unless the service can add clusters.</p>",
+    "use_case": {
+      "when": "Use this decision whenever a SQL endpoint is slow: first distinguish per-query pressure from concurrency pressure.",
+      "example": "A month-end reconciliation spills on one cluster, while the morning BI dashboard is fast once it starts but waits in a queue.",
+      "decision": "Scale up for a query that cannot fit or parallelize well. Scale out for many independent queries waiting. Add auto-stop/suspend only after choosing the right capacity shape."
+    },
+    "practice": "Move the heavy-query size and concurrent-query count. The diagram changes from a wider lane to more lanes and explains the bottleneck.",
+    "boundary": "The browser uses synthetic capacity units and a simple queue formula. Real engines schedule stages, cache data, isolate workloads, and charge differently. The Databricks and Snowflake SQL below is unexecuted vendor practice.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.meter{height:28px;background:#dce5de;border-radius:7px;overflow:hidden;margin:5px 0}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:120px 1fr 65px;gap:8px;align-items:center;margin:8px 0}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.bar{grid-template-columns:1fr}}</style><label>One query needs <input id=\"heavyNeed\" type=\"range\" min=\"20\" max=\"100\" step=\"10\" value=\"70\"> capacity units</label><label>Concurrent small queries <input id=\"queryCount\" type=\"range\" min=\"1\" max=\"16\" value=\"12\"></label><div id=\"capacityWorld\" class=\"world\" aria-live=\"polite\"></div>",
+    "js": "function paintCapacity(){const need=+heavyNeed.value,n=+queryCount.value,size=need>40?80:40,clusters=n>4?Math.ceil(n/4):1,wait=Math.max(0,n-clusters*4);capacityWorld.innerHTML='<div class=\"lane\"><div class=\"box '+(need>40?'warn':'good')+'\"><strong>Heavy query</strong><br>'+need+' units needed</div><div class=\"box good\"><strong>Scale up</strong><br>worker capacity '+size+'</div><div class=\"box '+(n>4?'warn':'good')+'\"><strong>Arrivals</strong><br>'+n+' small queries</div><div class=\"box good\"><strong>Scale out</strong><br>'+clusters+' lanes · '+wait+' initially waiting</div></div><p><strong>Reason:</strong> worker size answers “can one query run well?”; cluster count answers “how many can start together?”</p>';}heavyNeed.oninput=paintCapacity;queryCount.oninput=paintCapacity;paintCapacity();",
+    "questions": [
+      [
+        "One query spills while there is no queue. First capacity move?",
+        [
+          "Increase per-query/warehouse size",
+          "Add more identical clusters only",
+          "Increase retry count"
+        ],
+        0,
+        "The symptom is one query exceeding its lane, not many queries waiting."
+      ],
+      [
+        "Queries are fast after they start, but twenty wait. Best direction?",
+        [
+          "Scale out concurrency",
+          "Make SQL longer",
+          "Disable autoscaling"
+        ],
+        0,
+        "More lanes address waiting independent work."
+      ],
+      [
+        "Why keep auto-stop or auto-suspend?",
+        [
+          "To reduce idle compute cost",
+          "To improve data correctness",
+          "To replace access control"
+        ],
+        0,
+        "Idle-time controls address cost, not query semantics."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "heavy_need=70\nworker_capacity=40",
+          "note": "Start with a heavy query that exceeds one worker shape."
+        },
+        {
+          "code": "scale_up=80 if heavy_need>worker_capacity else worker_capacity",
+          "note": "Choose a larger shape for the single-query need."
+        },
+        {
+          "code": "small_queries=12\nqueries_per_cluster=4",
+          "note": "Now model many independent dashboard queries."
+        },
+        {
+          "code": "clusters=(small_queries+queries_per_cluster-1)//queries_per_cluster\ninitial_wait=max(0,small_queries-clusters*queries_per_cluster)",
+          "note": "Add lanes until all twelve can begin in this teaching model."
+        }
+      ],
+      "expect": {
+        "clusters": 3,
+        "initial_wait": 0
+      },
+      "limit": "The browser uses synthetic capacity units and a simple queue formula. Real engines schedule stages, cache data, isolate workloads, and charge differently. The Databricks and Snowflake SQL below is unexecuted vendor practice.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "heavy_need": 70,
+            "worker_capacity": 40
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "heavy_need": 70,
+            "worker_capacity": 40,
+            "scale_up": 80
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "heavy_need": 70,
+            "worker_capacity": 40,
+            "scale_up": 80,
+            "small_queries": 12,
+            "queries_per_cluster": 4
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "heavy_need": 70,
+            "worker_capacity": 40,
+            "scale_up": 80,
+            "small_queries": 12,
+            "queries_per_cluster": 4,
+            "clusters": 3,
+            "initial_wait": 0
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks SQL warehouse types",
+        "https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-types",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Databricks: create a SQL warehouse",
+        "https://docs.databricks.com/aws/en/compute/sql-warehouse/create",
+        "Living documentation"
+      ],
+      [
+        "Snowflake virtual warehouse overview",
+        "https://docs.snowflake.com/en/user-guide/warehouses-overview",
+        "Living documentation"
+      ],
+      [
+        "Snowflake multi-cluster warehouses",
+        "https://docs.snowflake.com/en/user-guide/warehouses-multicluster",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "Read the diagram as two separate questions. The left pair compares one query with one worker. The right pair compares arrivals with available lanes; it never suggests that a larger lane automatically creates more lanes.",
+    "written_questions": [
+      "Which production metrics would distinguish spill/scan pressure from queue pressure?",
+      "Where would you isolate dashboard and ETL workloads instead of scaling one shared endpoint?"
+    ],
+    "source_checked_on": "2026-10-16",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: warehouse size and cluster range answer different questions",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> A serverless SQL warehouse serves executive dashboards and a month-end reconciliation.</p><p><strong>Unexecuted vendor practice.</strong> Configure an authorized SQL warehouse; the browser visual is local JavaScript.</p><pre class=\"codepanel\"><code><span>-- Warehouse settings, not notebook SQL:</span><span>Cluster size: 2X-Small → Medium  -- heavier query</span><span>Scaling: min 1, max 4 clusters -- more concurrency</span><span>Auto stop: 10 minutes          -- idle cost</span></code></pre><label>Symptom <select id=\"dbSymptom\"><option value=\"heavy\">one query spills</option><option value=\"queue\">many queries queue</option><option value=\"idle\">warehouse sits idle</option></select></label><button id=\"dbCapacityStep\">Choose Databricks control</button><div id=\"dbCapacityWorld\" class=\"world\"></div><p><strong>Failure/fix.</strong> Raising maximum clusters will not necessarily rescue one memory-heavy query. Increase warehouse size or tune the query for per-query pressure; raise cluster range for queued concurrency. Serverless behavior and limits vary by workspace and region.</p>",
+        "markdown": "Vendor configuration is unexecuted. Warehouse size addresses per-query capacity; min/max clusters address concurrency; auto-stop addresses idle cost. Confirm serverless availability and workspace policy.",
+        "javascript": "const dbSymptom=$('dbSymptom'),dbCapacityStep=$('dbCapacityStep'),dbCapacityWorld=$('dbCapacityWorld');function dbCapacityPaint(){const x={heavy:['one large query','increase size / tune SQL','watch spill and duration'],queue:['many waiting queries','raise max clusters','watch queue time'],idle:['no active queries','shorten auto-stop','watch idle DBUs']}[dbSymptom.value];dbCapacityWorld.innerHTML='<div class=\"lane\">'+x.map((v,i)=>'<div class=\"box '+(i===1?'good':'')+'\"><strong>'+['Symptom','Control','Evidence'][i]+'</strong><br>'+v+'</div>').join('')+'</div><p>Local teaching model; no Databricks setting changed.</p>';}dbSymptom.onchange=dbCapacityPaint;dbCapacityStep.onclick=dbCapacityPaint;dbCapacityPaint();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: warehouse size versus multi-cluster concurrency",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> A reporting warehouse must run a large reconciliation and absorb a dashboard burst.</p><p><strong>Unexecuted vendor SQL.</strong> Run only with change control. The browser visual is local JavaScript.</p><pre class=\"codepanel\"><code><span>ALTER WAREHOUSE reporting SET WAREHOUSE_SIZE = LARGE;</span><span>ALTER WAREHOUSE reporting SET</span><span>  MIN_CLUSTER_COUNT = 1 MAX_CLUSTER_COUNT = 4</span><span>  SCALING_POLICY = STANDARD AUTO_SUSPEND = 600;</span></code></pre><label>Symptom <select id=\"sfSymptom\"><option value=\"heavy\">one query needs more capacity</option><option value=\"queue\">queries queue</option><option value=\"idle\">warehouse is idle</option></select></label><button id=\"sfCapacityStep\">Choose Snowflake control</button><div id=\"sfCapacityWorld\" class=\"world\"></div><p><strong>Failure/fix.</strong> Resizing changes the resources of each cluster. Multi-cluster adds clusters for concurrency and requires the relevant Snowflake edition. Auto-suspend/resume controls idle use; verify caching and latency effects before shortening it.</p>",
+        "markdown": "Vendor SQL is unexecuted. Warehouse size is the per-cluster shape. A multi-cluster warehouse adds clusters for queued concurrency and requires the relevant edition. AUTO_SUSPEND controls idle use.",
+        "javascript": "const sfSymptom=$('sfSymptom'),sfCapacityStep=$('sfCapacityStep'),sfCapacityWorld=$('sfCapacityWorld');function sfCapacityPaint(){const x={heavy:['single cluster','resize warehouse','larger lane'],queue:['queued arrivals','multi-cluster','more lanes'],idle:['empty warehouse','AUTO_SUSPEND','stop billing after threshold']}[sfSymptom.value];sfCapacityWorld.innerHTML='<div class=\"lane\">'+x.map((v,i)=>'<div class=\"box '+(i===1?'good':'')+'\"><strong>'+['Observation','Snowflake control','Effect'][i]+'</strong><br>'+v+'</div>').join('')+'</div><p>Local teaching model; no Snowflake SQL ran.</p>';}sfSymptom.onchange=sfCapacityPaint;sfCapacityStep.onclick=sfCapacityPaint;sfCapacityPaint();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Decision</th><th>Databricks SQL</th><th>Snowflake</th></tr></thead><tbody><tr><td>One heavy query</td><td>Warehouse size + query tuning</td><td>Warehouse size + query tuning</td></tr><tr><td>Concurrent queue</td><td>Cluster scaling range</td><td>Multi-cluster warehouse</td></tr><tr><td>Idle cost</td><td>Auto stop</td><td>AUTO_SUSPEND/AUTO_RESUME</td></tr><tr><td>Boundary</td><td>Serverless availability, DBU policy</td><td>Edition and credit behavior</td></tr></tbody></table>",
+      "markdown": "| Decision | Databricks SQL | Snowflake |\n|---|---|---|\n| Heavy query | warehouse size/tune | warehouse size/tune |\n| Queue | cluster range | multi-cluster |\n| Idle | auto stop | auto suspend/resume |"
+    },
+    "product_questions": [
+      [
+        "Dashboard queries run quickly after starting but wait in line. Common answer?",
+        [
+          "Add concurrency lanes/clusters",
+          "Only make each cluster larger",
+          "Turn off query history"
+        ],
+        0,
+        "Queue pressure is a scale-out problem."
+      ],
+      [
+        "One reconciliation spills with no queue. Common first direction?",
+        [
+          "Increase per-query size or tune it",
+          "Add more identical concurrency clusters only",
+          "Reduce observability"
+        ],
+        0,
+        "One query needs a wider lane."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks SQL warehouse types",
+        "https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-types",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Databricks: create a SQL warehouse",
+        "https://docs.databricks.com/aws/en/compute/sql-warehouse/create",
+        "Living documentation"
+      ],
+      [
+        "Snowflake virtual warehouse overview",
+        "https://docs.snowflake.com/en/user-guide/warehouses-overview",
+        "Living documentation"
+      ],
+      [
+        "Snowflake multi-cluster warehouses",
+        "https://docs.snowflake.com/en/user-guide/warehouses-multicluster",
+        "Living documentation"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-16",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "platform",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Focused SQL warehouse sizing, concurrency scaling, and idle-cost controls; not complete compute or optimization coverage."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "domains": [
+          "account_warehouse_access",
+          "performance"
+        ],
+        "scope": "Focused warehouse sizing, multi-cluster concurrency, and auto-suspend decisions; planning groups only because full COF-C03 objective IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "A savepoint can undo the optional step—not the whole order",
+    "goal": "Use a database savepoint when one optional operation may fail inside a larger transaction.",
+    "tag": "Transactions · partial recovery",
+    "concept": "<p>A cashier rings up an order, then tries to apply optional loyalty points. If the loyalty step fails, you may want to keep the valid order rather than throw away the whole basket. A <strong>savepoint</strong> is a bookmark inside the transaction: roll back work after the bookmark, then continue.</p><p>In PostgreSQL, an error leaves the transaction unable to continue until you roll back to a savepoint (or roll back the transaction).</p>",
+    "example": "<p>The order insert succeeds. The loyalty insert violates a constraint. <code>ROLLBACK TO loyalty_step</code> removes only the loyalty work and clears the error state. The order can still commit, provided that this degraded outcome is allowed by the business contract.</p>",
+    "use_case": {
+      "when": "Use a savepoint when a multi-step database transaction has an explicitly optional sub-step and all work lives in the same transactional database.",
+      "example": "Persist an order even when an optional loyalty-credit write fails, then enqueue a repair record inside the same transaction.",
+      "decision": "Use a savepoint only when partial success is a valid business state. Roll back everything when the failed step is required for correctness, money movement, or invariants."
+    },
+    "practice": "Choose where the failure happens and step through the transaction timeline. Watch which rows survive.",
+    "boundary": "The local model is not a database and does not model locks, isolation, JDBC driver behavior, nested savepoints, or external services. A savepoint cannot atomically undo a Kafka publish or HTTP call.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.meter{height:28px;background:#dce5de;border-radius:7px;overflow:hidden;margin:5px 0}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:120px 1fr 65px;gap:8px;align-items:center;margin:8px 0}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.bar{grid-template-columns:1fr}}</style><label>Failure <select id=\"saveFail\"><option value=\"optional\">optional loyalty insert</option><option value=\"required\">required order insert</option><option value=\"none\">no failure</option></select></label><div id=\"saveWorld\" class=\"world\"></div>",
+    "js": "function paintSave(){const f=saveFail.value,rows=f==='required'?[]:f==='optional'?['order 42','repair marker']:['order 42','loyalty +10'];saveWorld.innerHTML='<div class=\"lane\"><div class=\"box '+(f==='required'?'bad':'good')+'\"><strong>Required order</strong><br>'+(f==='required'?'FAIL → full rollback':'saved')+'</div><div class=\"box '+(f==='optional'?'warn':'good')+'\"><strong>Savepoint</strong><br>'+(f==='optional'?'ROLLBACK TO marker':'not needed')+'</div><div class=\"box good\"><strong>Commit contains</strong><br>'+(rows.join('<br>')||'nothing')+'</div></div>';}saveFail.onchange=paintSave;paintSave();",
+    "questions": [
+      [
+        "After an optional PostgreSQL statement errors, what enables the transaction to continue?",
+        [
+          "Ignore the error",
+          "ROLLBACK TO the earlier savepoint",
+          "Open another browser tab"
+        ],
+        1,
+        "Rolling back to the savepoint restores the transaction state before the optional step."
+      ],
+      [
+        "When should the whole transaction roll back?",
+        [
+          "A required invariant failed",
+          "A cosmetic audit field failed and degradation is approved",
+          "A savepoint has a short name"
+        ],
+        0,
+        "Required business invariants must remain atomic."
+      ],
+      [
+        "Can a database savepoint undo an already-sent HTTP request?",
+        [
+          "Yes",
+          "No",
+          "Only on Tuesdays"
+        ],
+        1,
+        "The savepoint controls work in that database transaction, not external side effects."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "rows=['order:42']\nstate='active'",
+          "note": "The required order write succeeds."
+        },
+        {
+          "code": "savepoint=len(rows)\nrows.append('loyalty:+10')",
+          "note": "Bookmark the transaction, then attempt optional work."
+        },
+        {
+          "code": "state='failed'\nrows=rows[:savepoint]\nstate='active'",
+          "note": "Simulate the error and ROLLBACK TO the bookmark."
+        },
+        {
+          "code": "rows.append('repair:loyalty')\ncommitted=(state=='active')",
+          "note": "Record the degraded outcome and commit the still-valid transaction."
+        }
+      ],
+      "expect": {
+        "committed": true
+      },
+      "limit": "The local model is not a database and does not model locks, isolation, JDBC driver behavior, nested savepoints, or external services. A savepoint cannot atomically undo a Kafka publish or HTTP call.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "rows": [
+              "order:42"
+            ],
+            "state": "active"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "rows": [
+              "order:42",
+              "loyalty:+10"
+            ],
+            "state": "active",
+            "savepoint": 1
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "rows": [
+              "order:42"
+            ],
+            "state": "active",
+            "savepoint": 1
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "rows": [
+              "order:42",
+              "repair:loyalty"
+            ],
+            "state": "active",
+            "savepoint": 1,
+            "committed": true
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.py"
+    },
+    "sources": [
+      [
+        "PostgreSQL 18 SAVEPOINT",
+        "https://www.postgresql.org/docs/current/sql-savepoint.html",
+        "PostgreSQL 18.6 documentation"
+      ],
+      [
+        "PostgreSQL 18 ROLLBACK TO SAVEPOINT",
+        "https://www.postgresql.org/docs/current/sql-rollback-to.html",
+        "PostgreSQL 18.6 documentation"
+      ],
+      [
+        "PostgreSQL transactions tutorial",
+        "https://www.postgresql.org/docs/current/tutorial-transactions.html",
+        "PostgreSQL 18.6 documentation"
+      ]
+    ],
+    "visual_explanation": "The required order sits before the bookmark. Only work to the right of the bookmark is erased. If the required order fails, the picture deliberately removes every committed row.",
+    "written_questions": [
+      "Which optional database step in your service has a documented degraded outcome?",
+      "What external side effect would make a savepoint unsafe here?"
+    ],
+    "source_checked_on": "2026-10-16"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Show unit cost before you charge teams",
+    "goal": "Turn shared-platform spend into a decision metric without hiding unallocated cost.",
+    "tag": "FinOps · technical governance",
+    "concept": "<p>A restaurant bill is not useful for improvement until you know what was ordered. Likewise, “the data platform cost $420k” does not say whether efficiency improved while usage doubled. Pair cost with a business output, such as successful terabytes processed.</p><p><strong>Showback</strong> makes costs visible. <strong>Chargeback</strong> bills teams. Start with showback while tags and shared-cost allocation are still being repaired.</p>",
+    "example": "<p>Team A costs $12,000 and successfully processes 600 TB: $20/TB. Team B costs $8,000 for 200 TB: $40/TB. Another $5,000 is unallocated. Do not smear that unknown cost across teams and call it precise; publish the gap and fix ownership.</p>",
+    "use_case": {
+      "when": "Use unit-cost showback when a shared platform must connect engineering choices to business output.",
+      "example": "Compare monthly Spark platform cost per successful terabyte by domain, while exposing untagged shared services separately.",
+      "decision": "Move toward chargeback only when ownership, allocation rules, dispute paths, and unit definitions are stable enough that teams can act on the numbers."
+    },
+    "practice": "Change Team B output and unallocated cost. Watch total spend stay the same while decision quality changes.",
+    "boundary": "The model assumes one synthetic unit and simple direct allocation. Real programs need amortization, commitments, shared services, failed work, data-quality rules, and anti-gaming controls.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.meter{height:28px;background:#dce5de;border-radius:7px;overflow:hidden;margin:5px 0}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:120px 1fr 65px;gap:8px;align-items:center;margin:8px 0}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.bar{grid-template-columns:1fr}}</style><label>Team B successful TB <input id=\"teamBTb\" type=\"range\" min=\"100\" max=\"800\" step=\"100\" value=\"200\"></label><label>Unallocated cost $<input id=\"unknownCost\" type=\"range\" min=\"0\" max=\"10000\" step=\"1000\" value=\"5000\"></label><div id=\"costWorld\" class=\"world\"></div>",
+    "js": "function paintCost(){const b=+teamBTb.value,u=+unknownCost.value,total=12000+8000+u;costWorld.innerHTML='<div class=\"bar\"><strong>Team A</strong><div class=\"meter\"><span style=\"width:48%\"></span></div><span>$20/TB</span></div><div class=\"bar\"><strong>Team B</strong><div class=\"meter\"><span style=\"width:32%\"></span></div><span>$'+(8000/b).toFixed(0)+'/TB</span></div><div class=\"bar\"><strong>Unallocated</strong><div class=\"meter\"><span style=\"width:'+Math.round(100*u/Math.max(total,1))+'%\"></span></div><span>$'+u+'</span></div><p>Total $'+total+'. Unallocated cost is shown, not silently reassigned.</p>';}teamBTb.oninput=paintCost;unknownCost.oninput=paintCost;paintCost();",
+    "questions": [
+      [
+        "Why pair cost with successful TB?",
+        [
+          "To connect spend with useful output",
+          "To make tags unnecessary",
+          "To guarantee fairness"
+        ],
+        0,
+        "A unit metric shows efficiency as workload volume changes."
+      ],
+      [
+        "What should happen to unallocated cost?",
+        [
+          "Hide it",
+          "Expose it and improve attribution",
+          "Split it randomly"
+        ],
+        1,
+        "Visible uncertainty creates a repair target without false precision."
+      ],
+      [
+        "When is chargeback premature?",
+        [
+          "Allocation rules are unstable and disputed",
+          "Unit definitions are clear",
+          "Teams can influence the metric"
+        ],
+        0,
+        "Billing on weak attribution creates distrust and bad incentives."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "cost_a=12000\ntb_a=600\ncost_b=8000\ntb_b=200",
+          "note": "Start with allocated spend and successful output."
+        },
+        {
+          "code": "unit_a=cost_a/tb_a\nunit_b=cost_b/tb_b",
+          "note": "Compute comparable unit costs."
+        },
+        {
+          "code": "unallocated=5000\ntotal=cost_a+cost_b+unallocated",
+          "note": "Keep unknown shared cost visible."
+        },
+        {
+          "code": "allocation_coverage=(cost_a+cost_b)/total",
+          "note": "Measure confidence in the showback before using it as a bill."
+        }
+      ],
+      "expect": {
+        "allocation_coverage": 0.8
+      },
+      "limit": "The model assumes one synthetic unit and simple direct allocation. Real programs need amortization, commitments, shared services, failed work, data-quality rules, and anti-gaming controls.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "cost_a": 12000,
+            "tb_a": 600,
+            "cost_b": 8000,
+            "tb_b": 200
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "cost_a": 12000,
+            "tb_a": 600,
+            "cost_b": 8000,
+            "tb_b": 200,
+            "unit_a": 20.0,
+            "unit_b": 40.0
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "cost_a": 12000,
+            "tb_a": 600,
+            "cost_b": 8000,
+            "tb_b": 200,
+            "unit_a": 20.0,
+            "unit_b": 40.0,
+            "unallocated": 5000,
+            "total": 25000
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "cost_a": 12000,
+            "tb_a": 600,
+            "cost_b": 8000,
+            "tb_b": 200,
+            "unit_a": 20.0,
+            "unit_b": 40.0,
+            "unallocated": 5000,
+            "total": 25000,
+            "allocation_coverage": 0.8
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Well-Architected: define cost optimization KPIs",
+        "https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/cost_monitor_usage_define_kpi.html",
+        "Living guidance"
+      ],
+      [
+        "AWS cost allocation tags",
+        "https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/custom-tags.html",
+        "Living documentation"
+      ],
+      [
+        "AWS cost allocation tags best practices",
+        "https://docs.aws.amazon.com/whitepapers/latest/tagging-best-practices/cost-allocation-tags.html",
+        "Living whitepaper"
+      ]
+    ],
+    "visual_explanation": "The bars separate assigned teams from the unknown pool. The unit value changes with successful output; the dollar bar does not pretend that higher utilization costs less.",
+    "written_questions": [
+      "Which denominator would be hardest for teams to game on your platform?",
+      "What allocation-coverage threshold would you require before chargeback?"
+    ],
+    "source_checked_on": "2026-10-16"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Slice the eval before the average hides a dangerous failure",
+    "goal": "Stratify agent evaluations so rare, high-risk tool cases cannot disappear inside an overall pass rate.",
+    "tag": "Harness engineering · sliced evaluation",
+    "concept": "<p>An average hospital wait time can look good while emergency patients wait dangerously long. Agent pass rates have the same trap. If 95 read-only cases pass and 5 payment cases fail, the overall score is still 95%.</p><p>Define important slices before running the eval: tool risk, customer tier, language, document length, or failure mode. Keep the total, but gate the release on critical slices too.</p>",
+    "example": "<p>Candidate B passes 95/100 cases. The table reveals read-only tasks at 100% and payment tasks at 0%. A “≥90% overall” gate would ship it; a “≥90% overall and ≥80% payment” gate blocks it.</p>",
+    "use_case": {
+      "when": "Use sliced evaluation whenever failures have unequal consequences or the production mix contains important minority cases.",
+      "example": "Evaluate a support agent separately on read-only account lookup and money-moving refund tools.",
+      "decision": "Predefine operationally meaningful slices and minimum sample sizes. Use the overall score for trend, but make high-risk slice thresholds independent release gates."
+    },
+    "practice": "Change the number of payment successes. Compare the overall bar with the payment slice gate.",
+    "boundary": "This model uses deterministic binary labels and tiny synthetic slices. Real evals need representative sampling, grader validation, uncertainty, contamination checks, and manual review of consequential failures.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.meter{height:28px;background:#dce5de;border-radius:7px;overflow:hidden;margin:5px 0}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:120px 1fr 65px;gap:8px;align-items:center;margin:8px 0}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.bar{grid-template-columns:1fr}}</style><label>Payment passes out of 5 <input id=\"paymentPass\" type=\"range\" min=\"0\" max=\"5\" value=\"0\"></label><div id=\"sliceWorld\" class=\"world\"></div>",
+    "js": "function paintSlice(){const p=+paymentPass.value,read=95,overall=read+p,pct=20*p,ok=overall>=90&&pct>=80;sliceWorld.innerHTML='<div class=\"bar\"><strong>Overall</strong><div class=\"meter\"><span style=\"width:'+overall+'%\"></span></div><span>'+overall+'%</span></div><div class=\"bar\"><strong>Payments</strong><div class=\"meter\"><span style=\"width:'+pct+'%\"></span></div><span>'+pct+'%</span></div><p class=\"'+(ok?'good':'bad')+' box\"><strong>Release gate:</strong> '+(ok?'PASS':'BLOCK')+' — both thresholds must pass.</p>';}paymentPass.oninput=paintSlice;paintSlice();",
+    "questions": [
+      [
+        "Why can a 95% overall rate still be unsafe?",
+        [
+          "Rare critical cases may all fail",
+          "Percentages are never useful",
+          "All tools are identical"
+        ],
+        0,
+        "A majority slice can dominate the aggregate."
+      ],
+      [
+        "When should slice thresholds be chosen?",
+        [
+          "Before inspecting candidate results",
+          "After finding the best-looking score",
+          "Never"
+        ],
+        0,
+        "Predefinition reduces post-hoc metric shopping."
+      ],
+      [
+        "What if a critical slice has only two cases?",
+        [
+          "Claim certainty",
+          "Treat it as weak evidence and add representative cases",
+          "Delete the slice"
+        ],
+        1,
+        "Small samples cannot support a strong readiness claim."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "read_only={\"pass\":95,\"total\":95}\npayments={\"pass\":0,\"total\":5}",
+          "note": "Separate the common and high-risk slices."
+        },
+        {
+          "code": "overall=(read_only[\"pass\"]+payments[\"pass\"])/(read_only[\"total\"]+payments[\"total\"])",
+          "note": "The aggregate looks strong because read-only cases dominate."
+        },
+        {
+          "code": "payment_rate=payments[\"pass\"]/payments[\"total\"]",
+          "note": "The critical slice reveals total failure."
+        },
+        {
+          "code": "release=(overall>=0.90 and payment_rate>=0.80)",
+          "note": "Require both an overall and a risk-slice gate."
+        }
+      ],
+      "expect": {
+        "release": false
+      },
+      "limit": "This model uses deterministic binary labels and tiny synthetic slices. Real evals need representative sampling, grader validation, uncertainty, contamination checks, and manual review of consequential failures.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "read_only": {
+              "pass": 95,
+              "total": 95
+            },
+            "payments": {
+              "pass": 0,
+              "total": 5
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "read_only": {
+              "pass": 95,
+              "total": 95
+            },
+            "payments": {
+              "pass": 0,
+              "total": 5
+            },
+            "overall": 0.95
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "read_only": {
+              "pass": 95,
+              "total": 95
+            },
+            "payments": {
+              "pass": 0,
+              "total": 5
+            },
+            "overall": 0.95,
+            "payment_rate": 0.0
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "read_only": {
+              "pass": 95,
+              "total": 95
+            },
+            "payments": {
+              "pass": 0,
+              "total": 5
+            },
+            "overall": 0.95,
+            "payment_rate": 0.0,
+            "release": false
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI evaluation best practices",
+        "https://platform.openai.com/docs/guides/evaluation-best-practices",
+        "Living documentation"
+      ],
+      [
+        "OpenAI Evals guide",
+        "https://platform.openai.com/docs/guides/evals",
+        "Living documentation"
+      ],
+      [
+        "OpenAI Graders API",
+        "https://platform.openai.com/docs/api-reference/graders",
+        "Living API reference"
+      ]
+    ],
+    "visual_explanation": "The two bars share the same 0–100% scale. The release box combines them with AND, making it visually impossible for the large safe slice to erase the small risky slice.",
+    "written_questions": [
+      "Which production slice would block your agent despite a strong overall score?",
+      "How would you detect that a grader is systematically lenient on one slice?"
+    ],
+    "source_checked_on": "2026-10-16"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "CXL memory pooling: lend capacity instead of stranding it",
+    "goal": "Understand the promise and boundary of cache-coherent shared memory pools for uneven server demand.",
+    "tag": "Standards deep dive · CXL 4.0 current",
+    "concept": "<p>Imagine four apartments, each keeping a private guest room “just in case.” Most rooms sit empty, while one apartment sometimes needs three. A shared guest floor could reduce stranded capacity.</p><p>CXL is a cache-coherent interconnect for processors, memory expansion, and accelerators. A memory pool can let hosts draw capacity through a fabric, but remote pooled memory has different latency, bandwidth, topology, failure, and software-management properties from local DIMMs.</p>",
+    "example": "<p>Four hosts each own 128 GB but use 64, 80, 120, and 40 GB. That leaves 208 GB stranded in separate boxes. A 128 GB shared pool could cover a 64 GB burst for host 3 without installing 64 GB in every host.</p>",
+    "use_case": {
+      "when": "Consider CXL memory expansion or pooling for fleets with uneven, expensive memory demand and software that can tolerate a different memory tier.",
+      "example": "An inference fleet has bursty KV-cache demand; hosts borrow pooled capacity instead of reserving peak DRAM everywhere.",
+      "decision": "Adopt only after benchmarking workload locality and validating fabric, NUMA, RAS, security, orchestration, and failure behavior. Local memory remains the safer latency baseline."
+    },
+    "practice": "Move one host’s burst. See whether fixed local memory fails and whether the pool covers it.",
+    "boundary": "This is an arithmetic capacity model, not a CXL simulator or performance claim. It ignores fabric generations, latency, bandwidth, coherency traffic, switches, NUMA placement, security, operating-system support, and vendor implementation maturity.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.meter{height:28px;background:#dce5de;border-radius:7px;overflow:hidden;margin:5px 0}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:120px 1fr 65px;gap:8px;align-items:center;margin:8px 0}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.bar{grid-template-columns:1fr}}</style><label>Host 3 burst GB <input id=\"burstGb\" type=\"range\" min=\"0\" max=\"128\" step=\"16\" value=\"64\"></label><div id=\"cxlWorld\" class=\"world\"></div>",
+    "js": "function paintCxl(){const b=+burstGb.value,localFree=8,pool=128,localOk=b<=localFree,poolOk=b<=localFree+pool;cxlWorld.innerHTML='<div class=\"lane\"><div class=\"box\"><strong>Host 3 local free</strong><br>'+localFree+' GB</div><div class=\"box '+(localOk?'good':'bad')+'\"><strong>Local-only burst</strong><br>'+(localOk?'fits':'short '+(b-localFree)+' GB')+'</div><div class=\"box warn\"><strong>CXL pool</strong><br>'+pool+' GB shared</div><div class=\"box '+(poolOk?'good':'bad')+'\"><strong>Pooled result</strong><br>'+(poolOk?'capacity fits; benchmark latency':'pool exhausted')+'</div></div>';}burstGb.oninput=paintCxl;paintCxl();",
+    "questions": [
+      [
+        "What problem does a memory pool mainly target?",
+        [
+          "Stranded capacity across hosts",
+          "SQL injection",
+          "Clock skew"
+        ],
+        0,
+        "A pool can shift capacity toward hosts that need it."
+      ],
+      [
+        "Does capacity fit prove performance fit?",
+        [
+          "Yes",
+          "No—latency, bandwidth, topology, and software still matter",
+          "Only for 128 GB"
+        ],
+        1,
+        "Remote/tiered memory behavior must be measured."
+      ],
+      [
+        "What is the current public specification generation on the consortium page checked today?",
+        [
+          "CXL 4.0",
+          "CXL 1.0 only",
+          "No specification"
+        ],
+        0,
+        "The consortium page offers an evaluation copy of CXL 4.0 dated 2026."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "hosts_used=[64,80,120,40]\nlocal_capacity=128",
+          "note": "Model uneven memory use across four fixed hosts."
+        },
+        {
+          "code": "stranded=sum(local_capacity-x for x in hosts_used)",
+          "note": "Unused local capacity totals 208 GB but cannot move by itself."
+        },
+        {
+          "code": "burst=64\npool=128\nlocal_free=local_capacity-hosts_used[2]",
+          "note": "Host 3 has only 8 GB free before a 64 GB burst."
+        },
+        {
+          "code": "fits_with_pool=(burst<=local_free+pool)",
+          "note": "The pool solves the capacity arithmetic, not the performance proof."
+        }
+      ],
+      "expect": {
+        "fits_with_pool": true
+      },
+      "limit": "This is an arithmetic capacity model, not a CXL simulator or performance claim. It ignores fabric generations, latency, bandwidth, coherency traffic, switches, NUMA placement, security, operating-system support, and vendor implementation maturity.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "hosts_used": [
+              64,
+              80,
+              120,
+              40
+            ],
+            "local_capacity": 128
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "hosts_used": [
+              64,
+              80,
+              120,
+              40
+            ],
+            "local_capacity": 128,
+            "stranded": 208
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "hosts_used": [
+              64,
+              80,
+              120,
+              40
+            ],
+            "local_capacity": 128,
+            "stranded": 208,
+            "burst": 64,
+            "pool": 128,
+            "local_free": 8
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "hosts_used": [
+              64,
+              80,
+              120,
+              40
+            ],
+            "local_capacity": 128,
+            "stranded": 208,
+            "burst": 64,
+            "pool": 128,
+            "local_free": 8,
+            "fits_with_pool": true
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Compute Express Link: About CXL",
+        "https://computeexpresslink.org/about-cxl/",
+        "Consortium overview; checked October 16, 2026"
+      ],
+      [
+        "CXL Specification page",
+        "https://computeexpresslink.org/cxl-specification/",
+        "CXL 4.0 evaluation-copy page dated February 12, 2026"
+      ],
+      [
+        "CXL Consortium homepage",
+        "https://computeexpresslink.org/",
+        "CXL 4.0 availability and feature summary; checked October 16, 2026"
+      ]
+    ],
+    "visual_explanation": "The picture keeps local free memory, the failed local-only burst, and the shared pool separate. Green means capacity arithmetic works—not that latency or production readiness has been proven.",
+    "written_questions": [
+      "Which workload metric would tell you that pooled memory latency is acceptable?",
+      "Which fabric failure should your capacity scheduler rehearse?"
+    ],
+    "source_checked_on": "2026-10-16"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "Give every matrix job its own artifact name",
+    "goal": "Prevent immutable artifact-name collisions when parallel jobs upload results.",
+    "tag": "Artifacts · matrix workflows",
+    "concept": "<p>Four travelers cannot check four suitcases under one claim ticket and expect to retrieve the right bag. A matrix workflow has the same problem. Each job must upload to a unique artifact name.</p><p>With <code>upload-artifact@v4</code>, artifacts are immutable. Uploading multiple jobs to the same name is not a safe way to merge their files.</p>",
+    "example": "<p>Linux and Windows jobs both upload <code>test-results</code>. The shared name collides. Use <code>test-results-${{ matrix.os }}</code>; a later aggregation job downloads each named artifact and combines reports explicitly.</p>",
+    "use_case": {
+      "when": "Use matrix-qualified artifact names whenever parallel GitHub Actions jobs upload logs, binaries, coverage, or test reports.",
+      "example": "Three operating-system jobs publish JUnit XML before one report job aggregates them.",
+      "decision": "Treat each job output as immutable evidence. Name it with matrix dimensions and optionally run attempt; aggregate in a separate job rather than writing concurrently."
+    },
+    "practice": "Change the matrix size and naming policy. Watch duplicate names collapse into one collision group.",
+    "boundary": "The browser does not run Actions or upload files. Real limits include retention, permissions, hidden files, compression, artifact IDs, action-version behavior, and naming constraints.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.meter{height:28px;background:#dce5de;border-radius:7px;overflow:hidden;margin:5px 0}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:120px 1fr 65px;gap:8px;align-items:center;margin:8px 0}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.bar{grid-template-columns:1fr}}</style><label>Matrix jobs <input id=\"matrixJobs\" type=\"range\" min=\"1\" max=\"4\" value=\"3\"></label><label><input id=\"uniqueNames\" type=\"checkbox\"> include matrix.os in name</label><div id=\"artifactWorld\" class=\"world\"></div>",
+    "js": "function paintArtifacts(){const n=+matrixJobs.value,u=uniqueNames.checked,os=['ubuntu','windows','macos','arm'];const names=os.slice(0,n).map(x=>u?'test-results-'+x:'test-results'),distinct=new Set(names).size;artifactWorld.innerHTML='<div class=\"lane\">'+names.map((x,i)=>'<div class=\"box '+(distinct<n?'bad':'good')+'\"><strong>job '+(i+1)+'</strong><br>'+x+'</div>').join('')+'</div><p>'+(distinct<n?'COLLISION: '+n+' uploads target '+distinct+' name.':'SAFE: every parallel job has a unique immutable artifact.')+'</p>';}matrixJobs.oninput=paintArtifacts;uniqueNames.onchange=paintArtifacts;paintArtifacts();",
+    "questions": [
+      [
+        "Why is one name unsafe across v4 matrix uploads?",
+        [
+          "Artifacts are immutable and parallel jobs collide",
+          "YAML forbids dashes",
+          "Artifacts execute automatically"
+        ],
+        0,
+        "Each job should create its own artifact."
+      ],
+      [
+        "Best matrix name?",
+        [
+          "test-results",
+          "test-results-${{ matrix.os }}",
+          "results-${{ secrets.TOKEN }}"
+        ],
+        1,
+        "The matrix dimension creates predictable uniqueness without exposing secrets."
+      ],
+      [
+        "How should reports be combined?",
+        [
+          "Concurrent writes to one artifact",
+          "A later aggregation job downloads named artifacts",
+          "Delete all but one"
+        ],
+        1,
+        "Aggregation should be an explicit downstream step."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "oses=['ubuntu','windows','macos']\nunsafe=['test-results' for os in oses]",
+          "note": "All parallel jobs choose the same artifact name."
+        },
+        {
+          "code": "unsafe_unique=len(set(unsafe))",
+          "note": "Three jobs collapse to one name."
+        },
+        {
+          "code": "safe=[f'test-results-{os}' for os in oses]",
+          "note": "Include the matrix dimension."
+        },
+        {
+          "code": "safe_unique=len(set(safe))",
+          "note": "Each immutable upload now has a distinct name."
+        }
+      ],
+      "expect": {
+        "safe_unique": 3
+      },
+      "limit": "The browser does not run Actions or upload files. Real limits include retention, permissions, hidden files, compression, artifact IDs, action-version behavior, and naming constraints.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "oses": [
+              "ubuntu",
+              "windows",
+              "macos"
+            ],
+            "unsafe": [
+              "test-results",
+              "test-results",
+              "test-results"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "oses": [
+              "ubuntu",
+              "windows",
+              "macos"
+            ],
+            "unsafe": [
+              "test-results",
+              "test-results",
+              "test-results"
+            ],
+            "unsafe_unique": 1
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "oses": [
+              "ubuntu",
+              "windows",
+              "macos"
+            ],
+            "unsafe": [
+              "test-results",
+              "test-results",
+              "test-results"
+            ],
+            "unsafe_unique": 1,
+            "safe": [
+              "test-results-ubuntu",
+              "test-results-windows",
+              "test-results-macos"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "oses": [
+              "ubuntu",
+              "windows",
+              "macos"
+            ],
+            "unsafe": [
+              "test-results",
+              "test-results",
+              "test-results"
+            ],
+            "unsafe_unique": 1,
+            "safe": [
+              "test-results-ubuntu",
+              "test-results-windows",
+              "test-results-macos"
+            ],
+            "safe_unique": 3
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions: store and share data with workflow artifacts",
+        "https://docs.github.com/en/actions/tutorials/store-and-share-data",
+        "Living documentation; v4 immutability"
+      ],
+      [
+        "GitHub Actions contexts reference",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/contexts",
+        "Living documentation"
+      ],
+      [
+        "actions/upload-artifact",
+        "https://github.com/actions/upload-artifact",
+        "Official action repository"
+      ]
+    ],
+    "visual_explanation": "Each box is one parallel uploader. Red boxes repeat the same claim ticket; green boxes include the matrix value so the later collector can name every input.",
+    "written_questions": [
+      "Which matrix dimensions belong in your artifact identity?",
+      "How will the aggregation job detect a missing artifact rather than silently publish a partial report?"
+    ],
+    "source_checked_on": "2026-10-16"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Budget GraphQL breadth before nested lists multiply",
+    "goal": "Estimate nodes in a nested query, then paginate the level that drives growth.",
+    "tag": "GraphQL · query cost",
+    "concept": "<p>Ordering “ten boxes, each with ten folders, each with ten pages” is not ten things—it is more than a thousand nodes. GraphQL lets clients choose shape, so nested list widths multiply.</p><p>Depth alone is not the whole problem. A shallow query with broad connections can still be expensive. Require pagination and apply node, point, time, or custom complexity limits.</p>",
+    "example": "<p>A GitHub-style query asks for 10 repositories, 10 issues per repository, and 10 comments per issue: 10 repositories + 100 issues + 1,000 comments = 1,110 returned nodes, before other objects.</p>",
+    "use_case": {
+      "when": "Use query-cost controls on GraphQL APIs that expose nested or expensive fields to varied clients.",
+      "example": "A dashboard asks for repositories, issues, and comments in one request and can accidentally multiply work.",
+      "decision": "Set field-aware budgets, require pagination on connections, and return a clear error before expensive execution. Prefer smaller pages for nested queries even when the maximum page size is higher."
+    },
+    "practice": "Change list widths. The visual calculates each layer and shows which pagination cut reduces the total most.",
+    "boundary": "This arithmetic model treats every node equally. Real GraphQL cost depends on resolvers, caches, fan-out, authorization, database plans, federation, timeouts, and provider-specific formulas.",
+    "sim": "<style>.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.active{outline:4px solid #c98218}.meter{height:28px;background:#dce5de;border-radius:7px;overflow:hidden;margin:5px 0}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:120px 1fr 65px;gap:8px;align-items:center;margin:8px 0}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:520px){.lane{grid-template-columns:1fr}.bar{grid-template-columns:1fr}}</style><label>Repositories <input id=\"repoN\" type=\"range\" min=\"1\" max=\"20\" value=\"10\"></label><label>Issues each <input id=\"issueN\" type=\"range\" min=\"1\" max=\"20\" value=\"10\"></label><label>Comments each <input id=\"commentN\" type=\"range\" min=\"1\" max=\"20\" value=\"10\"></label><div id=\"gqlWorld\" class=\"world\"></div>",
+    "js": "function paintGql(){const r=+repoN.value,i=+issueN.value,c=+commentN.value,issues=r*i,comments=issues*c,total=r+issues+comments,budget=1000;gqlWorld.innerHTML='<div class=\"bar\"><strong>Repositories</strong><div class=\"meter\"><span style=\"width:'+Math.min(100,r/20*100)+'%\"></span></div><span>'+r+'</span></div><div class=\"bar\"><strong>Issues</strong><div class=\"meter\"><span style=\"width:'+Math.min(100,issues/budget*100)+'%\"></span></div><span>'+issues+'</span></div><div class=\"bar\"><strong>Comments</strong><div class=\"meter\"><span style=\"width:'+Math.min(100,comments/budget*100)+'%\"></span></div><span>'+comments+'</span></div><p class=\"box '+(total>budget?'bad':'good')+'\"><strong>Total '+total+'</strong> · teaching budget '+budget+' · '+(total>budget?'reject or paginate':'within budget')+'</p>';}repoN.oninput=paintGql;issueN.oninput=paintGql;commentN.oninput=paintGql;paintGql();",
+    "questions": [
+      [
+        "10 repos × 10 issues × 10 comments produces how many comment nodes?",
+        [
+          "30",
+          "100",
+          "1000"
+        ],
+        2,
+        "Nested list widths multiply."
+      ],
+      [
+        "Why is a depth limit alone insufficient?",
+        [
+          "A shallow query can still request broad lists",
+          "Depth never matters",
+          "GraphQL has no lists"
+        ],
+        0,
+        "Breadth can dominate even at modest depth."
+      ],
+      [
+        "What should the server do before executing an over-budget query?",
+        [
+          "Return a documented cost/limit error",
+          "Run it forever",
+          "Ignore authorization"
+        ],
+        0,
+        "Admission control should reject work before expensive fan-out."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "repos=10\nissues_each=10\ncomments_each=10",
+          "note": "Set the width of each connection."
+        },
+        {
+          "code": "issue_nodes=repos*issues_each",
+          "note": "Issues multiply by repository count."
+        },
+        {
+          "code": "comment_nodes=issue_nodes*comments_each",
+          "note": "Comments multiply again."
+        },
+        {
+          "code": "total_nodes=repos+issue_nodes+comment_nodes\nwithin_budget=(total_nodes<=1000)",
+          "note": "The 1,110-node shape exceeds the synthetic budget."
+        }
+      ],
+      "expect": {
+        "within_budget": false
+      },
+      "limit": "This arithmetic model treats every node equally. Real GraphQL cost depends on resolvers, caches, fan-out, authorization, database plans, federation, timeouts, and provider-specific formulas.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "repos": 10,
+            "issues_each": 10,
+            "comments_each": 10
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "repos": 10,
+            "issues_each": 10,
+            "comments_each": 10,
+            "issue_nodes": 100
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "repos": 10,
+            "issues_each": 10,
+            "comments_each": 10,
+            "issue_nodes": 100,
+            "comment_nodes": 1000
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "repos": 10,
+            "issues_each": 10,
+            "comments_each": 10,
+            "issue_nodes": 100,
+            "comment_nodes": 1000,
+            "total_nodes": 1110,
+            "within_budget": false
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "GitHub GraphQL rate and query limits",
+        "https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api",
+        "Living documentation"
+      ],
+      [
+        "GitHub GraphQL pagination guide",
+        "https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api",
+        "Living documentation"
+      ],
+      [
+        "GraphQL specification",
+        "https://spec.graphql.org/",
+        "Living specification"
+      ]
+    ],
+    "visual_explanation": "The bars are counts by layer, not latency claims. The comments bar grows from both parent widths, making the multiplicative source visible rather than drawing a generic request arrow.",
+    "written_questions": [
+      "Which fields in your schema need higher complexity weights than a plain node count?",
+      "What partial-data behavior should a client expect after a cost rejection?"
+    ],
+    "source_checked_on": "2026-10-16"
+  }
+]
