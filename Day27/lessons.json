@@ -1,0 +1,1187 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Choose one source winner before MERGE",
+    "goal": "Make MERGE deterministic by reducing duplicate source events to one winner for each business key.",
+    "tag": "Focused certification lesson · cycle 2, position 4",
+    "concept": "<p>Think of a race with one podium place. If two runners both arrive for “order 42,” the referee must choose one winner <em>before</em> updating the official record. A database <code>MERGE</code> has the same need: each target row should see one source winner.</p><p>The safe shape is <strong>raw events → rank within each business key → keep rank 1 → MERGE</strong>. “Latest” needs a complete, deterministic order: event time plus an ingestion sequence or event ID for ties.</p>",
+    "example": "<p>Order 42 arrives twice: <code>PACKED at 10:02, sequence 7</code> and <code>SHIPPED at 10:05, sequence 9</code>. Rank by <code>event_time DESC, ingest_sequence DESC</code>. SHIPPED becomes row 1. The MERGE sees only that row, so the target moves from PACKED to SHIPPED once.</p><p>A second order can be processed in the same batch because ranking is partitioned by <code>order_id</code>.</p>",
+    "use_case": {
+      "when": "Use this before an upsert whenever one micro-batch or staged load may contain two records for the same target key.",
+      "example": "A Kafka retry and a late shipment event both put order 42 into the same landing batch.",
+      "decision": "Define the business key, the winning order, and the tie-breaker explicitly. Reject or quarantine rows when the system cannot select a truthful winner."
+    },
+    "practice": "Change the second event time and tie-breaker. The podium shows exactly which record reaches MERGE.",
+    "boundary": "The browser ranks three synthetic rows; it does not execute Delta Lake or Snowflake. Real correctness also depends on key quality, timestamp semantics, late-event policy, concurrent writers, isolation, schema evolution, and product/runtime versions. Vendor SQL is unexecuted.",
+    "sim": "<style>\n.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.mutedbox{background:#e7ece9}.arrow{text-align:center;font-weight:800;font-size:1.25rem}.stack{display:grid;gap:8px}.event{display:grid;grid-template-columns:70px 1fr 120px;gap:8px;align-items:center;border:1px solid #9db3aa;border-radius:9px;padding:8px}.winner{outline:4px solid #2d816c;background:#dff3ce}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.token{display:inline-block;padding:6px 9px;border-radius:8px;background:#dcebe3;margin:3px}.meter{height:24px;background:#dce5de;border-radius:7px;overflow:hidden}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:130px 1fr 70px;gap:8px;align-items:center;margin:8px 0}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:560px){.lane{grid-template-columns:1fr}.event,.bar{grid-template-columns:1fr}}\n</style><label>Second event minute <input id=\"eventMinute\" type=\"range\" min=\"1\" max=\"8\" value=\"5\"></label><label>Tie-breaker sequence <input id=\"eventSeq\" type=\"range\" min=\"1\" max=\"12\" value=\"9\"></label><div id=\"winnerWorld\" class=\"world\" aria-live=\"polite\"></div>",
+    "js": "function paintWinner(){const minute=+eventMinute.value,seq=+eventSeq.value;const rows=[{status:'PACKED',minute:2,seq:7},{status:'SHIPPED',minute,seq}].sort((a,b)=>b.minute-a.minute||b.seq-a.seq);winnerWorld.innerHTML='<div class=\"stack\">'+rows.map((r,i)=>'<div class=\"event '+(i===0?'winner':'')+'\"><strong>rank '+(i+1)+'</strong><span>order 42 · '+r.status+' · 10:0'+r.minute+'</span><span>sequence '+r.seq+'</span></div>').join('')+'</div><p><strong>MERGE receives:</strong> '+rows[0].status+' only. '+(rows[0].minute===rows[1].minute?'Timestamp tied; sequence decides.':'Newest event time decides.')+'</p>';}eventMinute.oninput=paintWinner;eventSeq.oninput=paintWinner;paintWinner();",
+    "questions": [
+      [
+        "Why rank source rows before MERGE?",
+        [
+          "To make one deterministic source winner per target key",
+          "To disable transactions",
+          "To make every row rank 1"
+        ],
+        0,
+        "One target row should not receive competing source actions."
+      ],
+      [
+        "Two events have the same event time. What is still needed?",
+        [
+          "A deterministic tie-breaker",
+          "A random choice",
+          "A larger warehouse only"
+        ],
+        0,
+        "A complete ordering prevents a different winner on a later run."
+      ],
+      [
+        "Can source deduplication repair a wrong business key?",
+        [
+          "Yes",
+          "No",
+          "Only in Snowflake"
+        ],
+        1,
+        "Ranking cannot fix an identity model that groups unrelated records."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "events=[{'status':'PACKED','minute':2,'seq':7},{'status':'SHIPPED','minute':5,'seq':9}]",
+          "note": "Two source rows compete for order 42."
+        },
+        {
+          "code": "ranked=sorted(events,key=lambda e:(e['minute'],e['seq']),reverse=True)",
+          "note": "Order by event time and then the deterministic ingestion sequence."
+        },
+        {
+          "code": "winner=ranked[0]",
+          "note": "Keep rank 1 before touching the target."
+        },
+        {
+          "code": "target={'order_id':42,'status':winner['status']}",
+          "note": "MERGE now receives one source action for the target key."
+        }
+      ],
+      "expect": {
+        "target": {
+          "order_id": 42,
+          "status": "SHIPPED"
+        }
+      },
+      "limit": "The browser ranks three synthetic rows; it does not execute Delta Lake or Snowflake. Real correctness also depends on key quality, timestamp semantics, late-event policy, concurrent writers, isolation, schema evolution, and product/runtime versions. Vendor SQL is unexecuted.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "events": [
+              {
+                "status": "PACKED",
+                "minute": 2,
+                "seq": 7
+              },
+              {
+                "status": "SHIPPED",
+                "minute": 5,
+                "seq": 9
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "events": [
+              {
+                "status": "PACKED",
+                "minute": 2,
+                "seq": 7
+              },
+              {
+                "status": "SHIPPED",
+                "minute": 5,
+                "seq": 9
+              }
+            ],
+            "ranked": [
+              {
+                "status": "SHIPPED",
+                "minute": 5,
+                "seq": 9
+              },
+              {
+                "status": "PACKED",
+                "minute": 2,
+                "seq": 7
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "events": [
+              {
+                "status": "PACKED",
+                "minute": 2,
+                "seq": 7
+              },
+              {
+                "status": "SHIPPED",
+                "minute": 5,
+                "seq": 9
+              }
+            ],
+            "ranked": [
+              {
+                "status": "SHIPPED",
+                "minute": 5,
+                "seq": 9
+              },
+              {
+                "status": "PACKED",
+                "minute": 2,
+                "seq": 7
+              }
+            ],
+            "winner": {
+              "status": "SHIPPED",
+              "minute": 5,
+              "seq": 9
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "events": [
+              {
+                "status": "PACKED",
+                "minute": 2,
+                "seq": 7
+              },
+              {
+                "status": "SHIPPED",
+                "minute": 5,
+                "seq": 9
+              }
+            ],
+            "ranked": [
+              {
+                "status": "SHIPPED",
+                "minute": 5,
+                "seq": 9
+              },
+              {
+                "status": "PACKED",
+                "minute": 2,
+                "seq": 7
+              }
+            ],
+            "winner": {
+              "status": "SHIPPED",
+              "minute": 5,
+              "seq": 9
+            },
+            "target": {
+              "order_id": 42,
+              "status": "SHIPPED"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks Delta Lake MERGE",
+        "https://docs.databricks.com/aws/en/delta/merge",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Snowflake MERGE command",
+        "https://docs.snowflake.com/en/sql-reference/sql/merge",
+        "Living documentation"
+      ],
+      [
+        "Snowflake ROW_NUMBER",
+        "https://docs.snowflake.com/en/sql-reference/functions/row_number",
+        "Living documentation"
+      ],
+      [
+        "Snowflake QUALIFY",
+        "https://docs.snowflake.com/en/sql-reference/constructs/qualify",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The podium is the contract boundary: every duplicate can exist on the left, but only rank 1 crosses into MERGE. When timestamps tie, the sequence slider visibly becomes the deciding evidence.",
+    "written_questions": [
+      "What fields define a deterministic winner in your event stream?",
+      "Which duplicate pattern should be quarantined instead of silently ranked?"
+    ],
+    "source_checked_on": "2026-10-17",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: rank the Delta source, then MERGE one row per key",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> Bronze contains retries and late order events. Silver must expose one current row per order.</p><p><strong>Unexecuted Databricks SQL.</strong> The browser below is a local model; run SQL only in an authorized workspace.</p><pre class=\"codepanel\"><code><span>WITH ranked AS (</span><span> SELECT *, ROW_NUMBER() OVER (</span><span>  PARTITION BY order_id</span><span>  ORDER BY event_time DESC, ingest_sequence DESC</span><span> ) AS rn FROM bronze.order_events</span><span>)</span><span>MERGE INTO silver.orders t</span><span>USING (SELECT * FROM ranked WHERE rn = 1) s</span><span>ON t.order_id = s.order_id</span><span>WHEN MATCHED THEN UPDATE SET status = s.status</span><span>WHEN NOT MATCHED THEN INSERT *;</span></code></pre><label>Rows for order 42 <input id=\"dbDuplicates\" type=\"range\" min=\"1\" max=\"4\" value=\"3\"></label><div id=\"dbMergeWorld\" class=\"world\"></div><p><strong>Failure/fix.</strong> Delta MERGE can reject ambiguous multiple source matches. Databricks also documents runtime-dependent duplicate-match evaluation. Do not encode correctness in that version difference: preprocess the source to one row per key.</p>",
+        "markdown": "Use ROW_NUMBER over the business key with a deterministic descending order, filter to rn = 1, then MERGE. Vendor SQL is unexecuted. Runtime-specific duplicate detection is a boundary, not a correctness strategy.",
+        "javascript": "const dbDuplicates=$('dbDuplicates'),dbMergeWorld=$('dbMergeWorld');function dbPaint(){const n=+dbDuplicates.value;dbMergeWorld.innerHTML='<div class=\"lane\"><div class=\"box warn\"><strong>Bronze candidates</strong><br>'+n+' rows for order 42</div><div class=\"box good\"><strong>ROW_NUMBER</strong><br>1 winner · '+Math.max(0,n-1)+' filtered</div><div class=\"box good\"><strong>Delta MERGE</strong><br>one source action</div></div><p>Local teaching model; no Databricks query ran.</p>';}dbDuplicates.oninput=dbPaint;dbPaint();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: QUALIFY the staged source before MERGE",
+        "minutes": 9,
+        "html": "<p><strong>Use case.</strong> A staged Snowpipe or batch load contains more than one status row for an order.</p><p><strong>Unexecuted Snowflake SQL.</strong> The browser is a local model; run SQL only with the intended role, warehouse, and change controls.</p><pre class=\"codepanel\"><code><span>MERGE INTO curated.orders t</span><span>USING (</span><span> SELECT * FROM raw.order_events</span><span> QUALIFY ROW_NUMBER() OVER (</span><span>  PARTITION BY order_id</span><span>  ORDER BY event_time DESC, ingest_sequence DESC</span><span> ) = 1</span><span>) s ON t.order_id = s.order_id</span><span>WHEN MATCHED THEN UPDATE SET status = s.status</span><span>WHEN NOT MATCHED THEN INSERT (order_id,status)</span><span> VALUES (s.order_id,s.status);</span></code></pre><label>ERROR_ON_NONDETERMINISTIC_MERGE <select id=\"sfStrict\"><option value=\"true\">TRUE</option><option value=\"false\">FALSE</option></select></label><div id=\"sfMergeWorld\" class=\"world\"></div><p><strong>Failure/fix.</strong> With multiple conflicting source matches, Snowflake documents an error when the parameter is TRUE; FALSE may choose a value nondeterministically. Filtering to one source winner makes the result deterministic instead of weakening the guardrail. Duplicate unmatched source rows can also produce duplicate inserts, so dedupe before both paths.</p>",
+        "markdown": "QUALIFY ROW_NUMBER() = 1 makes the staged source unique before MERGE. Keep ERROR_ON_NONDETERMINISTIC_MERGE as a guardrail; setting it false does not define a business winner. Vendor SQL is unexecuted.",
+        "javascript": "const sfStrict=$('sfStrict'),sfMergeWorld=$('sfMergeWorld');function sfPaint(){const strict=sfStrict.value==='true';sfMergeWorld.innerHTML='<div class=\"lane\"><div class=\"box warn\"><strong>Competing rows</strong><br>PACKED + SHIPPED</div><div class=\"box '+(strict?'bad':'warn')+'\"><strong>Without QUALIFY</strong><br>'+(strict?'error protects target':'undefined winner risk')+'</div><div class=\"box good\"><strong>With QUALIFY</strong><br>one ranked winner</div></div><p>Local model; the safe path does not depend on relaxing the parameter.</p>';}sfStrict.onchange=sfPaint;sfPaint();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Source winner</td><td>ROW_NUMBER then WHERE rn=1</td><td>ROW_NUMBER with QUALIFY = 1</td></tr><tr><td>Ambiguous matches</td><td>Can fail; behavior details vary by runtime</td><td>ERROR_ON_NONDETERMINISTIC_MERGE guards conflicting updates/deletes</td></tr><tr><td>Shared rule</td><td colspan=\"2\">Give MERGE one deterministic source row for each target key</td></tr><tr><td>Boundary</td><td>Delta concurrency and runtime behavior</td><td>Unmatched duplicates may both insert</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Winner | ROW_NUMBER then rn=1 | ROW_NUMBER + QUALIFY |\n| Guardrail | duplicate source matches can fail | nondeterministic merge parameter |\n| Shared rule | one deterministic source row per key | one deterministic source row per key |"
+    },
+    "product_questions": [
+      [
+        "What should cross the source/target boundary?",
+        [
+          "Every retry",
+          "One ranked winner per business key",
+          "A random source row"
+        ],
+        1,
+        "Both products are safer when MERGE receives one deterministic source row per key."
+      ],
+      [
+        "Snowflake strict nondeterministic-merge checking errors. Best fix?",
+        [
+          "Set the parameter FALSE",
+          "Deduplicate/rank the source by the business rule",
+          "Retry until it succeeds"
+        ],
+        1,
+        "Define the winner instead of disabling the guardrail."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks Delta Lake MERGE",
+        "https://docs.databricks.com/aws/en/delta/merge",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Snowflake MERGE command",
+        "https://docs.snowflake.com/en/sql-reference/sql/merge",
+        "Living documentation"
+      ],
+      [
+        "Snowflake ROW_NUMBER",
+        "https://docs.snowflake.com/en/sql-reference/functions/row_number",
+        "Living documentation"
+      ],
+      [
+        "Snowflake QUALIFY",
+        "https://docs.snowflake.com/en/sql-reference/constructs/qualify",
+        "Living documentation"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-17",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "transformation_modeling",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Focused Delta MERGE source shaping, window ranking, and duplicate-match diagnosis; not complete transformation coverage."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "domains": [
+          "loading_unloading_transformation",
+          "performance"
+        ],
+        "scope": "Focused MERGE determinism, QUALIFY, and source deduplication; planning groups only because full COF-C03 objective IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Retry a poison message three times—then quarantine it",
+    "goal": "Keep one permanently bad event from consuming the whole retry lane.",
+    "tag": "Messaging · bounded retries and DLQ",
+    "concept": "<p>A conveyor belt should not keep sending the same broken package through the scanner forever. Give each message a small retry budget. If it still fails, move it to a <strong>dead-letter queue (DLQ)</strong> so healthy work can continue and operators have evidence to repair.</p><p>A DLQ is a quarantine, not a trash can: retain context, alert on depth/age, fix the cause, and redrive at a controlled rate.</p>",
+    "example": "<p><code>order-42</code> contains <code>amount=\"twelve\"</code>. Attempts 1, 2, and 3 fail validation. On the next receive it is quarantined. <code>order-43</code> can now complete. After the schema producer is fixed, an operator redrives order-42 slowly.</p>",
+    "use_case": {
+      "when": "Use bounded retries when a queue offers at-least-once delivery and some failures may be permanent or require human repair.",
+      "example": "A malformed order event fails deserialization while valid orders wait behind it.",
+      "decision": "Retry transient errors with backoff. Quarantine deterministic data/code failures after a measured limit. Preserve ordering requirements before adding a DLQ."
+    },
+    "practice": "Choose the failure type and step through attempts. The belt either recovers or sends the message to quarantine.",
+    "boundary": "The local model is not SQS or Kafka and has no time, visibility timeout, ordering, retention, duplicate delivery, backoff, alarm, or redrive-velocity behavior. DLQs can break strict FIFO ordering.",
+    "sim": "<style>\n.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.mutedbox{background:#e7ece9}.arrow{text-align:center;font-weight:800;font-size:1.25rem}.stack{display:grid;gap:8px}.event{display:grid;grid-template-columns:70px 1fr 120px;gap:8px;align-items:center;border:1px solid #9db3aa;border-radius:9px;padding:8px}.winner{outline:4px solid #2d816c;background:#dff3ce}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.token{display:inline-block;padding:6px 9px;border-radius:8px;background:#dcebe3;margin:3px}.meter{height:24px;background:#dce5de;border-radius:7px;overflow:hidden}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:130px 1fr 70px;gap:8px;align-items:center;margin:8px 0}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:560px){.lane{grid-template-columns:1fr}.event,.bar{grid-template-columns:1fr}}\n</style><label>Failure type <select id=\"failureKind\"><option value=\"permanent\">bad schema</option><option value=\"transient\">temporary timeout</option></select></label><label>Receive count <input id=\"receiveCount\" type=\"range\" min=\"1\" max=\"5\" value=\"1\"></label><div id=\"dlqWorld\" class=\"world\"></div>",
+    "js": "function paintDlq(){const n=+receiveCount.value,p=failureKind.value==='permanent',recovered=!p&&n>=2,quarantine=p&&n>3;dlqWorld.innerHTML='<div class=\"lane\"><div class=\"box\"><strong>Main queue</strong><br>order-42 · receive '+n+'</div><div class=\"box '+(recovered?'good':quarantine?'bad':'warn')+'\"><strong>Consumer</strong><br>'+(recovered?'timeout cleared':quarantine?'retry budget spent':'processing failed')+'</div><div class=\"box '+(quarantine?'warn':'mutedbox')+'\"><strong>DLQ</strong><br>'+(quarantine?'order-42 quarantined':'empty')+'</div></div><p>'+(recovered?'ACK and continue.':quarantine?'Alert, repair, then controlled redrive.':'Do not spin: wait for the next bounded attempt.')+'</p>';}failureKind.onchange=paintDlq;receiveCount.oninput=paintDlq;paintDlq();",
+    "questions": [
+      [
+        "Why cap retries?",
+        [
+          "To prevent one permanent failure from consuming work forever",
+          "To guarantee exactly once",
+          "To remove monitoring"
+        ],
+        0,
+        "Permanent failures need quarantine and repair, not infinite retries."
+      ],
+      [
+        "What should happen before redrive?",
+        [
+          "Fix or understand the cause and choose a safe velocity",
+          "Delete the DLQ blindly",
+          "Increase payload corruption"
+        ],
+        0,
+        "Redrive without repair can recreate the incident."
+      ],
+      [
+        "When can a DLQ be a bad fit?",
+        [
+          "When strict FIFO ordering must be preserved",
+          "When messages have IDs",
+          "When metrics exist"
+        ],
+        0,
+        "Moving one item aside changes strict sequence semantics."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "message={'id':'order-42','valid':False}\nmax_receives=3",
+          "note": "Start with a deterministic poison message and a retry budget."
+        },
+        {
+          "code": "receive_count=1\nstatus=\"retry\"",
+          "note": "The first failed receive stays inside the budget."
+        },
+        {
+          "code": "receive_count=3\nstatus=\"retry\"",
+          "note": "The third failure uses the final normal attempt."
+        },
+        {
+          "code": "receive_count=4\nstatus=\"dlq\" if not message[\"valid\"] and receive_count>max_receives else \"ack\"",
+          "note": "The next receive crosses the budget and quarantines the message."
+        }
+      ],
+      "expect": {
+        "status": "dlq"
+      },
+      "limit": "The local model is not SQS or Kafka and has no time, visibility timeout, ordering, retention, duplicate delivery, backoff, alarm, or redrive-velocity behavior. DLQs can break strict FIFO ordering.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "message": {
+              "id": "order-42",
+              "valid": false
+            },
+            "max_receives": 3
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "message": {
+              "id": "order-42",
+              "valid": false
+            },
+            "max_receives": 3,
+            "receive_count": 1,
+            "status": "retry"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "message": {
+              "id": "order-42",
+              "valid": false
+            },
+            "max_receives": 3,
+            "receive_count": 3,
+            "status": "retry"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "message": {
+              "id": "order-42",
+              "valid": false
+            },
+            "max_receives": 3,
+            "receive_count": 4,
+            "status": "dlq"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.py"
+    },
+    "sources": [
+      [
+        "Amazon SQS dead-letter queues",
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html",
+        "Living documentation"
+      ],
+      [
+        "Amazon SQS DLQ redrive",
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-configure-dead-letter-queue-redrive.html",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The belt has three destinations with different meanings: main queue, bounded processing, and quarantine. Moving the receive slider shows the exact boundary where a permanent failure stops blocking normal work.",
+    "written_questions": [
+      "Which errors in your consumer are transient versus poison-message failures?",
+      "What alarm and redrive runbook would keep the DLQ from becoming permanent storage?"
+    ],
+    "source_checked_on": "2026-10-17"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Standardize the guardrail—not every implementation",
+    "goal": "Create a paved road with mandatory evidence and a time-limited escape hatch.",
+    "tag": "Platform strategy · golden paths",
+    "concept": "<p>A building code requires safe exits, but it does not require every building to use the same floor plan. A good internal platform works the same way: standardize outcomes such as ownership, security checks, SLOs, traceability, and deployment evidence—without forcing a Spark job and a Java API into identical scaffolding.</p>",
+    "example": "<p>The Spark pipeline uses a Databricks job template. The Java service uses a container template. Both must publish an owner, SLO, dependency record, vulnerability scan, and rollback plan. A rare exception can bypass one template only with an owner, reason, and expiration date.</p>",
+    "use_case": {
+      "when": "Use a platform contract when many teams need safe defaults but their workloads legitimately require different implementation paths.",
+      "example": "A data pipeline and a low-latency API both need production readiness evidence even though their runtimes differ.",
+      "decision": "Mandate a small set of observable outcomes. Offer opinionated templates. Keep an explicit, expiring exception path for cases the platform cannot yet serve."
+    },
+    "practice": "Toggle a missing control in either lane. The shared gate blocks only the evidence gap, not the different implementation.",
+    "boundary": "This is a governance teaching model, not a complete control framework. Real contracts require threat models, audit evidence, versioning, platform SLOs, ownership, feedback loops, and a funded process for exceptions.",
+    "sim": "<style>\n.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.mutedbox{background:#e7ece9}.arrow{text-align:center;font-weight:800;font-size:1.25rem}.stack{display:grid;gap:8px}.event{display:grid;grid-template-columns:70px 1fr 120px;gap:8px;align-items:center;border:1px solid #9db3aa;border-radius:9px;padding:8px}.winner{outline:4px solid #2d816c;background:#dff3ce}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.token{display:inline-block;padding:6px 9px;border-radius:8px;background:#dcebe3;margin:3px}.meter{height:24px;background:#dce5de;border-radius:7px;overflow:hidden}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:130px 1fr 70px;gap:8px;align-items:center;margin:8px 0}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:560px){.lane{grid-template-columns:1fr}.event,.bar{grid-template-columns:1fr}}\n</style><label><input id=\"sparkOwner\" type=\"checkbox\" checked> Spark job has owner + SLO</label><label><input id=\"serviceOwner\" type=\"checkbox\" checked> Java service has owner + SLO</label><label><input id=\"exceptionActive\" type=\"checkbox\"> approved exception with expiry</label><div id=\"guardrailWorld\" class=\"world\"></div>",
+    "js": "function paintGuardrail(){const s=sparkOwner.checked,j=serviceOwner.checked,e=exceptionActive.checked;guardrailWorld.innerHTML='<div class=\"lane\"><div class=\"box '+(s?'good':'bad')+'\"><strong>Databricks path</strong><br>job template<br>'+(s?'owner + SLO':'evidence missing')+'</div><div class=\"box '+(j?'good':'bad')+'\"><strong>Service path</strong><br>container template<br>'+(j?'owner + SLO':'evidence missing')+'</div></div><div class=\"arrow\">↓ shared production gate ↓</div><div class=\"box '+((s&&j)||e?'good':'bad')+'\"><strong>' + (((s&&j)||e)?'PASS':'BLOCK') + '</strong><br>'+((!s||!j)&&e?'temporary exception; owner must close the gap':'same evidence, different implementations')+'</div>';}sparkOwner.onchange=paintGuardrail;serviceOwner.onchange=paintGuardrail;exceptionActive.onchange=paintGuardrail;paintGuardrail();",
+    "questions": [
+      [
+        "What should the shared platform contract standardize?",
+        [
+          "Observable safety and operability outcomes",
+          "One runtime for every workload",
+          "Team names"
+        ],
+        0,
+        "Common outcomes allow different valid implementations."
+      ],
+      [
+        "What makes an escape hatch healthy?",
+        [
+          "Owner, reason, scope, and expiry",
+          "Permanent silent bypass",
+          "No evidence"
+        ],
+        0,
+        "Exceptions need accountability and a closing condition."
+      ],
+      [
+        "Why not force one template everywhere?",
+        [
+          "Different workload constraints can make one implementation harmful",
+          "Templates are always wrong",
+          "Security is optional"
+        ],
+        0,
+        "The contract should preserve legitimate design variation."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "required={'owner','slo','scan','rollback'}",
+          "note": "Define evidence every production workload must provide."
+        },
+        {
+          "code": "spark={'owner','slo','scan','rollback'}\nservice={'owner','slo','scan'}",
+          "note": "Two implementations produce evidence through different templates."
+        },
+        {
+          "code": "spark_gaps=required-spark\nservice_gaps=required-service",
+          "note": "Evaluate outcomes rather than comparing implementation internals."
+        },
+        {
+          "code": "decision='pass' if not spark_gaps and not service_gaps else 'block'",
+          "note": "The Java service is blocked only because rollback evidence is missing."
+        }
+      ],
+      "expect": {
+        "decision": "block"
+      },
+      "limit": "This is a governance teaching model, not a complete control framework. Real contracts require threat models, audit evidence, versioning, platform SLOs, ownership, feedback loops, and a funded process for exceptions.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {}
+        },
+        {
+          "step": 2,
+          "state": {}
+        },
+        {
+          "step": 3,
+          "state": {
+            "decision": "block"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Backstage Software Templates",
+        "https://backstage.io/docs/features/software-templates/",
+        "Living documentation"
+      ],
+      [
+        "CNCF Platforms Working Group whitepaper",
+        "https://tag-app-delivery.cncf.io/whitepapers/platforms/",
+        "Living whitepaper"
+      ],
+      [
+        "AWS Prescriptive Guidance: platform engineering",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/platform-engineering/what-is-platform-engineering.html",
+        "Living guidance"
+      ]
+    ],
+    "visual_explanation": "Two independent paths stay visibly separate until the production gate. The gate checks shared evidence; the exception is a labeled detour with an expiry, not a hidden bypass.",
+    "written_questions": [
+      "Which four outcomes would form the smallest useful platform contract in your organization?",
+      "What evidence would prove an exception can now be removed?"
+    ],
+    "source_checked_on": "2026-10-17"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Replay the observation—not the side effect",
+    "goal": "Debug and evaluate an agent with recorded tool results while blocking dangerous actions.",
+    "tag": "Harness engineering · safe replay",
+    "concept": "<p>A flight simulator replays conditions without crashing a real airplane. An agent harness should do the same. Record the tool request and observation, then let a candidate agent reason against the recording. Do not rerun a refund, email, deployment, or deletion just to reproduce the trace.</p>",
+    "example": "<p>A support agent calls <code>lookup_order(42)</code> and receives <code>{status: delivered, paid: true}</code>. It then proposes <code>refund(42)</code>. Offline replay returns the recorded lookup result, but the refund tool is replaced by a blocker that records “would refund” without moving money.</p>",
+    "use_case": {
+      "when": "Use recorded replay for regression tests and incident analysis when tool calls are costly, nondeterministic, rate-limited, private, or side-effecting.",
+      "example": "Compare a new support-agent prompt on a production-shaped order trace without issuing a second refund.",
+      "decision": "Record enough context to reproduce the decision, redact sensitive values, version the harness, replay read observations, and stub all side effects by default."
+    },
+    "practice": "Switch between live and replay mode. Watch the same observation feed the agent while the side-effect boundary changes.",
+    "boundary": "This local model is not an OpenAI or OpenTelemetry runtime. Real traces may contain secrets and personal data; apply redaction, access control, retention, consent, sampling, schema/version checks, and freshness rules. A stale recording cannot prove live-system behavior.",
+    "sim": "<style>\n.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.mutedbox{background:#e7ece9}.arrow{text-align:center;font-weight:800;font-size:1.25rem}.stack{display:grid;gap:8px}.event{display:grid;grid-template-columns:70px 1fr 120px;gap:8px;align-items:center;border:1px solid #9db3aa;border-radius:9px;padding:8px}.winner{outline:4px solid #2d816c;background:#dff3ce}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.token{display:inline-block;padding:6px 9px;border-radius:8px;background:#dcebe3;margin:3px}.meter{height:24px;background:#dce5de;border-radius:7px;overflow:hidden}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:130px 1fr 70px;gap:8px;align-items:center;margin:8px 0}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:560px){.lane{grid-template-columns:1fr}.event,.bar{grid-template-columns:1fr}}\n</style><label>Harness mode <select id=\"replayMode\"><option value=\"replay\">recorded replay</option><option value=\"live\">live production</option></select></label><label>Requested action <select id=\"agentAction\"><option value=\"lookup\">lookup only</option><option value=\"refund\">refund $42</option></select></label><div id=\"replayWorld\" class=\"world\"></div>",
+    "js": "function paintReplay(){const mode=replayMode.value,a=agentAction.value,danger=a==='refund',blocked=mode==='replay'&&danger;replayWorld.innerHTML='<div class=\"lane\"><div class=\"box\"><strong>Tool request</strong><br>lookup_order(42)</div><div class=\"box good\"><strong>Observation</strong><br>recorded: delivered + paid</div><div class=\"box '+(blocked?'good':danger?'bad':'good')+'\"><strong>Action boundary</strong><br>'+(blocked?'STUB: would refund $42':danger?'LIVE: money may move':'read-only')+'</div></div><p>'+(blocked?'Safe for offline comparison; score the proposed action.':mode==='live'?'Live mode needs authorization, idempotency, and human policy.':'Replay uses recorded evidence.')+'</p>';}replayMode.onchange=paintReplay;agentAction.onchange=paintReplay;paintReplay();",
+    "questions": [
+      [
+        "What should replay do with a refund tool?",
+        [
+          "Execute it again",
+          "Stub/block it and record the proposed call",
+          "Delete the trace"
+        ],
+        1,
+        "Offline evaluation should not repeat a side effect."
+      ],
+      [
+        "What can a recorded observation prove?",
+        [
+          "How the candidate behaves on that captured condition",
+          "That production is unchanged forever",
+          "That no redaction is needed"
+        ],
+        0,
+        "Replay tests a known condition, not current live state."
+      ],
+      [
+        "What belongs in the harness version?",
+        [
+          "Trace schema, tool stubs, policies, and graders",
+          "Only the agent name",
+          "No configuration"
+        ],
+        0,
+        "Reproducibility depends on the environment around the model."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "trace={'request':'lookup_order(42)','observation':{'status':'delivered','paid':True}}",
+          "note": "Capture the read tool request and its observation."
+        },
+        {
+          "code": "mode='replay'\nproposed_action='refund(42)'",
+          "note": "Run the candidate against the captured condition."
+        },
+        {
+          "code": "side_effects_allowed=(mode=='live')",
+          "note": "Make the dangerous boundary explicit."
+        },
+        {
+          "code": "result='executed' if side_effects_allowed else 'blocked-and-recorded'",
+          "note": "Replay records the intent without moving money."
+        }
+      ],
+      "expect": {
+        "result": "blocked-and-recorded"
+      },
+      "limit": "This local model is not an OpenAI or OpenTelemetry runtime. Real traces may contain secrets and personal data; apply redaction, access control, retention, consent, sampling, schema/version checks, and freshness rules. A stale recording cannot prove live-system behavior.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "trace": {
+              "request": "lookup_order(42)",
+              "observation": {
+                "status": "delivered",
+                "paid": true
+              }
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "trace": {
+              "request": "lookup_order(42)",
+              "observation": {
+                "status": "delivered",
+                "paid": true
+              }
+            },
+            "mode": "replay",
+            "proposed_action": "refund(42)"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "trace": {
+              "request": "lookup_order(42)",
+              "observation": {
+                "status": "delivered",
+                "paid": true
+              }
+            },
+            "mode": "replay",
+            "proposed_action": "refund(42)",
+            "side_effects_allowed": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "trace": {
+              "request": "lookup_order(42)",
+              "observation": {
+                "status": "delivered",
+                "paid": true
+              }
+            },
+            "mode": "replay",
+            "proposed_action": "refund(42)",
+            "side_effects_allowed": false,
+            "result": "blocked-and-recorded"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenTelemetry GenAI agent spans",
+        "https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/",
+        "Development semantic conventions"
+      ],
+      [
+        "OpenAI Agents SDK tracing",
+        "https://openai.github.io/openai-agents-python/tracing/",
+        "Living SDK documentation"
+      ],
+      [
+        "OpenAI evaluation best practices",
+        "https://platform.openai.com/docs/guides/evaluation-best-practices",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The observation lane is identical in both modes; only the action boundary changes. That makes the lesson’s key claim visible: replay evidence is useful precisely because the harness does not repeat the consequence.",
+    "written_questions": [
+      "Which production trace fields must be redacted before they enter an eval dataset?",
+      "Which tools in your agent require a hard replay stub rather than a sandbox implementation?"
+    ],
+    "source_checked_on": "2026-10-17"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "DNA Fountain: enough independent droplets can reconstruct the archive",
+    "goal": "See how overlapping encoded droplets can recover missing digital chunks before DNA synthesis.",
+    "tag": "Research deep dive · 2017 foundation",
+    "concept": "<p>Imagine three puzzle pieces named A, B, and C. Instead of storing each piece once, store overlapping clues: A, A⊕B, and B⊕C. If one clue reveals A, you can peel A out of A⊕B to recover B, then peel B out of B⊕C to recover C.</p><p>DNA Fountain applied fountain-code ideas before converting data to DNA oligos. The breakthrough claim is about robust, high-density archival storage; this lesson’s XOR game explains the coding intuition, not the chemistry.</p>",
+    "example": "<p>Original chunks are A=1, B=0, C=1. Droplets are A=1, A⊕B=1, and B⊕C=1. Start with singleton A. XOR it with A⊕B to get B=0. Then XOR B with B⊕C to get C=1. Missing the singleton leaves no starting point in this tiny example.</p>",
+    "use_case": {
+      "when": "Use fountain-style erasure coding when many encoded pieces may be sampled or lost and the decoder can collect enough independent droplets.",
+      "example": "An archival DNA store sequences a random subset of oligos and reconstructs the original file from sufficient valid droplets.",
+      "decision": "Choose it for robust archival recovery, not low-latency random updates. Model synthesis/sequencing errors and metadata overhead, not only erasures."
+    },
+    "practice": "Remove one droplet. The decoder shows whether a singleton starts the peeling chain and which chunks become known.",
+    "boundary": "The XOR model has three bits and only erasures. DNA Fountain used a larger coding pipeline plus biochemical screening and error correction. It does not model synthesis, sequencing, substitutions/insertions/deletions, oligo addressing, random access, or long-term degradation.",
+    "sim": "<style>\n.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.mutedbox{background:#e7ece9}.arrow{text-align:center;font-weight:800;font-size:1.25rem}.stack{display:grid;gap:8px}.event{display:grid;grid-template-columns:70px 1fr 120px;gap:8px;align-items:center;border:1px solid #9db3aa;border-radius:9px;padding:8px}.winner{outline:4px solid #2d816c;background:#dff3ce}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.token{display:inline-block;padding:6px 9px;border-radius:8px;background:#dcebe3;margin:3px}.meter{height:24px;background:#dce5de;border-radius:7px;overflow:hidden}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:130px 1fr 70px;gap:8px;align-items:center;margin:8px 0}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:560px){.lane{grid-template-columns:1fr}.event,.bar{grid-template-columns:1fr}}\n</style><label>Available droplets <select id=\"dropletSet\"><option value=\"all\">A, A⊕B, B⊕C</option><option value=\"noA\">A⊕B, B⊕C</option><option value=\"noTail\">A, A⊕B</option></select></label><div id=\"dnaWorld\" class=\"world\"></div>",
+    "js": "function paintDna(){const x=dropletSet.value;let steps=x==='all'?['A = 1 (singleton)','B = (A⊕B)⊕A = 0','C = (B⊕C)⊕B = 1']:x==='noA'?['No singleton','Cannot start peeling','A, B, C remain unknown']:['A = 1 (singleton)','B = (A⊕B)⊕A = 0','C remains unknown'];const ok=x==='all';dnaWorld.innerHTML='<div class=\"lane\">'+steps.map((s,i)=>'<div class=\"box '+(ok||i<2&&x==='noTail'?'good':'warn')+'\"><strong>step '+(i+1)+'</strong><br>'+s+'</div>').join('')+'</div><p><strong>'+(ok?'Archive reconstructed':'More independent information is needed')+'.</strong></p>';}dropletSet.onchange=paintDna;paintDna();",
+    "questions": [
+      [
+        "Why is a singleton droplet useful in peeling decode?",
+        [
+          "It reveals one chunk so overlapping droplets can be reduced",
+          "It encrypts every chunk",
+          "It changes DNA chemistry"
+        ],
+        0,
+        "A known chunk can be XORed out of neighboring droplets."
+      ],
+      [
+        "What does this toy model omit?",
+        [
+          "Synthesis and sequencing errors",
+          "XOR",
+          "Missing data"
+        ],
+        0,
+        "Real DNA storage must handle biochemical and sequencing error modes."
+      ],
+      [
+        "Is DNA Fountain presented here as a new 2026 result?",
+        [
+          "Yes",
+          "No—it is a 2017 research foundation",
+          "It has no paper"
+        ],
+        1,
+        "The lesson explicitly distinguishes a foundational paper from current developments."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "A,B,C=1,0,1",
+          "note": "Create three one-bit source chunks."
+        },
+        {
+          "code": "d1=A\nd2=A^B\nd3=B^C",
+          "note": "Create one singleton and two overlapping XOR droplets."
+        },
+        {
+          "code": "recovered_A=d1\nrecovered_B=d2^recovered_A",
+          "note": "Peel A out of the second droplet to recover B."
+        },
+        {
+          "code": "recovered_C=d3^recovered_B\narchive=[recovered_A,recovered_B,recovered_C]",
+          "note": "Peel B out of the final droplet to reconstruct the archive."
+        }
+      ],
+      "expect": {
+        "archive": [
+          1,
+          0,
+          1
+        ]
+      },
+      "limit": "The XOR model has three bits and only erasures. DNA Fountain used a larger coding pipeline plus biochemical screening and error correction. It does not model synthesis, sequencing, substitutions/insertions/deletions, oligo addressing, random access, or long-term degradation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "A": 1,
+            "B": 0,
+            "C": 1
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "A": 1,
+            "B": 0,
+            "C": 1,
+            "d1": 1,
+            "d2": 1,
+            "d3": 1
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "A": 1,
+            "B": 0,
+            "C": 1,
+            "d1": 1,
+            "d2": 1,
+            "d3": 1,
+            "recovered_A": 1,
+            "recovered_B": 0
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "A": 1,
+            "B": 0,
+            "C": 1,
+            "d1": 1,
+            "d2": 1,
+            "d3": 1,
+            "recovered_A": 1,
+            "recovered_B": 0,
+            "recovered_C": 1,
+            "archive": [
+              1,
+              0,
+              1
+            ]
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "DNA Fountain: A Robust and Efficient Storage Architecture",
+        "https://www.science.org/doi/10.1126/science.aaj2038",
+        "Science, March 2017"
+      ],
+      [
+        "DNA Fountain PubMed record",
+        "https://pubmed.ncbi.nlm.nih.gov/28254941/",
+        "Primary paper metadata"
+      ],
+      [
+        "Fundamental limits of DNA storage systems",
+        "https://arxiv.org/abs/1705.04732",
+        "Research preprint, May 2017"
+      ]
+    ],
+    "visual_explanation": "The decoder is drawn as a dependency chain rather than a generic storage pipeline. Removing A visibly removes the starting fact; removing the tail permits partial recovery but not a complete archive.",
+    "written_questions": [
+      "What makes a set of droplets independent enough to recover the original chunks?",
+      "Which real DNA error mode would require more than this erasure-only XOR model?"
+    ],
+    "source_checked_on": "2026-10-17"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A restore key may return yesterday’s dependencies",
+    "goal": "Treat a partial cache hit as a starting point, then reinstall and verify from the lockfile.",
+    "tag": "Caching · correctness boundary",
+    "concept": "<p>A hotel key that says “Floor 4” may open the hallway, but it does not identify your exact room. A GitHub Actions cache restore key is similar: a broad prefix can return the newest related cache, not the exact dependency set for today’s lockfile.</p><p>Cache is an optimization. The lockfile and build remain the source of truth.</p>",
+    "example": "<p>The job requests <code>linux-gradle-h2</code>. No exact cache exists, but restore prefix <code>linux-gradle-</code> returns <code>linux-gradle-h1</code>. The job must run Gradle dependency resolution/verification against lockfile h2. After success, it can save an immutable h2 cache.</p>",
+    "use_case": {
+      "when": "Use restore keys when an older dependency cache can safely accelerate installation without deciding correctness.",
+      "example": "A Gradle lockfile changes one library; yesterday’s cache supplies most jars while the build verifies and fetches the changed artifact.",
+      "decision": "Put OS/tool/lockfile hash in the exact key. Keep prefixes narrow. On anything except an exact hit, run the normal deterministic install and verification."
+    },
+    "practice": "Choose which caches exist. Follow exact match, prefix fallback, install, and immutable save as separate states.",
+    "boundary": "This browser does not run Actions or model eviction, cache scopes, branch fallback, quotas, poisoning, compression, platform paths, or package-manager verification. Never cache secrets.",
+    "sim": "<style>\n.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.mutedbox{background:#e7ece9}.arrow{text-align:center;font-weight:800;font-size:1.25rem}.stack{display:grid;gap:8px}.event{display:grid;grid-template-columns:70px 1fr 120px;gap:8px;align-items:center;border:1px solid #9db3aa;border-radius:9px;padding:8px}.winner{outline:4px solid #2d816c;background:#dff3ce}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.token{display:inline-block;padding:6px 9px;border-radius:8px;background:#dcebe3;margin:3px}.meter{height:24px;background:#dce5de;border-radius:7px;overflow:hidden}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:130px 1fr 70px;gap:8px;align-items:center;margin:8px 0}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:560px){.lane{grid-template-columns:1fr}.event,.bar{grid-template-columns:1fr}}\n</style><label>Available cache <select id=\"cacheAvailable\"><option value=\"old\">h1 prefix match only</option><option value=\"exact\">exact h2</option><option value=\"none\">none</option></select></label><div id=\"cacheWorld\" class=\"world\"></div>",
+    "js": "function paintCache(){const x=cacheAvailable.value,hit=x==='exact',prefix=x==='old';cacheWorld.innerHTML='<div class=\"lane\"><div class=\"box\"><strong>Requested</strong><br>linux-gradle-h2</div><div class=\"box '+(hit?'good':prefix?'warn':'mutedbox')+'\"><strong>Restored</strong><br>'+(hit?'exact h2':prefix?'latest prefix: h1':'nothing')+'</div><div class=\"box '+(hit?'good':'warn')+'\"><strong>Install step</strong><br>'+(hit?'may skip by policy':'resolve + verify h2')+'</div><div class=\"box good\"><strong>Build truth</strong><br>lockfile h2</div></div><p>cache-hit is true only for the exact key; a prefix restore is not exact.</p>';}cacheAvailable.onchange=paintCache;paintCache();",
+    "questions": [
+      [
+        "A restore prefix returned h1 for requested h2. What next?",
+        [
+          "Run dependency resolution and verification for h2",
+          "Call it exact",
+          "Edit the lockfile back"
+        ],
+        0,
+        "A partial restore accelerates install but does not establish correctness."
+      ],
+      [
+        "What belongs in an exact dependency cache key?",
+        [
+          "OS/tool plus lockfile hash",
+          "A secret token",
+          "Only the word cache"
+        ],
+        0,
+        "The key should identify the dependency input and relevant platform."
+      ],
+      [
+        "Why can a cache not be the source of truth?",
+        [
+          "It may be stale, partial, evicted, or poisoned",
+          "Caches are always empty",
+          "Lockfiles are optional"
+        ],
+        0,
+        "The deterministic build inputs must decide correctness."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "requested='linux-gradle-h2'\navailable=['linux-gradle-h1']",
+          "note": "The exact lockfile-hash key is absent."
+        },
+        {
+          "code": "exact=requested in available",
+          "note": "The exact lookup fails."
+        },
+        {
+          "code": "restored='linux-gradle-h1' if not exact else requested",
+          "note": "The broad restore prefix returns the most recent related cache."
+        },
+        {
+          "code": "install_required=(restored!=requested)\nbuild_input='lockfile-h2'",
+          "note": "The job reinstalls/verifies because the cache is only a partial starting point."
+        }
+      ],
+      "expect": {
+        "install_required": true
+      },
+      "limit": "This browser does not run Actions or model eviction, cache scopes, branch fallback, quotas, poisoning, compression, platform paths, or package-manager verification. Never cache secrets.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "requested": "linux-gradle-h2",
+            "available": [
+              "linux-gradle-h1"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "requested": "linux-gradle-h2",
+            "available": [
+              "linux-gradle-h1"
+            ],
+            "exact": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "requested": "linux-gradle-h2",
+            "available": [
+              "linux-gradle-h1"
+            ],
+            "exact": false,
+            "restored": "linux-gradle-h1"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "requested": "linux-gradle-h2",
+            "available": [
+              "linux-gradle-h1"
+            ],
+            "exact": false,
+            "restored": "linux-gradle-h1",
+            "install_required": true,
+            "build_input": "lockfile-h2"
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions dependency caching reference",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching",
+        "Living documentation"
+      ],
+      [
+        "GitHub Actions cache dependencies guide",
+        "https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows",
+        "Living documentation"
+      ],
+      [
+        "actions/cache repository",
+        "https://github.com/actions/cache",
+        "Official action repository"
+      ]
+    ],
+    "visual_explanation": "The visual separates requested identity, restored bytes, installation, and build truth. That prevents the common mental shortcut “something restored, therefore dependencies are correct.”",
+    "written_questions": [
+      "How narrow should your restore-key prefix be to avoid unsafe cross-project reuse?",
+      "What verification step would detect a stale or poisoned dependency cache?"
+    ],
+    "source_checked_on": "2026-10-17"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "A valid token does not make every order yours",
+    "goal": "Authorize the user’s action on the specific object after resolving its identity.",
+    "tag": "API security · BOLA",
+    "concept": "<p>A valid building badge gets Alice through the lobby; it does not let her open every apartment. An API token proves an identity and perhaps scopes, but an endpoint must still decide whether that identity may perform this action on this object.</p><p>Broken Object Level Authorization (BOLA) appears when an API accepts an object ID and returns or changes that object without checking ownership or policy.</p>",
+    "example": "<p>Alice legitimately calls <code>GET /orders/42</code>; order 42 belongs to Alice. She changes the URL to <code>/orders/43</code>; order 43 belongs to Bob. A vulnerable handler queries by ID and returns it. The fixed handler loads the order, evaluates <code>can_read(user, order)</code>, and returns 404/403 without leaking the object.</p>",
+    "use_case": {
+      "when": "Apply object-level authorization to every endpoint or resolver that accepts an object identifier, including nested IDs and batch operations.",
+      "example": "A customer changes an order ID in a REST path, GraphQL argument, or gRPC request.",
+      "decision": "Authenticate first, resolve the object, then enforce user + action + object policy server-side. Random IDs are defense-in-depth, not authorization."
+    },
+    "practice": "Change the requested order and toggle the ownership check. The door shows why token validity and object permission are separate decisions.",
+    "boundary": "This is a local authorization model, not a complete IAM system. Real services need tenant boundaries, role/attribute policy, batch semantics, existence-leak decisions, caching rules, audit logs, race handling, and tests for every action.",
+    "sim": "<style>\n.world{background:#f3f8f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}.box{border:2px solid #66897e;border-radius:10px;padding:11px;background:#edf4ef;overflow-wrap:anywhere}.good{background:#dff3ce;border-color:#277761}.bad{background:#ffe4dc;border-color:#a3473b}.warn{background:#fff1bd;border-color:#c98218}.mutedbox{background:#e7ece9}.arrow{text-align:center;font-weight:800;font-size:1.25rem}.stack{display:grid;gap:8px}.event{display:grid;grid-template-columns:70px 1fr 120px;gap:8px;align-items:center;border:1px solid #9db3aa;border-radius:9px;padding:8px}.winner{outline:4px solid #2d816c;background:#dff3ce}.codepanel span{display:block;padding:5px;white-space:pre-wrap}.codepanel .active{background:#d6f4b5;border-left:4px solid #1d715f}.token{display:inline-block;padding:6px 9px;border-radius:8px;background:#dcebe3;margin:3px}.meter{height:24px;background:#dce5de;border-radius:7px;overflow:hidden}.meter span{display:block;height:100%;background:#247a68}.bar{display:grid;grid-template-columns:130px 1fr 70px;gap:8px;align-items:center;margin:8px 0}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #b7c8be;padding:8px;overflow-wrap:anywhere;text-align:left}select,input{font:inherit;max-width:100%;padding:8px}@media(max-width:560px){.lane{grid-template-columns:1fr}.event,.bar{grid-template-columns:1fr}}\n</style><label>Requested order <select id=\"orderId\"><option value=\"42\">42 (Alice)</option><option value=\"43\">43 (Bob)</option></select></label><label><input id=\"objectCheck\" type=\"checkbox\" checked> enforce object-owner check</label><div id=\"bolaWorld\" class=\"world\"></div>",
+    "js": "function paintBola(){const id=orderId.value,owner=id==='42'?'Alice':'Bob',allowed=!objectCheck.checked||owner==='Alice';bolaWorld.innerHTML='<div class=\"lane\"><div class=\"box good\"><strong>Authentication</strong><br>valid token: Alice</div><div class=\"box\"><strong>Object</strong><br>order '+id+' · owner '+owner+'</div><div class=\"box '+(allowed?'good':'bad')+'\"><strong>Authorization</strong><br>'+(allowed?(owner==='Alice'?'ALLOW owner':'VULNERABLE allow'):'DENY: not owner')+'</div></div><p>'+(objectCheck.checked?'Policy uses user + action + object.':'Handler trusts the ID after token validation—this is the BOLA bug.')+'</p>';}orderId.onchange=paintBola;objectCheck.onchange=paintBola;paintBola();",
+    "questions": [
+      [
+        "Alice has a valid token. May she read Bob’s order?",
+        [
+          "Yes, authentication is enough",
+          "Only if object-level policy allows that action",
+          "Yes, if the ID is a UUID"
+        ],
+        1,
+        "Authentication does not grant access to every object."
+      ],
+      [
+        "Do random object IDs replace authorization?",
+        [
+          "Yes",
+          "No—they are defense-in-depth only",
+          "Only in GraphQL"
+        ],
+        1,
+        "An unguessable ID does not define permission."
+      ],
+      [
+        "Where must the check run?",
+        [
+          "Server-side for every object/action path",
+          "Only in the browser",
+          "Only in documentation"
+        ],
+        0,
+        "Clients are not trusted enforcement points."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "orders={42:'Alice',43:'Bob'}\nuser='Alice'",
+          "note": "Authenticate Alice and load the two ownership records."
+        },
+        {
+          "code": "requested_id=43\nowner=orders[requested_id]",
+          "note": "Alice changes only the object identifier."
+        },
+        {
+          "code": "authenticated=True",
+          "note": "The token remains valid; authentication still passes."
+        },
+        {
+          "code": "authorized=authenticated and owner==user",
+          "note": "Object-level policy correctly denies Bob’s order."
+        }
+      ],
+      "expect": {
+        "authorized": false
+      },
+      "limit": "This is a local authorization model, not a complete IAM system. Real services need tenant boundaries, role/attribute policy, batch semantics, existence-leak decisions, caching rules, audit logs, race handling, and tests for every action.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "orders": {
+              "42": "Alice",
+              "43": "Bob"
+            },
+            "user": "Alice"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "orders": {
+              "42": "Alice",
+              "43": "Bob"
+            },
+            "user": "Alice",
+            "requested_id": 43,
+            "owner": "Bob"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "orders": {
+              "42": "Alice",
+              "43": "Bob"
+            },
+            "user": "Alice",
+            "requested_id": 43,
+            "owner": "Bob",
+            "authenticated": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "orders": {
+              "42": "Alice",
+              "43": "Bob"
+            },
+            "user": "Alice",
+            "requested_id": 43,
+            "owner": "Bob",
+            "authenticated": true,
+            "authorized": false
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "OWASP API Security Top 10 2023: Broken Object Level Authorization",
+        "https://api-security.owasp.org/editions/2023/en/0xa1-broken-object-level-authorization/",
+        "OWASP API1:2023"
+      ],
+      [
+        "OAuth 2.0 Bearer Token Usage",
+        "https://www.rfc-editor.org/rfc/rfc6750.html",
+        "RFC 6750"
+      ],
+      [
+        "OWASP Authorization Cheat Sheet",
+        "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html",
+        "Living guidance"
+      ]
+    ],
+    "visual_explanation": "Three boxes force three questions in order: who is the caller, which object is requested, and may that caller perform this action on that object? The vulnerable mode visibly skips only the third question.",
+    "written_questions": [
+      "How would you test BOLA across REST, GraphQL, and gRPC endpoints in your platform?",
+      "Would your service return 403 or 404 for a forbidden object, and what information tradeoff drives that choice?"
+    ],
+    "source_checked_on": "2026-10-17"
+  }
+]
