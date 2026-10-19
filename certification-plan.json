@@ -396,6 +396,42 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day29/data-engineering",
+      "product_material_added_on": "2026-10-19",
+      "session_type": "consolidation_case",
+      "cycle_position": 6,
+      "cycle_origin": "Day24",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "ingestion",
+        "transformation_modeling",
+        "lakeflow_jobs",
+        "troubleshooting_optimization",
+        "governance_security"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official current overview verified 2026-10-15; full objective IDs and weights still unverified; planning groups only",
+      "snowflake_planning_groups": [
+        "loading_unloading_transformation",
+        "account_warehouse_access",
+        "performance",
+        "collaboration_protection"
+      ],
+      "source_checked_on": "2026-10-19",
+      "source_versions": {
+        "databricks": "Auto Loader, Delta MERGE, job repair, SQL warehouse and sharing docs checked 2026-10-19; exam guide dated 2026-05-04",
+        "snowflake": "COPY/load metadata, MERGE, warehouse scaling and Secure Sharing docs checked 2026-10-19; current COF-C03 overview checked 2026-10-15"
+      },
+      "depth": "Cycle-two consolidation case joining file identity, deterministic merge, repeat-safe repair, compute choice and revocable live sharing; not complete exam coverage",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql_or_python": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -455,6 +491,11 @@
       "day_number": 28,
       "date": "2026-10-18",
       "key": "Day22/data-engineering+products+1"
+    },
+    {
+      "day_number": 29,
+      "date": "2026-10-19",
+      "key": "Day21/data-engineering+products+3"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
@@ -480,7 +521,7 @@
       "6": "consolidation_case",
       "7": "retrieval_gap"
     },
-    "next_consolidation_day": 29,
+    "next_consolidation_day": 36,
     "next_retrieval_day": 30
   }
 }
