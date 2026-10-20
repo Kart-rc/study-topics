@@ -432,6 +432,42 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day30/data-engineering",
+      "product_material_added_on": "2026-10-20",
+      "session_type": "retrieval_gap",
+      "cycle_position": 7,
+      "cycle_origin": "Day24",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "ingestion",
+        "transformation_modeling",
+        "lakeflow_jobs",
+        "troubleshooting_optimization",
+        "governance_security"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official current overview verified 2026-10-15; full objective IDs and weights still unverified; planning groups only",
+      "snowflake_planning_groups": [
+        "loading_unloading_transformation",
+        "account_warehouse_access",
+        "performance",
+        "collaboration_protection"
+      ],
+      "source_checked_on": "2026-10-20",
+      "source_versions": {
+        "databricks": "Certification overview plus Auto Loader, MERGE, job repair, SQL warehouse and sharing documentation retrieved through cycle two; guide dated 2026-05-04",
+        "snowflake": "COF-C03 overview plus staged metadata, MERGE, task graph, warehouse and sharing documentation retrieved through cycle two; full guide IDs/weights unverified"
+      },
+      "depth": "Cycle-two retrieval and gap detection across delivered controls. No personal gaps inferred and no complete exam coverage claim.",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql_or_python": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -496,6 +532,11 @@
       "day_number": 29,
       "date": "2026-10-19",
       "key": "Day21/data-engineering+products+3"
+    },
+    {
+      "day_number": 30,
+      "date": "2026-10-20",
+      "key": "Day23/data-engineering+products+1"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
@@ -522,6 +563,6 @@
       "7": "retrieval_gap"
     },
     "next_consolidation_day": 36,
-    "next_retrieval_day": 30
+    "next_retrieval_day": 37
   }
 }
