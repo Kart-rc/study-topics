@@ -1,0 +1,1108 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "One table, different rows: query-time row access policies",
+    "goal": "Filter rows by the caller's identity without making a separate table per team.",
+    "tag": "Certification focus · cycle 3, position 2",
+    "concept": "<p>A hotel clerk may open the same booking system as a regional manager, but should see fewer rooms. The table does not change; the <strong>visible result</strong> changes with the caller.</p><p>A row policy is a predicate evaluated at query time. It does not grant table access by itself. First the caller needs ordinary object privileges; then the policy removes rows that are outside that caller's allowed region.</p>",
+    "example": "<p>The table contains orders <code>east-42</code>, <code>west-77</code>, and <code>east-99</code>. The group <code>east_analysts</code> receives two east rows. <code>west_analysts</code> receives one west row. A governance administrator may receive all three. The physical rows are unchanged.</p>",
+    "use_case": {
+      "when": "Use row-level policy when many users query the same governed table but each user or role may see only a subset of rows.",
+      "example": "Regional finance teams share one orders table; east analysts must never receive west customer records.",
+      "decision": "Choose a centralized policy when the rule repeats across many tables; use a table-level rule for narrow table-specific logic. Prefer separate datasets when legal or operational isolation requires a stronger physical boundary."
+    },
+    "practice": "Switch the active identity. Predict which order cards survive the policy before revealing the result.",
+    "boundary": "The browser filters three synthetic rows locally. It does not execute Unity Catalog or Snowflake, prove that identity groups are configured correctly, model policy-owner privileges, prevent inference through every query, or measure policy cost. Vendor SQL is sourced but not executed.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.2rem;font-weight:850}.lanes{display:grid;grid-template-columns:130px 1fr;gap:8px}.lane{display:contents}.label{font-weight:800;padding:10px}.records{display:flex;gap:8px;flex-wrap:wrap}.record{border:2px solid #78958b;border-radius:10px;padding:10px;min-width:110px;background:#fbfdfb}.hidden{opacity:.25;text-decoration:line-through}.snapshot{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stack{display:grid;gap:8px}.bar{height:34px;border-radius:8px;padding:7px 10px;box-sizing:border-box;font-weight:800}.toil{background:#ffd0c6;border:2px solid #a43d32}.engineering{background:#cceccb;border:2px solid #277761}.handoff{display:grid;grid-template-columns:1fr 60px 1fr;gap:8px;align-items:center}.parcel{border:2px solid #668f82;border-radius:12px;padding:12px;background:#fbfdfb}.molecule{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.pool{border:2px solid #6f9287;border-radius:12px;padding:12px;min-height:105px}.gate{border:3px solid #6f9287;border-radius:12px;padding:13px}.channel{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.status{font-weight:800;padding:10px;border-radius:9px}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.snapshot,.handoff,.molecule,.channel{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.lane{display:grid}.records{display:grid}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label>Caller <select id=\"policyCaller\"><option value=\"east\">east analyst</option><option value=\"west\">west analyst</option><option value=\"admin\">governance admin</option></select></label><div id=\"policyWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "const policyRows=[['east-42','east'],['west-77','west'],['east-99','east']];function paintPolicy(){const who=policyCaller.value;policyWorld.innerHTML='<div class=records>'+policyRows.map(r=>'<div class=\"record '+(who==='admin'||r[1]===who?'ok':'hidden')+'\"><strong>'+r[0]+'</strong><br>region='+r[1]+'<br>'+(who==='admin'||r[1]===who?'returned':'filtered before result')+'</div>').join('')+'</div><p><strong>Visible rows:</strong> '+policyRows.filter(r=>who==='admin'||r[1]===who).map(r=>r[0]).join(', ')+'</p>';};policyCaller.onchange=paintPolicy;paintPolicy();",
+    "questions": [
+      [
+        "An east analyst has SELECT on the table. What does the row policy add?",
+        [
+          "It removes rows whose predicate is false",
+          "It creates a new physical table",
+          "It grants SELECT"
+        ],
+        0,
+        "Object privileges allow the query; the row policy narrows its result."
+      ],
+      [
+        "Why test the policy as multiple identities?",
+        [
+          "The same SQL must yield the intended different row sets",
+          "Policies run only for admins",
+          "Identity never affects evaluation"
+        ],
+        0,
+        "The security property is identity-dependent output."
+      ],
+      [
+        "What is outside a row policy's boundary?",
+        [
+          "Physical isolation and every side channel",
+          "Filtering SELECT results",
+          "Using a row attribute"
+        ],
+        0,
+        "A logical query-time filter is not a separate account or storage boundary."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "rows = [('east-42', 'east'), ('west-77', 'west'), ('east-99', 'east')]",
+          "note": "Use one physical row set."
+        },
+        {
+          "code": "caller_region = 'east'",
+          "note": "Represent the authenticated caller's authorized region."
+        },
+        {
+          "code": "visible = [order for order, region in rows if region == caller_region]",
+          "note": "Apply the policy predicate before results leave the query boundary."
+        },
+        {
+          "code": "visible_count = len(visible)",
+          "note": "The east caller sees two of three rows."
+        }
+      ],
+      "expect": {
+        "visible_count": 2
+      },
+      "limit": "The browser filters three synthetic rows locally. It does not execute Unity Catalog or Snowflake, prove that identity groups are configured correctly, model policy-owner privileges, prevent inference through every query, or measure policy cost. Vendor SQL is sourced but not executed.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "rows": [
+              [
+                "east-42",
+                "east"
+              ],
+              [
+                "west-77",
+                "west"
+              ],
+              [
+                "east-99",
+                "east"
+              ]
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "rows": [
+              [
+                "east-42",
+                "east"
+              ],
+              [
+                "west-77",
+                "west"
+              ],
+              [
+                "east-99",
+                "east"
+              ]
+            ],
+            "caller_region": "east"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "rows": [
+              [
+                "east-42",
+                "east"
+              ],
+              [
+                "west-77",
+                "west"
+              ],
+              [
+                "east-99",
+                "east"
+              ]
+            ],
+            "caller_region": "east",
+            "visible": [
+              "east-42",
+              "east-99"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "rows": [
+              [
+                "east-42",
+                "east"
+              ],
+              [
+                "west-77",
+                "west"
+              ],
+              [
+                "east-99",
+                "east"
+              ]
+            ],
+            "caller_region": "east",
+            "visible": [
+              "east-42",
+              "east-99"
+            ],
+            "visible_count": 2
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks row filters and column masks",
+        "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks",
+        "Updated October 9, 2026"
+      ],
+      [
+        "Databricks manual row-filter syntax",
+        "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply",
+        "Updated October 8, 2026"
+      ],
+      [
+        "Snowflake row access policies",
+        "https://docs.snowflake.com/en/user-guide/security-row-intro",
+        "Living documentation"
+      ],
+      [
+        "Snowflake CREATE ROW ACCESS POLICY",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-row-access-policy",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The same three row cards stay in place while the caller changes. Cards become visible or crossed out at the policy boundary, so identity-dependent results are concrete.",
+    "written_questions": [
+      "How would you test that a new region cannot see another region's rows after a mapping change?",
+      "When would you choose separate accounts or catalogs instead of a row policy?"
+    ],
+    "source_checked_on": "2026-10-22",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: Unity Catalog row filter UDF",
+        "minutes": 9,
+        "html": "<p><strong>Mechanism.</strong> A SQL UDF returns true for rows the caller may see. Attach it with <code>ALTER TABLE ... SET ROW FILTER</code>. Databricks recommends ABAC policies when the same rule must scale across many tagged tables.</p><pre><code><span>-- sourced pattern; not executed here</span><span>CREATE FUNCTION governance.region_filter(region STRING)</span><span>RETURN is_account_group_member('governance_admin')</span><span>   OR is_account_group_member(concat(region, '_analysts'));</span><span>ALTER TABLE sales.orders</span><span>SET ROW FILTER governance.region_filter ON (region);</span></code></pre><label>Databricks group <select id=\"dbRole\"><option value=\"east\">east_analysts</option><option value=\"west\">west_analysts</option><option value=\"admin\">governance_admin</option></select></label><div id=\"dbPolicyWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> A per-table filter can be missed on a newly created table. For broad repeatable governance, use tagged ABAC policies and test policy coverage. The filter is an added restriction; base privileges are still required.</p><p><strong>Boundary.</strong> Unity Catalog is required. UDF complexity and secure evaluation can affect optimization. This lesson does not run the SQL.</p>",
+        "markdown": "Databricks uses a row-filter UDF attached to a Unity Catalog table. Rows for which the function returns false are excluded. Prefer ABAC for repeatable tag-driven coverage across many tables. SQL is unexecuted.",
+        "javascript": "const dbRole=$('dbRole'),dbPolicyWorld=$('dbPolicyWorld');function paintDbPolicy(){const r=dbRole.value;dbPolicyWorld.innerHTML='<div class=records>'+policyRows.map(x=>'<div class=\"record '+(r==='admin'||x[1]===r?'ok':'hidden')+'\"><strong>'+x[0]+'</strong><br>UDF → '+(r==='admin'||x[1]===r?'TRUE':'FALSE')+'</div>').join('')+'</div><p>Local identity/predicate model; no Databricks query ran.</p>';};dbRole.onchange=paintDbPolicy;paintDbPolicy();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: schema-level row access policy",
+        "minutes": 9,
+        "html": "<p><strong>Mechanism.</strong> A row access policy is a schema object whose boolean expression is evaluated at query time. Attach it to one or more tables or views. Snowflake evaluates its expression using the policy owner's role, enabling protected mapping-table lookups.</p><pre><code><span>-- sourced pattern; not executed here</span><span>CREATE ROW ACCESS POLICY governance.region_policy</span><span>AS (region STRING) RETURNS BOOLEAN -&gt;</span><span>  CURRENT_ROLE() = 'GOVERNANCE_ADMIN'</span><span>  OR EXISTS (SELECT 1 FROM governance.role_region</span><span>             WHERE role_name = CURRENT_ROLE()</span><span>               AND allowed_region = region);</span><span>ALTER TABLE sales.orders ADD ROW ACCESS POLICY</span><span>  governance.region_policy ON (region);</span></code></pre><label>Snowflake role <select id=\"sfRole\"><option value=\"east\">EAST_ANALYST</option><option value=\"west\">WEST_ANALYST</option><option value=\"admin\">GOVERNANCE_ADMIN</option></select></label><div id=\"sfPolicyWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> A row access policy controls visibility; it does not stop inserts or changes to rows a role can already modify. Grant DML separately and test that policy context, ownership, and mapping rows are correct.</p><p><strong>Boundary.</strong> Row access policies are an Enterprise Edition feature. Policy evaluation and mapping-table design have privilege and performance implications. This lesson does not run the SQL.</p>",
+        "markdown": "Snowflake row access policies are reusable schema objects attached to tables or views. Their boolean expression controls which rows appear at query time. They do not independently block inserts or grant object privileges. SQL is unexecuted.",
+        "javascript": "const sfRole=$('sfRole'),sfPolicyWorld=$('sfPolicyWorld');function paintSfPolicy(){const r=sfRole.value;sfPolicyWorld.innerHTML='<div class=records>'+policyRows.map(x=>'<div class=\"record '+(r==='admin'||x[1]===r?'ok':'hidden')+'\"><strong>'+x[0]+'</strong><br>policy → '+(r==='admin'||x[1]===r?'TRUE':'FALSE')+'</div>').join('')+'</div><p>Local role/mapping model; no Snowflake query ran.</p>';};sfRole.onchange=paintSfPolicy;paintSfPolicy();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Policy unit</td><td>SQL UDF attached to table, or centralized ABAC policy</td><td>Reusable schema-level row access policy attached to table/view</td></tr><tr><td>Identity</td><td>Account group membership functions</td><td>Role/context functions and optional mapping table</td></tr><tr><td>Broad scale</td><td>ABAC with governed tags is recommended</td><td>Reuse one policy across objects; tag-based policies also exist</td></tr><tr><td>Important limit</td><td>Does not grant base table access</td><td>Does not prevent inserts or visible-row DML by itself</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Unit | UDF or ABAC policy | schema-level row policy |\n| Identity | account groups | roles/context |\n| Scale | ABAC tags | reusable/tag policies |\n| Limit | no base grant | no insert/DML prevention |"
+    },
+    "product_questions": [
+      [
+        "A new governed table needs the same tagged region rule in Databricks. Which approach reduces missed per-table attachment?",
+        [
+          "A centralized ABAC policy",
+          "A local browser filter",
+          "A copy per user"
+        ],
+        0,
+        "ABAC can apply policies automatically based on governed tags."
+      ],
+      [
+        "A Snowflake row policy hides west rows from an east role. What must still be controlled separately?",
+        [
+          "Object and DML privileges",
+          "Whether SQL has rows",
+          "The role's display name"
+        ],
+        0,
+        "Visibility policies do not replace ordinary authorization."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks row filters and column masks",
+        "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks",
+        "Updated October 9, 2026"
+      ],
+      [
+        "Databricks ROW FILTER clause",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-row-filter",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Snowflake row access policies",
+        "https://docs.snowflake.com/en/user-guide/security-row-intro",
+        "Living documentation"
+      ],
+      [
+        "Snowflake CREATE ROW ACCESS POLICY",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-row-access-policy",
+        "Living documentation"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-22",
+      "session_type": "focused",
+      "cycle_position": 2,
+      "cycle_origin": "Day31",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "governance_security"
+        ],
+        "scope": "Unity Catalog row filters, group-aware predicates, ABAC scaling choice, privileges and performance boundary. Delivered coverage is not mastery."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "blueprint_status": "Official current overview verified 2026-10-21; full objective IDs and weights remain unverified",
+        "planning_groups": [
+          "account_warehouse_access",
+          "collaboration_protection"
+        ],
+        "scope": "Row access policy object, runtime role context, mapping tables, privileges and DML boundary. Full COF-C03 coverage is not claimed."
+      },
+      "product_lab_execution": "not_run"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Readers keep a snapshot; writers pay for a copy",
+    "goal": "Use CopyOnWriteArrayList only when reads vastly outnumber writes.",
+    "tag": "Java concurrency · snapshot iteration",
+    "concept": "<p>A museum prints a visitor map each morning. Visitors can keep reading that map even while staff prepare tomorrow's version. Readers never see half-edited ink; the staff pays the cost of printing a new map.</p><p><code>CopyOnWriteArrayList</code> works that way. A mutation copies the backing array. An iterator keeps the array reference it captured, so later additions do not appear in that iterator.</p>",
+    "example": "<p>A listener list starts as <code>[billing, audit]</code>. Request A creates an iterator. Another thread adds <code>fraud</code>, producing a new array. Request A still calls only billing and audit. A new request sees all three listeners.</p>",
+    "use_case": {
+      "when": "Use it for small listener, route, or configuration lists that are traversed constantly and changed rarely.",
+      "example": "A Java service invokes two event listeners on every Kafka record but updates the listener set only during a rare configuration change.",
+      "decision": "Choose it when traversal dominates and stale snapshot iteration is acceptable. Use another concurrent structure or explicit immutable snapshot publication when writes, list size, or freshness requirements make copying expensive."
+    },
+    "practice": "Create an iterator, then add a listener. Compare the old iterator's snapshot with a newly created iterator.",
+    "boundary": "The browser models array identities and snapshot visibility. The Java replay runs single-threaded. Neither measures allocation, contention, GC cost, or timing, and it does not prove correctness for mutable elements stored inside the list.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.2rem;font-weight:850}.lanes{display:grid;grid-template-columns:130px 1fr;gap:8px}.lane{display:contents}.label{font-weight:800;padding:10px}.records{display:flex;gap:8px;flex-wrap:wrap}.record{border:2px solid #78958b;border-radius:10px;padding:10px;min-width:110px;background:#fbfdfb}.hidden{opacity:.25;text-decoration:line-through}.snapshot{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stack{display:grid;gap:8px}.bar{height:34px;border-radius:8px;padding:7px 10px;box-sizing:border-box;font-weight:800}.toil{background:#ffd0c6;border:2px solid #a43d32}.engineering{background:#cceccb;border:2px solid #277761}.handoff{display:grid;grid-template-columns:1fr 60px 1fr;gap:8px;align-items:center}.parcel{border:2px solid #668f82;border-radius:12px;padding:12px;background:#fbfdfb}.molecule{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.pool{border:2px solid #6f9287;border-radius:12px;padding:12px;min-height:105px}.gate{border:3px solid #6f9287;border-radius:12px;padding:13px}.channel{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.status{font-weight:800;padding:10px;border-radius:9px}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.snapshot,.handoff,.molecule,.channel{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.lane{display:grid}.records{display:grid}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label><input id=\"addListener\" type=\"checkbox\"> add fraud after iterator creation</label><div id=\"cowWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintCow(){const add=addListener.checked;cowWorld.innerHTML='<div class=snapshot><div class=node><strong>iterator snapshot · array A</strong><br>billing · audit</div><div class=\"node '+(add?'ok':'wait')+'\"><strong>current list · '+(add?'array B':'array A')+'</strong><br>billing · audit'+(add?' · fraud':'')+'</div></div><p>Old iterator sees 2; new iterator sees '+(add?3:2)+'.</p>';};addListener.onchange=paintCow;paintCow();",
+    "questions": [
+      [
+        "An iterator exists before fraud is added. What does it see?",
+        [
+          "Only billing and audit",
+          "All three listeners",
+          "A ConcurrentModificationException"
+        ],
+        0,
+        "The iterator keeps its creation-time array snapshot."
+      ],
+      [
+        "Why can traversal avoid synchronization?",
+        [
+          "The captured array is not mutated",
+          "All writes are ignored",
+          "Elements become immutable"
+        ],
+        0,
+        "Writers publish a fresh backing array."
+      ],
+      [
+        "When is this structure a poor fit?",
+        [
+          "Large or frequently mutated lists",
+          "Tiny read-mostly lists",
+          "Snapshot-tolerant listener registries"
+        ],
+        0,
+        "Every mutation copies the backing array."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var listeners = new java.util.concurrent.CopyOnWriteArrayList<String>(java.util.List.of(\"billing\", \"audit\"));",
+          "note": "Create the read-mostly listener list."
+        },
+        {
+          "code": "var oldIterator = listeners.iterator();",
+          "note": "The iterator captures the current backing-array snapshot."
+        },
+        {
+          "code": "listeners.add(\"fraud\");",
+          "note": "The write publishes a copied array containing three values."
+        },
+        {
+          "code": "var currentCount = listeners.size(); var oldCount = 0; while (oldIterator.hasNext()) { oldIterator.next(); oldCount++; }",
+          "note": "The current list has three values while the old snapshot still has two."
+        }
+      ],
+      "expect": {
+        "oldCount": "2",
+        "currentCount": "3"
+      },
+      "limit": "The browser models array identities and snapshot visibility. The Java replay runs single-threaded. Neither measures allocation, contention, GC cost, or timing, and it does not prove correctness for mutable elements stored inside the list.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "listeners": "[billing, audit]"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "listeners": "[billing, audit]",
+            "oldIterator": "java.util.concurrent.CopyOnWriteArrayList$COWIterator@2928854b"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "listeners": "[billing, audit, fraud]",
+            "oldIterator": "java.util.concurrent.CopyOnWriteArrayList$COWIterator@2928854b"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "listeners": "[billing, audit, fraud]",
+            "oldIterator": "java.util.concurrent.CopyOnWriteArrayList$COWIterator@2928854b",
+            "currentCount": "3",
+            "oldCount": "2"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java 26 CopyOnWriteArrayList API",
+        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/concurrent/CopyOnWriteArrayList.html",
+        "Java SE 26"
+      ]
+    ],
+    "visual_explanation": "Two arrays are shown at once because that is the core mechanism: the old iterator stays attached to A while a writer publishes B.",
+    "written_questions": [
+      "What listener freshness guarantee does your service actually need?",
+      "How would you measure whether copy allocation is material at production list sizes?"
+    ],
+    "source_checked_on": "2026-10-22"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Put toil on a budget before it owns the roadmap",
+    "goal": "Turn recurring operational work into a visible capacity decision.",
+    "tag": "Organizational leverage · toil budget",
+    "concept": "<p>A team has a 40-hour jar. Every manual replay, access fix, and release ticket takes time from the same jar as reliability engineering. If recurring work grows quietly, roadmap misses look like an execution problem instead of a capacity fact.</p><p>Google SRE defines toil as work that is manual, repetitive, automatable, tactical, lacks enduring value, or grows linearly with the service. The leadership move is to measure it, cap it, and fund work that removes the largest recurring source.</p>",
+    "example": "<p>A six-person platform group spends 108 hours each week on manual tenant onboarding: 45% of its 240-hour capacity. A 30% local toil budget allows 72 hours. The 36-hour overflow is explicit. Automating onboarding by 24 hours still leaves a 12-hour gap; leaders must remove more toil, reduce commitments, or add sustainable capacity.</p>",
+    "use_case": {
+      "when": "Use a toil budget when repeated operational work keeps displacing platform improvements or grows with tenants, pipelines, or services.",
+      "example": "Every new data domain requires four manual IAM, catalog, and topic tickets, so onboarding work scales linearly with adoption.",
+      "decision": "Classify work by its attributes, measure hands-on time, set a local target, and rank elimination projects by recurring hours removed and risk. Do not label necessary novel incident learning as toil just because it is unpleasant."
+    },
+    "practice": "Move weekly toil hours. Watch which roadmap capacity disappears and when the chosen budget is exceeded.",
+    "boundary": "This is a capacity arithmetic model, not a universal staffing prescription. Google's published 50% SRE goal is context, not a mandated target for every team. The model ignores interrupt variance, skill mix, on-call recovery, and project dependencies.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.2rem;font-weight:850}.lanes{display:grid;grid-template-columns:130px 1fr;gap:8px}.lane{display:contents}.label{font-weight:800;padding:10px}.records{display:flex;gap:8px;flex-wrap:wrap}.record{border:2px solid #78958b;border-radius:10px;padding:10px;min-width:110px;background:#fbfdfb}.hidden{opacity:.25;text-decoration:line-through}.snapshot{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stack{display:grid;gap:8px}.bar{height:34px;border-radius:8px;padding:7px 10px;box-sizing:border-box;font-weight:800}.toil{background:#ffd0c6;border:2px solid #a43d32}.engineering{background:#cceccb;border:2px solid #277761}.handoff{display:grid;grid-template-columns:1fr 60px 1fr;gap:8px;align-items:center}.parcel{border:2px solid #668f82;border-radius:12px;padding:12px;background:#fbfdfb}.molecule{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.pool{border:2px solid #6f9287;border-radius:12px;padding:12px;min-height:105px}.gate{border:3px solid #6f9287;border-radius:12px;padding:13px}.channel{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.status{font-weight:800;padding:10px;border-radius:9px}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.snapshot,.handoff,.molecule,.channel{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.lane{display:grid}.records{display:grid}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label>Weekly toil hours <input id=\"toilHours\" type=\"range\" min=\"0\" max=\"240\" step=\"12\" value=\"108\"></label><div id=\"toilWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintToil(){const toil=+toilHours.value,total=240,budget=72,eng=total-toil;toilWorld.innerHTML='<div class=stack><div class=\"bar toil\" style=\"width:'+Math.max(8,toil/total*100)+'%\">toil '+toil+'h</div><div class=\"bar engineering\" style=\"width:'+Math.max(8,eng/total*100)+'%\">engineering '+eng+'h</div></div><p class=\"status '+(toil>budget?'fail':'ok')+'\">30% local budget = 72h · '+(toil>budget?'overflow '+(toil-budget)+'h':'headroom '+(budget-toil)+'h')+'</p>';};toilHours.oninput=paintToil;paintToil();",
+    "questions": [
+      [
+        "What makes manual onboarding likely toil?",
+        [
+          "It repeats, is automatable, and scales with tenants",
+          "It involves production",
+          "Someone dislikes it"
+        ],
+        0,
+        "Toil is classified by work characteristics, not taste."
+      ],
+      [
+        "Why publish a toil budget?",
+        [
+          "It turns hidden displacement into an explicit capacity tradeoff",
+          "It guarantees automation success",
+          "It eliminates on-call"
+        ],
+        0,
+        "A budget makes overflow and sacrificed engineering visible."
+      ],
+      [
+        "What is a boundary of the 50% figure?",
+        [
+          "It is Google SRE context, not a universal mandate",
+          "It applies only to Java teams",
+          "It proves 49% is healthy"
+        ],
+        0,
+        "Each team needs a context-appropriate target and evidence."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "weekly_capacity = 240",
+          "note": "Six people provide a simplified 240-hour weekly pool."
+        },
+        {
+          "code": "toil_hours = 108",
+          "note": "Measure recurring hands-on operational time."
+        },
+        {
+          "code": "budget_hours = int(weekly_capacity * 0.30)",
+          "note": "Set a deliberate local 30% cap."
+        },
+        {
+          "code": "overflow = max(0, toil_hours - budget_hours)",
+          "note": "Make the displaced 36 hours explicit."
+        }
+      ],
+      "expect": {
+        "overflow": 36
+      },
+      "limit": "This is a capacity arithmetic model, not a universal staffing prescription. Google's published 50% SRE goal is context, not a mandated target for every team. The model ignores interrupt variance, skill mix, on-call recovery, and project dependencies.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "weekly_capacity": 240
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "weekly_capacity": 240,
+            "toil_hours": 108
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "weekly_capacity": 240,
+            "toil_hours": 108,
+            "budget_hours": 72
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "weekly_capacity": 240,
+            "toil_hours": 108,
+            "budget_hours": 72,
+            "overflow": 36
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Google SRE: Eliminating Toil",
+        "https://sre.google/sre-book/eliminating-toil/",
+        "Foundational SRE chapter"
+      ],
+      [
+        "Google SRE production services best practices",
+        "https://sre.google/sre-book/service-best-practices/",
+        "Living guidance"
+      ]
+    ],
+    "visual_explanation": "The single capacity jar is rendered as two proportional bars; increasing toil visibly shrinks engineering work and crosses a named budget line.",
+    "written_questions": [
+      "Which recurring task consumes the most hands-on hours per month, and what evidence supports that estimate?",
+      "What commitment would you explicitly defer if toil remains above budget next quarter?"
+    ],
+    "source_checked_on": "2026-10-22"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Hand off only the context the next agent needs",
+    "goal": "Filter agent handoff history without pretending it is an authorization boundary.",
+    "tag": "Harness engineering · context transfer",
+    "concept": "<p>A hospital referral should carry the diagnosis and relevant tests, not every hallway conversation. An agent handoff has the same design choice: the next specialist can receive the full conversation, or a filtered version.</p><p>In the OpenAI Agents SDK, a handoff input filter transforms <code>HandoffInputData</code>. It can remove tool chatter or summarize prior history. That changes context quality and privacy exposure; it does not grant or revoke tool authority.</p>",
+    "example": "<p>A triage agent collects an order number, a customer email, two tool results, and a refund reason. The refund specialist needs the order number and reason. The filter drops tool-call plumbing and redacts the email before the handoff. The specialist's tool permissions are configured separately.</p>",
+    "use_case": {
+      "when": "Use a handoff filter when a specialist needs a narrower, cleaner, or redacted history than the originating agent accumulated.",
+      "example": "A support triage agent delegates a refund decision while keeping payment lookup internals and unrelated conversation out of the specialist context.",
+      "decision": "Define the minimum fields needed for the next task, preserve auditability of what was transferred, and test omissions. Use separate tool and authorization controls; context filtering alone is not least privilege."
+    },
+    "practice": "Toggle full and filtered transfer. Inspect exactly which context items cross the handoff boundary.",
+    "boundary": "This browser moves synthetic cards. It does not run an agent, summarize with a model, enforce tool permissions, protect server-managed conversations, or prove privacy. Official docs note server-managed conversations do not support handoff input filters through RunConfig.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.2rem;font-weight:850}.lanes{display:grid;grid-template-columns:130px 1fr;gap:8px}.lane{display:contents}.label{font-weight:800;padding:10px}.records{display:flex;gap:8px;flex-wrap:wrap}.record{border:2px solid #78958b;border-radius:10px;padding:10px;min-width:110px;background:#fbfdfb}.hidden{opacity:.25;text-decoration:line-through}.snapshot{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stack{display:grid;gap:8px}.bar{height:34px;border-radius:8px;padding:7px 10px;box-sizing:border-box;font-weight:800}.toil{background:#ffd0c6;border:2px solid #a43d32}.engineering{background:#cceccb;border:2px solid #277761}.handoff{display:grid;grid-template-columns:1fr 60px 1fr;gap:8px;align-items:center}.parcel{border:2px solid #668f82;border-radius:12px;padding:12px;background:#fbfdfb}.molecule{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.pool{border:2px solid #6f9287;border-radius:12px;padding:12px;min-height:105px}.gate{border:3px solid #6f9287;border-radius:12px;padding:13px}.channel{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.status{font-weight:800;padding:10px;border-radius:9px}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.snapshot,.handoff,.molecule,.channel{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.lane{display:grid}.records{display:grid}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label><input id=\"filterHandoff\" type=\"checkbox\" checked> apply minimum-context filter</label><div id=\"handoffWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintHandoff(){const f=filterHandoff.checked;const all=['order=42','email=ada@example.com','tool raw JSON','reason=late'];const sent=f?['order=42','reason=late']:all;handoffWorld.innerHTML='<div class=handoff><div class=parcel><strong>triage context</strong><br>'+all.join('<br>')+'</div><div class=arrow>→</div><div class=\"parcel '+(f?'ok':'wait')+'\"><strong>refund agent receives</strong><br>'+sent.join('<br>')+'</div></div><p>'+(f?'Email and tool plumbing stay behind.':'Full history crosses the boundary.')+' Tool authority is unchanged.</p>';};filterHandoff.onchange=paintHandoff;paintHandoff();",
+    "questions": [
+      [
+        "What does a handoff input filter change?",
+        [
+          "The context passed to the next agent",
+          "The next agent's IAM role",
+          "The source database"
+        ],
+        0,
+        "It transforms handoff input data."
+      ],
+      [
+        "Why preserve order ID and reason?",
+        [
+          "They are necessary for the specialist's task",
+          "Every prior field is required",
+          "They grant refund authority"
+        ],
+        0,
+        "Minimum useful context keeps task-critical facts."
+      ],
+      [
+        "What must remain separate?",
+        [
+          "Tool authorization and action approval",
+          "History selection",
+          "Redaction tests"
+        ],
+        0,
+        "A smaller prompt is not an authorization boundary."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "history = ['order=42', 'email=ada@example.com', 'tool raw JSON', 'reason=late']",
+          "note": "Start with synthetic accumulated context."
+        },
+        {
+          "code": "needed_prefixes = ('order=', 'reason=')",
+          "note": "Declare the specialist's minimum required fields."
+        },
+        {
+          "code": "transferred = [item for item in history if item.startswith(needed_prefixes)]",
+          "note": "Filter before crossing the handoff boundary."
+        },
+        {
+          "code": "transferred_count = len(transferred)",
+          "note": "Only two task-relevant items remain."
+        }
+      ],
+      "expect": {
+        "transferred_count": 2
+      },
+      "limit": "This browser moves synthetic cards. It does not run an agent, summarize with a model, enforce tool permissions, protect server-managed conversations, or prove privacy. Official docs note server-managed conversations do not support handoff input filters through RunConfig.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "history": [
+              "order=42",
+              "email=ada@example.com",
+              "tool raw JSON",
+              "reason=late"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "history": [
+              "order=42",
+              "email=ada@example.com",
+              "tool raw JSON",
+              "reason=late"
+            ],
+            "needed_prefixes": [
+              "order=",
+              "reason="
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "history": [
+              "order=42",
+              "email=ada@example.com",
+              "tool raw JSON",
+              "reason=late"
+            ],
+            "needed_prefixes": [
+              "order=",
+              "reason="
+            ],
+            "transferred": [
+              "order=42",
+              "reason=late"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "history": [
+              "order=42",
+              "email=ada@example.com",
+              "tool raw JSON",
+              "reason=late"
+            ],
+            "needed_prefixes": [
+              "order=",
+              "reason="
+            ],
+            "transferred": [
+              "order=42",
+              "reason=late"
+            ],
+            "transferred_count": 2
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI Agents SDK handoffs",
+        "https://openai.github.io/openai-agents-python/handoffs/",
+        "Living documentation"
+      ],
+      [
+        "Agents SDK handoff filters reference",
+        "https://openai.github.io/openai-agents-python/ref/extensions/handoff_filters/",
+        "Living documentation"
+      ],
+      [
+        "Agents SDK RunConfig reference",
+        "https://openai.github.io/openai-agents-python/ref/run_config/",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The handoff visual shows the full parcel and the filtered parcel simultaneously, making the transfer boundary and unchanged authority explicit.",
+    "written_questions": [
+      "Which exact fields would your specialist agent fail without?",
+      "How would you audit that a summary did not invent or omit a decision-critical fact?"
+    ],
+    "source_checked_on": "2026-10-22"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Concentrate phosphate where the reaction happens",
+    "goal": "Understand a new solid-electrolyte approach to dilute-water phosphate removal.",
+    "tag": "New research · published October 21, 2026",
+    "concept": "<p>Trying to catch a few grains of salt in a swimming pool is slow because the grains rarely reach the catcher. Dilute phosphate remediation has the same mass-transport problem.</p><p>A 2026 Nature Communications paper reports a solid-state electrolyte electrocoagulation system. Its interface enriches phosphate locally, then an anodic reaction forms coagulants at that same place. The research claim is that local concentration and improved ion transport accelerate removal in low-conductivity water.</p>",
+    "example": "<p>In a teaching model, 100 phosphate units are spread through a large volume. A conventional surface receives 10 units per interval. An enrichment interface receives 35, so more phosphate is available where coagulation occurs. The paper reports 0.197 mg/L·min removal, 0.0325 kWh/g P energy, and 3.829 g iron/g P in its evaluated setup.</p>",
+    "use_case": {
+      "when": "This is specialist research for decentralized treatment of low-level phosphate in low-conductivity natural water, not a general-purpose production recipe.",
+      "example": "The paper validates a photovoltaic-integrated boat-mounted unit intended to treat natural waters below a stated regulatory threshold.",
+      "decision": "Treat it as a research claim until site-specific water chemistry, maintenance, lifetime, safety, cost, by-products, scaling, and independent replication are evaluated. Do not transfer headline rates to another water body without testing."
+    },
+    "practice": "Change interface enrichment. Watch phosphate move from the dilute pool to the reaction surface and compare captured units per interval.",
+    "boundary": "This is an original mass-transfer teaching model, not the paper's equations, apparatus, dataset, or source-data analysis. It does not model electrochemistry, competing ions, fouling, hydrodynamics, energy, iron dose, or regulatory validation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.2rem;font-weight:850}.lanes{display:grid;grid-template-columns:130px 1fr;gap:8px}.lane{display:contents}.label{font-weight:800;padding:10px}.records{display:flex;gap:8px;flex-wrap:wrap}.record{border:2px solid #78958b;border-radius:10px;padding:10px;min-width:110px;background:#fbfdfb}.hidden{opacity:.25;text-decoration:line-through}.snapshot{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stack{display:grid;gap:8px}.bar{height:34px;border-radius:8px;padding:7px 10px;box-sizing:border-box;font-weight:800}.toil{background:#ffd0c6;border:2px solid #a43d32}.engineering{background:#cceccb;border:2px solid #277761}.handoff{display:grid;grid-template-columns:1fr 60px 1fr;gap:8px;align-items:center}.parcel{border:2px solid #668f82;border-radius:12px;padding:12px;background:#fbfdfb}.molecule{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.pool{border:2px solid #6f9287;border-radius:12px;padding:12px;min-height:105px}.gate{border:3px solid #6f9287;border-radius:12px;padding:13px}.channel{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.status{font-weight:800;padding:10px;border-radius:9px}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.snapshot,.handoff,.molecule,.channel{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.lane{display:grid}.records{display:grid}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label>Interface enrichment <input id=\"enrichment\" type=\"range\" min=\"10\" max=\"50\" value=\"35\"></label><div id=\"phosphateWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintPhosphate(){const e=+enrichment.value;phosphateWorld.innerHTML='<div class=molecule><div class=pool><strong>dilute water</strong><br>'+(100-e)+' units remain dispersed</div><div class=arrow>→ '+e+' units →</div><div class=\"pool ok\"><strong>solid interface</strong><br>enriched phosphate meets in-situ coagulant</div></div><p>Teaching throughput: '+e+' units/interval versus 10 without enrichment. This is not a measured paper result.</p>';};enrichment.oninput=paintPhosphate;paintPhosphate();",
+    "questions": [
+      [
+        "What bottleneck does interface enrichment address?",
+        [
+          "Dilute ions rarely reach the reaction site",
+          "Phosphate has no charge",
+          "Solar panels create phosphate"
+        ],
+        0,
+        "Local enrichment targets mass transport in dilute water."
+      ],
+      [
+        "What is coupled at the interface?",
+        [
+          "Ion enrichment and in-situ anodic coagulation",
+          "Weather forecasting and DNS",
+          "Only passive filtration"
+        ],
+        0,
+        "The paper's mechanism combines transport and reaction locally."
+      ],
+      [
+        "How should reported performance transfer to a new lake?",
+        [
+          "As a claim requiring site-specific validation",
+          "As a guaranteed universal rate",
+          "As a software benchmark"
+        ],
+        0,
+        "Water chemistry and operating conditions change outcomes."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "phosphate_units = 100",
+          "note": "Represent a dilute synthetic pool."
+        },
+        {
+          "code": "baseline_at_interface = 10",
+          "note": "Without enrichment, few units reach the reaction surface per interval."
+        },
+        {
+          "code": "enriched_at_interface = 35",
+          "note": "The teaching interface concentrates more units locally."
+        },
+        {
+          "code": "teaching_gain = enriched_at_interface / baseline_at_interface",
+          "note": "The simple model shows 3.5× local availability, not a paper result."
+        }
+      ],
+      "expect": {
+        "teaching_gain": 3.5
+      },
+      "limit": "This is an original mass-transfer teaching model, not the paper's equations, apparatus, dataset, or source-data analysis. It does not model electrochemistry, competing ions, fouling, hydrodynamics, energy, iron dose, or regulatory validation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "phosphate_units": 100
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "phosphate_units": 100,
+            "baseline_at_interface": 10
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "phosphate_units": 100,
+            "baseline_at_interface": 10,
+            "enriched_at_interface": 35
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "phosphate_units": 100,
+            "baseline_at_interface": 10,
+            "enriched_at_interface": 35,
+            "teaching_gain": 3.5
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Kinetic acceleration of phosphate remediation in dilute aquatic environments",
+        "https://www.nature.com/articles/s41467-026-78830-0",
+        "Published October 21, 2026"
+      ]
+    ],
+    "visual_explanation": "The visual moves a counted amount from a large dilute pool into a small reaction interface, directly illustrating the paper's proposed mass-transfer mechanism.",
+    "written_questions": [
+      "Which site-specific water properties could change the mechanism's performance?",
+      "What evidence would you require before operating this device in an ecosystem?"
+    ],
+    "source_checked_on": "2026-10-22"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "Block the newly vulnerable dependency, not the whole history",
+    "goal": "Use dependency review as a pull-request delta gate.",
+    "tag": "Security gate · dependency review",
+    "concept": "<p>A building inspector checks the new room added by today's permit, not every brick ever laid. GitHub dependency review compares dependency changes in a pull request and can fail when the change introduces a dependency with a known vulnerability.</p><p>The key word is <strong>introduced</strong>. A pull-request gate helps stop new risk from entering. Existing vulnerable dependencies still need an inventory and remediation program.</p>",
+    "example": "<p>A pull request upgrades <code>widget-lib</code> from 1.4 to 2.0 and adds <code>parser-x 3.1</code>. The dependency review finds a high-severity advisory on parser-x. With <code>fail-on-severity: high</code> and the job marked required, the merge is blocked. A moderate advisory does not cross that chosen threshold.</p>",
+    "use_case": {
+      "when": "Use dependency review on repositories whose pull requests change supported package manifests or lockfiles and where new vulnerable or disallowed dependencies should block merge.",
+      "example": "A Java data-service PR adds a serializer library; the required dependency-review job checks the dependency diff before the service can merge.",
+      "decision": "Choose a severity and license policy that matches organizational risk, make the check required, and manage exceptions explicitly. Pair it with scanning and remediation for vulnerabilities already present."
+    },
+    "practice": "Change the highest severity introduced by the PR. Watch the required check pass or block at the configured threshold.",
+    "boundary": "The browser evaluates four severity labels. It does not call GitHub, parse manifests, query the Advisory Database, model transitive reachability or license policy, or prove that a status check is required. Availability depends on GitHub plan and repository configuration.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.2rem;font-weight:850}.lanes{display:grid;grid-template-columns:130px 1fr;gap:8px}.lane{display:contents}.label{font-weight:800;padding:10px}.records{display:flex;gap:8px;flex-wrap:wrap}.record{border:2px solid #78958b;border-radius:10px;padding:10px;min-width:110px;background:#fbfdfb}.hidden{opacity:.25;text-decoration:line-through}.snapshot{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stack{display:grid;gap:8px}.bar{height:34px;border-radius:8px;padding:7px 10px;box-sizing:border-box;font-weight:800}.toil{background:#ffd0c6;border:2px solid #a43d32}.engineering{background:#cceccb;border:2px solid #277761}.handoff{display:grid;grid-template-columns:1fr 60px 1fr;gap:8px;align-items:center}.parcel{border:2px solid #668f82;border-radius:12px;padding:12px;background:#fbfdfb}.molecule{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.pool{border:2px solid #6f9287;border-radius:12px;padding:12px;min-height:105px}.gate{border:3px solid #6f9287;border-radius:12px;padding:13px}.channel{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.status{font-weight:800;padding:10px;border-radius:9px}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.snapshot,.handoff,.molecule,.channel{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.lane{display:grid}.records{display:grid}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label>Highest new advisory <select id=\"depSeverity\"><option value=\"none\">none</option><option value=\"low\">low</option><option value=\"moderate\">moderate</option><option value=\"high\">high</option><option value=\"critical\">critical</option></select></label><div id=\"depWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintDep(){const rank={none:0,low:1,moderate:2,high:3,critical:4},s=depSeverity.value,block=rank[s]>=3;depWorld.innerHTML='<div class=\"gate '+(block?'fail':'ok')+'\"><strong>dependency-review / policy</strong><br>fail-on-severity: high<br>PR delta: '+s+'<br><strong>'+(block?'BLOCK MERGE':'PASS')+'</strong></div><p>Only the synthetic PR delta is evaluated here.</p>';};depSeverity.onchange=paintDep;paintDep();",
+    "questions": [
+      [
+        "A PR introduces one high advisory and threshold is high. Result?",
+        [
+          "The review job fails",
+          "It always passes",
+          "The old dependency graph is deleted"
+        ],
+        0,
+        "The introduced severity meets the fail threshold."
+      ],
+      [
+        "Why make the job a required check?",
+        [
+          "A failing job must actually block merge",
+          "It makes advisories impossible",
+          "It scans production memory"
+        ],
+        0,
+        "Enforcement needs branch/ruleset wiring in addition to job logic."
+      ],
+      [
+        "What remains outside this delta gate?",
+        [
+          "Existing vulnerable dependencies",
+          "New dependency changes",
+          "The chosen severity threshold"
+        ],
+        0,
+        "A PR-delta gate is not a full backlog-remediation program."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "severity_rank = {'none': 0, 'low': 1, 'moderate': 2, 'high': 3, 'critical': 4}",
+          "note": "Order the supported policy levels."
+        },
+        {
+          "code": "threshold = severity_rank['high']",
+          "note": "Configure the merge-blocking threshold."
+        },
+        {
+          "code": "introduced = severity_rank['high']",
+          "note": "The synthetic PR adds a high-severity advisory."
+        },
+        {
+          "code": "merge_allowed = introduced < threshold",
+          "note": "The required check rejects the change."
+        }
+      ],
+      "expect": {
+        "merge_allowed": false
+      },
+      "limit": "The browser evaluates four severity labels. It does not call GitHub, parse manifests, query the Advisory Database, model transitive reachability or license policy, or prove that a status check is required. Availability depends on GitHub plan and repository configuration.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "severity_rank": {
+              "none": 0,
+              "low": 1,
+              "moderate": 2,
+              "high": 3,
+              "critical": 4
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "severity_rank": {
+              "none": 0,
+              "low": 1,
+              "moderate": 2,
+              "high": 3,
+              "critical": 4
+            },
+            "threshold": 3
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "severity_rank": {
+              "none": 0,
+              "low": 1,
+              "moderate": 2,
+              "high": 3,
+              "critical": 4
+            },
+            "threshold": 3,
+            "introduced": 3
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "severity_rank": {
+              "none": 0,
+              "low": 1,
+              "moderate": 2,
+              "high": 3,
+              "critical": 4
+            },
+            "threshold": 3,
+            "introduced": 3,
+            "merge_allowed": false
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub dependency review",
+        "https://docs.github.com/en/code-security/concepts/supply-chain-security/dependency-review",
+        "Living documentation"
+      ],
+      [
+        "Configure dependency review action",
+        "https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/manage-your-dependency-security/configure-dependency-review-action",
+        "Living documentation"
+      ],
+      [
+        "Customize dependency review policy",
+        "https://docs.github.com/en/enterprise-cloud@latest/code-security/tutorials/secure-your-dependencies/customize-dependency-review-action",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The gate shows the exact comparison between the PR's highest introduced severity and the configured threshold, separating detection from enforcement.",
+    "written_questions": [
+      "What severity and license exception process would your repositories use, and who owns it?",
+      "How will you find and reduce vulnerable dependencies that predate the pull-request gate?"
+    ],
+    "source_checked_on": "2026-10-22"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Wait for ready, but never wait past the deadline",
+    "goal": "Queue a gRPC call through transient connection failure without making it unbounded.",
+    "tag": "gRPC · connection behavior",
+    "concept": "<p>An elevator is temporarily between floors. You can leave immediately and take the stairs, or wait—provided you still leave by your appointment time. gRPC's Wait-for-Ready makes the same choice for an RPC created while the channel is in transient failure.</p><p>Without it, the call fails immediately. With it, the call waits for the channel to become ready. The deadline still applies and stops the wait.</p>",
+    "example": "<p>A batch worker creates <code>ReconcileOrder</code> while the channel is in <code>TRANSIENT_FAILURE</code>. The service recovers after 3 seconds. With a 5-second deadline and Wait-for-Ready, the request is sent with 2 seconds remaining. With a 2-second deadline, it ends before recovery.</p>",
+    "use_case": {
+      "when": "Use Wait-for-Ready for batch or startup flows where a short transient connection failure should be absorbed and the caller has a meaningful deadline.",
+      "example": "A scheduled reconciliation worker starts while the gRPC service is rolling and can wait a few seconds before sending its idempotent request.",
+      "decision": "Enable it selectively, always set deadlines, and bound queue/memory pressure. Prefer immediate failure for interactive requests that need fast fallback or when waiting would hide a sustained outage."
+    },
+    "practice": "Set recovery time and deadline. Watch the RPC remain queued, send with remaining budget, or expire.",
+    "boundary": "This local state model does not create a gRPC channel, model resolver/load-balancer states, backoff, permanent failures, cancellation races, retries, hedging, queue limits, streaming, or language-specific APIs.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.2rem;font-weight:850}.lanes{display:grid;grid-template-columns:130px 1fr;gap:8px}.lane{display:contents}.label{font-weight:800;padding:10px}.records{display:flex;gap:8px;flex-wrap:wrap}.record{border:2px solid #78958b;border-radius:10px;padding:10px;min-width:110px;background:#fbfdfb}.hidden{opacity:.25;text-decoration:line-through}.snapshot{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stack{display:grid;gap:8px}.bar{height:34px;border-radius:8px;padding:7px 10px;box-sizing:border-box;font-weight:800}.toil{background:#ffd0c6;border:2px solid #a43d32}.engineering{background:#cceccb;border:2px solid #277761}.handoff{display:grid;grid-template-columns:1fr 60px 1fr;gap:8px;align-items:center}.parcel{border:2px solid #668f82;border-radius:12px;padding:12px;background:#fbfdfb}.molecule{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.pool{border:2px solid #6f9287;border-radius:12px;padding:12px;min-height:105px}.gate{border:3px solid #6f9287;border-radius:12px;padding:13px}.channel{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center}.status{font-weight:800;padding:10px;border-radius:9px}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.snapshot,.handoff,.molecule,.channel{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.lane{display:grid}.records{display:grid}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label>Server ready after <input id=\"readyAfter\" type=\"range\" min=\"1\" max=\"8\" value=\"3\"> seconds</label><label>Deadline <input id=\"rpcDeadline\" type=\"range\" min=\"1\" max=\"8\" value=\"5\"> seconds</label><div id=\"grpcWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintGrpc(){const r=+readyAfter.value,d=+rpcDeadline.value,send=r<d;grpcWorld.innerHTML='<div class=channel><div class=node><strong>t=0</strong><br>TRANSIENT_FAILURE<br>RPC queued</div><div class=arrow>→</div><div class=\"node '+(send?'ok':'fail')+'\"><strong>t='+Math.min(r,d)+'s</strong><br>'+(send?'READY · send<br>'+(d-r)+'s budget remains':'DEADLINE_EXCEEDED<br>never sent')+'</div></div>';};readyAfter.oninput=paintGrpc;rpcDeadline.oninput=paintGrpc;paintGrpc();",
+    "questions": [
+      [
+        "Ready at 3s, deadline at 5s, Wait-for-Ready enabled. What happens?",
+        [
+          "The RPC sends with about 2s remaining",
+          "It fails at t=0",
+          "The deadline resets"
+        ],
+        0,
+        "The call waits, but the original deadline keeps counting."
+      ],
+      [
+        "Why keep a deadline?",
+        [
+          "It bounds waiting during sustained failure",
+          "It guarantees the server recovers",
+          "It enables authorization"
+        ],
+        0,
+        "Wait-for-Ready without a useful bound can wait too long."
+      ],
+      [
+        "When is fail-fast often better?",
+        [
+          "An interactive request has a faster fallback",
+          "A bounded batch can wait through rollout",
+          "The channel is already ready"
+        ],
+        0,
+        "User-facing latency and fallback strategy may favor immediate failure."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "ready_after_s = 3",
+          "note": "The channel will recover after three seconds."
+        },
+        {
+          "code": "deadline_s = 5",
+          "note": "The caller's total patience is five seconds."
+        },
+        {
+          "code": "sent = ready_after_s < deadline_s",
+          "note": "Wait-for-Ready sends only if readiness arrives before expiry."
+        },
+        {
+          "code": "remaining_budget_s = deadline_s - ready_after_s if sent else 0",
+          "note": "Waiting consumes deadline budget; it does not reset it."
+        }
+      ],
+      "expect": {
+        "sent": true,
+        "remaining_budget_s": 2
+      },
+      "limit": "This local state model does not create a gRPC channel, model resolver/load-balancer states, backoff, permanent failures, cancellation races, retries, hedging, queue limits, streaming, or language-specific APIs.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "ready_after_s": 3
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "ready_after_s": 3,
+            "deadline_s": 5
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "ready_after_s": 3,
+            "deadline_s": 5,
+            "sent": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "ready_after_s": 3,
+            "deadline_s": 5,
+            "sent": true,
+            "remaining_budget_s": 2
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "gRPC Wait-for-Ready guide",
+        "https://grpc.io/docs/guides/wait-for-ready/",
+        "Living documentation"
+      ],
+      [
+        "gRPC deadlines guide",
+        "https://grpc.io/docs/guides/deadlines/",
+        "Living documentation"
+      ],
+      [
+        "gRPC service config",
+        "https://grpc.io/docs/guides/service-config/",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The channel timeline uses the same clock for readiness and deadline, making the race and remaining budget visible rather than describing a generic retry.",
+    "written_questions": [
+      "Which RPCs in your service may safely wait through startup, and which need fast fallback?",
+      "What queue, deadline, and idempotency signals would reveal harmful Wait-for-Ready use?"
+    ],
+    "source_checked_on": "2026-10-22"
+  }
+]
