@@ -1,0 +1,1079 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Open the S3 door without handing out AWS keys",
+    "goal": "Trace credential-free S3 access through Databricks and Snowflake, including the path boundary.",
+    "tag": "Certification focus · cycle 3, position 3",
+    "concept": "<p>A building badge should open one finance room, not arrive with a copy of the master key. Data platforms need the same design for S3.</p><p>The platform keeps a named trust object. That object can assume an AWS IAM role. A second object narrows the usable bucket path. Users receive permission on the platform object instead of receiving long-lived AWS access keys.</p>",
+    "example": "<p>The finance pipeline needs <code>s3://company-data/finance/incoming/</code>. The AWS role can read that prefix. The platform object points to the role, and the external-location or stage object points to that exact prefix. A request for <code>hr/payroll/</code> must fail even if someone guesses its path.</p>",
+    "use_case": {
+      "when": "Use a governed storage trust when jobs or SQL users need cloud files without embedding cloud access keys in notebooks, stages, or connection strings.",
+      "example": "A finance ingestion job reads one S3 prefix in both Databricks and Snowflake while AWS role trust and platform grants stay centrally managed.",
+      "decision": "Use a separate role and narrow path for a distinct blast radius. Reuse only when ownership, data sensitivity, lifecycle, and audit expectations match. Managed platform storage is simpler when external ownership is unnecessary."
+    },
+    "practice": "Choose the requested S3 prefix and turn each trust link on or off. Predict whether all three gates allow the read.",
+    "boundary": "The browser evaluates three synthetic booleans. It does not call AWS STS, Databricks, Snowflake, S3, IAM policy evaluation, network controls, encryption keys, file formats, or product audit logs. Vendor SQL and CLI examples are sourced but not executed.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.15rem;font-weight:850}.trust{display:grid;grid-template-columns:1fr 60px 1fr 60px 1fr;gap:8px;align-items:center}.lane{display:grid;grid-template-columns:125px 1fr;gap:10px;margin:8px 0}.track{height:32px;background:#d8e4df;border-radius:8px;overflow:hidden}.fill{height:100%;padding:4px 8px;font-weight:800;white-space:nowrap}.quota-a{background:#f2bb5f}.quota-b{background:#8dcac0}.secret{background:#ddc8f2}.script{font-family:ui-monospace,monospace;white-space:pre-wrap}.fiber-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}.fiber{height:72px;border-radius:50%;background:linear-gradient(#ffd55e,#de6b45);position:relative}.fiber.off{background:#73827e}.state-line{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:10px;padding:12px}.context-map{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:stretch}.packet{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb}.status{padding:8px;border-radius:8px;font-weight:800}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.trust,.state-line,.context-map{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.lane{grid-template-columns:1fr}.fiber-grid{grid-template-columns:repeat(4,1fr)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label>Requested prefix <select id=\"prefix\"><option value=\"finance\">finance/incoming</option><option value=\"hr\">hr/payroll</option></select></label><label><input id=\"trustOn\" type=\"checkbox\" checked> AWS trust accepts platform identity</label><label><input id=\"grantOn\" type=\"checkbox\" checked> caller has platform grant</label><div id=\"trustWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintTrust(){const path=prefix.value,trust=trustOn.checked,grant=grantOn.checked,scope=path==='finance',allow=trust&&grant&&scope;trustWorld.innerHTML='<div class=trust><div class=\"node '+(grant?'ok':'fail')+'\"><strong>Caller → platform object</strong><br>'+(grant?'grant present':'grant missing')+'</div><div class=arrow>→</div><div class=\"node '+(trust?'ok':'fail')+'\"><strong>Platform → IAM role</strong><br>'+(trust?'trust accepts':'trust rejects')+'</div><div class=arrow>→</div><div class=\"node '+(scope?'ok':'fail')+'\"><strong>S3 prefix</strong><br>'+path+'<br>'+(scope?'inside scope':'outside scope')+'</div></div><p class=\"status '+(allow?'ok':'fail')+'\">'+(allow?'READ ALLOWED':'READ DENIED')+'</p>';};prefix.onchange=paintTrust;trustOn.onchange=paintTrust;grantOn.onchange=paintTrust;paintTrust();",
+    "questions": [
+      [
+        "The caller has a platform grant and the path is finance, but AWS does not trust the platform identity. Result?",
+        [
+          "The read is denied at role assumption",
+          "The platform grant overrides AWS",
+          "S3 returns every prefix"
+        ],
+        0,
+        "Every link must allow the request; a platform grant cannot replace the AWS trust policy."
+      ],
+      [
+        "Why keep the usable prefix narrower than the IAM role when possible?",
+        [
+          "It adds a second governed scope and limits mistakes",
+          "It makes S3 strongly consistent",
+          "It removes the need for object grants"
+        ],
+        0,
+        "Narrow scopes reduce the blast radius of a bad grant or guessed path."
+      ],
+      [
+        "What is outside this lesson's proof?",
+        [
+          "Real STS, IAM, KMS, network and vendor execution",
+          "The three-gate teaching decision",
+          "A denied synthetic HR request"
+        ],
+        0,
+        "The local model is not evidence from either product or AWS."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "checks = {'platform_grant': True, 'aws_trust': True, 'prefix_allowed': True}",
+          "note": "Represent the three independent gates for the finance request."
+        },
+        {
+          "code": "finance_allowed = all(checks.values())",
+          "note": "Finance passes only because every gate is true."
+        },
+        {
+          "code": "checks['prefix_allowed'] = False",
+          "note": "Change only the requested path to out-of-scope HR."
+        },
+        {
+          "code": "hr_allowed = all(checks.values())",
+          "note": "The same caller and role are denied by the path boundary."
+        }
+      ],
+      "expect": {
+        "finance_allowed": true,
+        "hr_allowed": false
+      },
+      "limit": "The browser evaluates three synthetic booleans. It does not call AWS STS, Databricks, Snowflake, S3, IAM policy evaluation, network controls, encryption keys, file formats, or product audit logs. Vendor SQL and CLI examples are sourced but not executed.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "checks": {
+              "platform_grant": true,
+              "aws_trust": true,
+              "prefix_allowed": true
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "checks": {
+              "platform_grant": true,
+              "aws_trust": true,
+              "prefix_allowed": true
+            },
+            "finance_allowed": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "checks": {
+              "platform_grant": true,
+              "aws_trust": true,
+              "prefix_allowed": false
+            },
+            "finance_allowed": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "checks": {
+              "platform_grant": true,
+              "aws_trust": true,
+              "prefix_allowed": false
+            },
+            "finance_allowed": true,
+            "hr_allowed": false
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks storage credentials and external locations",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-storage-credentials",
+        "Living documentation; checked October 23, 2026"
+      ],
+      [
+        "Databricks S3 external-location setup",
+        "https://docs.databricks.com/aws/en/connect/unity-catalog/cloud-storage/s3/s3-external-location-manual",
+        "Living documentation; checked October 23, 2026"
+      ],
+      [
+        "Snowflake CREATE STORAGE INTEGRATION",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-storage-integration",
+        "Living documentation; checked October 23, 2026"
+      ],
+      [
+        "Snowflake S3 storage-integration setup",
+        "https://docs.snowflake.com/en/user-guide/data-load-s3-config-storage-integration",
+        "Living documentation; checked October 23, 2026"
+      ]
+    ],
+    "visual_explanation": "The visual is a three-link trust chain. It answers exactly where a request stops: caller grant, AWS role trust, or allowed S3 prefix.",
+    "written_questions": [
+      "How would you divide roles and prefixes among finance, HR, and shared reference data?",
+      "Which real audit events would prove that a read used the intended role and path?"
+    ],
+    "source_checked_on": "2026-10-23",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: storage credential → external location",
+        "minutes": 9,
+        "html": "<p><strong>Mechanism.</strong> A Unity Catalog storage credential represents the AWS IAM role. An external location joins that credential to an S3 URL. Users receive external-location privileges; they do not receive the AWS key.</p><pre><code><span># sourced CLI pattern; not executed</span><span>databricks storage-credentials create --json</span><span> '{\"name\":\"finance_cred\",\"aws_iam_role\":</span><span> {\"role_arn\":\"arn:aws:iam::111122223333:role/finance-read\"}}'</span><span></span><span>-- sourced SQL pattern; not executed</span><span>CREATE EXTERNAL LOCATION finance_incoming</span><span>URL 's3://company-data/finance/incoming/'</span><span>WITH (CREDENTIAL finance_cred);</span></code></pre><label>Databricks requested path <select id=\"dbPath\"><option value=\"finance\">finance/incoming</option><option value=\"hr\">hr/payroll</option></select></label><div id=\"dbTrustWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> A valid role with a missing self/trust relationship still fails validation. Configure the AWS trust relationship, validate the credential, then grant only the external-location privilege needed.</p><p><strong>Prerequisites and limit.</strong> Unity Catalog plus metastore privileges are required. Workspace binding, KMS, network, file-event, and IAM details can add gates. CLI/SQL above did not run.</p>",
+        "markdown": "Databricks represents the IAM role as a Unity Catalog storage credential, then scopes its use to an S3 URL with an external location. The caller still needs Unity Catalog privileges. CLI/SQL is sourced but unexecuted.",
+        "javascript": "const dbPath=$('dbPath'),dbTrustWorld=$('dbTrustWorld');function paintDbTrust(){const ok=dbPath.value==='finance';dbTrustWorld.innerHTML='<div class=state-line><div class=\"node ok\"><strong>finance_cred</strong><br>IAM role reference</div><div class=arrow>→</div><div class=\"node '+(ok?'ok':'fail')+'\"><strong>finance_incoming</strong><br>'+dbPath.value+'<br>'+(ok?'inside URL':'outside URL')+'</div></div><p>Local path-scope model; no Databricks or AWS call ran.</p>';};dbPath.onchange=paintDbTrust;paintDbTrust();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: storage integration → external stage",
+        "minutes": 9,
+        "html": "<p><strong>Mechanism.</strong> A storage integration stores Snowflake's generated cloud identity, the AWS role ARN, and allowed or blocked locations. An external stage references that integration and must use an aligned URL.</p><pre><code><span>-- sourced pattern; not executed</span><span>CREATE STORAGE INTEGRATION finance_int</span><span> TYPE = EXTERNAL_STAGE STORAGE_PROVIDER = 'S3'</span><span> STORAGE_AWS_ROLE_ARN =</span><span>   'arn:aws:iam::111122223333:role/finance-read'</span><span> ENABLED = TRUE</span><span> STORAGE_ALLOWED_LOCATIONS =</span><span>   ('s3://company-data/finance/incoming/');</span><span>CREATE STAGE finance_stage</span><span> URL='s3://company-data/finance/incoming/'</span><span> STORAGE_INTEGRATION=finance_int;</span></code></pre><label>Stage URL <select id=\"sfPath\"><option value=\"finance\">finance/incoming</option><option value=\"hr\">hr/payroll</option></select></label><div id=\"sfTrustWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> Recreating an integration can change its external ID and break the AWS trust policy. Prefer deliberate alteration; if recreated, update and verify the trust relationship.</p><p><strong>Prerequisites and limit.</strong> Account privileges and AWS IAM administration are required. Cross-region/provider transfer can cost extra, and government/China regions have restrictions. SQL above did not run.</p>",
+        "markdown": "Snowflake stores its generated cloud identity, AWS role ARN, and allowed prefixes in a storage integration. External stages reference it and must use an aligned URL. SQL is sourced but unexecuted.",
+        "javascript": "const sfPath=$('sfPath'),sfTrustWorld=$('sfTrustWorld');function paintSfTrust(){const ok=sfPath.value==='finance';sfTrustWorld.innerHTML='<div class=state-line><div class=\"node ok\"><strong>finance_int</strong><br>generated identity + role</div><div class=arrow>→</div><div class=\"node '+(ok?'ok':'fail')+'\"><strong>finance_stage</strong><br>'+sfPath.value+'<br>'+(ok?'URL aligned':'URL rejected')+'</div></div><p>Local integration-scope model; no Snowflake or AWS call ran.</p>';};sfPath.onchange=paintSfTrust;paintSfTrust();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Cloud identity object</td><td>Unity Catalog storage credential</td><td>Storage integration with generated identity</td></tr><tr><td>Path object</td><td>External location</td><td>External stage whose URL matches allowed locations</td></tr><tr><td>Caller control</td><td>Unity Catalog grants, optional workspace binding</td><td>Integration/stage privileges</td></tr><tr><td>Sharp edge</td><td>Role trust and validation; broad credential reuse</td><td>External-ID trust can break after recreation</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Identity | storage credential | storage integration |\n| Path | external location | external stage + allowed locations |\n| Caller control | UC grants/bindings | object privileges |\n| Sharp edge | role trust/overbroad reuse | external ID after recreation |"
+    },
+    "product_questions": [
+      [
+        "Databricks has a working IAM role, but a user lacks CREATE EXTERNAL TABLE on the external location. What happens?",
+        [
+          "The platform denies table creation",
+          "AWS permissions override Unity Catalog",
+          "The user receives AWS keys"
+        ],
+        0,
+        "Cloud trust and platform authorization are separate gates."
+      ],
+      [
+        "A Snowflake stage URL points to hr/payroll while the integration allows only finance/incoming. Result?",
+        [
+          "The stage URL is rejected or cannot access that location",
+          "The allowed list expands automatically",
+          "The role ARN is ignored"
+        ],
+        0,
+        "Stage URLs must align with STORAGE_ALLOWED_LOCATIONS."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks credentials reference",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-storage-credentials",
+        "Checked October 23, 2026"
+      ],
+      [
+        "Databricks S3 external locations",
+        "https://docs.databricks.com/aws/en/connect/unity-catalog/cloud-storage/s3/s3-external-location-manual",
+        "Checked October 23, 2026"
+      ],
+      [
+        "Snowflake CREATE STORAGE INTEGRATION",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-storage-integration",
+        "Checked October 23, 2026"
+      ],
+      [
+        "Snowflake configure S3 integration",
+        "https://docs.snowflake.com/en/user-guide/data-load-s3-config-storage-integration",
+        "Checked October 23, 2026"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-23",
+      "session_type": "focused",
+      "cycle_position": 3,
+      "cycle_origin": "Day31",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "platform",
+          "ingestion",
+          "governance_security"
+        ],
+        "scope": "Unity Catalog storage credentials, external locations, IAM-role trust, path scoping and privileges. Delivered coverage is not mastery."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "blueprint_status": "Official current overview verified 2026-10-21; full objective IDs and weights remain unverified",
+        "planning_groups": [
+          "architecture_connectivity",
+          "account_warehouse_access",
+          "loading_unloading_transformation"
+        ],
+        "scope": "Storage integrations, generated identity, allowed locations, external stages and trust boundaries. Complete COF-C03 coverage is not claimed."
+      },
+      "product_lab_execution": "not_run"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "A pooled thread remembers the last tenant unless you clean it",
+    "goal": "Prevent ThreadLocal request data from leaking into the next task on the same worker.",
+    "tag": "Java concurrency · ThreadLocal lifecycle",
+    "concept": "<p>A hotel housekeeper reuses the same cart for many rooms. If the previous guest's key card stays on the cart, the next room can receive the wrong identity.</p><p>A thread pool also reuses workers. A <code>ThreadLocal</code> value belongs to the worker thread, not to one request. Set request data at entry and remove it in a <code>finally</code> block.</p>",
+    "example": "<p>Worker-7 handles tenant <code>east</code>, stores <code>east</code>, and forgets cleanup. The same worker next handles a request whose authentication step fails before setting a tenant. A later <code>get()</code> still returns <code>east</code>. With <code>remove()</code> in <code>finally</code>, the second request sees no tenant.</p>",
+    "use_case": {
+      "when": "Use ThreadLocal only when code truly needs thread-confined context and execution stays on a known thread model.",
+      "example": "A synchronous Java servlet adds tenant ID to logs on a fixed worker pool.",
+      "decision": "Prefer explicit parameters or scoped context when possible. If ThreadLocal is justified, centralize set/remove around the request boundary and test worker reuse. Avoid assuming it follows reactive or asynchronous continuations."
+    },
+    "practice": "Toggle cleanup and step from request A to request B on the same worker. Predict the second tenant value.",
+    "boundary": "The browser is a deterministic two-request state machine. The Java replay is single-threaded. Neither models virtual-thread design, framework cleanup, async continuation hops, inheritable values, memory retention, or real scheduler timing.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.15rem;font-weight:850}.trust{display:grid;grid-template-columns:1fr 60px 1fr 60px 1fr;gap:8px;align-items:center}.lane{display:grid;grid-template-columns:125px 1fr;gap:10px;margin:8px 0}.track{height:32px;background:#d8e4df;border-radius:8px;overflow:hidden}.fill{height:100%;padding:4px 8px;font-weight:800;white-space:nowrap}.quota-a{background:#f2bb5f}.quota-b{background:#8dcac0}.secret{background:#ddc8f2}.script{font-family:ui-monospace,monospace;white-space:pre-wrap}.fiber-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}.fiber{height:72px;border-radius:50%;background:linear-gradient(#ffd55e,#de6b45);position:relative}.fiber.off{background:#73827e}.state-line{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:10px;padding:12px}.context-map{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:stretch}.packet{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb}.status{padding:8px;border-radius:8px;font-weight:800}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.trust,.state-line,.context-map{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.lane{grid-template-columns:1fr}.fiber-grid{grid-template-columns:repeat(4,1fr)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label><input id=\"cleanup\" type=\"checkbox\" checked> remove in finally after request A</label><div id=\"threadWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintThread(){const clean=cleanup.checked;threadWorld.innerHTML='<div class=state-line><div class=\"node ok\"><strong>Request A · tenant east</strong><br>Worker-7 local=east<br>'+(clean?'finally: remove()':'cleanup omitted')+'</div><div class=arrow>→ same worker →</div><div class=\"node '+(clean?'ok':'fail')+'\"><strong>Request B · auth failed early</strong><br>Worker-7 local='+(clean?'null':'east ← leaked')+'</div></div>';};cleanup.onchange=paintThread;paintThread();",
+    "questions": [
+      [
+        "Request A sets east and omits cleanup. Request B runs on the same worker without setting a value. What can get() return?",
+        [
+          "east",
+          "Always null",
+          "A compile error"
+        ],
+        0,
+        "The value belongs to the reused worker thread."
+      ],
+      [
+        "Why put remove() in finally?",
+        [
+          "It runs on success and failure paths",
+          "It migrates the value across threads",
+          "It makes the value immutable"
+        ],
+        0,
+        "Exceptions must not bypass cleanup."
+      ],
+      [
+        "Where does this design break down?",
+        [
+          "Work hops between asynchronous threads",
+          "A synchronous worker has explicit lifecycle cleanup",
+          "The value is removed in finally"
+        ],
+        0,
+        "Thread affinity is not request affinity in many async models."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var tenant = new ThreadLocal<String>();",
+          "note": "Create one thread-local slot."
+        },
+        {
+          "code": "tenant.set(\"east\");",
+          "note": "Request A stores its tenant on the current worker."
+        },
+        {
+          "code": "var leakedTenant = tenant.get();",
+          "note": "Without cleanup, a later task on that worker can still read east."
+        },
+        {
+          "code": "tenant.remove(); var cleanedTenant = String.valueOf(tenant.get());",
+          "note": "Explicit cleanup makes the next read null."
+        }
+      ],
+      "expect": {
+        "leakedTenant": "east",
+        "cleanedTenant": "null"
+      },
+      "limit": "The browser is a deterministic two-request state machine. The Java replay is single-threaded. Neither models virtual-thread design, framework cleanup, async continuation hops, inheritable values, memory retention, or real scheduler timing.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "tenant": "java.lang.ThreadLocal@e50a6f6"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "tenant": "java.lang.ThreadLocal@e50a6f6"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "tenant": "java.lang.ThreadLocal@e50a6f6",
+            "leakedTenant": "east"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "tenant": "java.lang.ThreadLocal@e50a6f6",
+            "leakedTenant": "east",
+            "cleanedTenant": "null"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java 26 Thread-Local Variables",
+        "https://docs.oracle.com/en/java/javase/26/core/thread-local-variables.html",
+        "Java SE 26; checked October 23, 2026"
+      ],
+      [
+        "Java 26 ThreadLocal API",
+        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/ThreadLocal.html",
+        "Java SE 26"
+      ]
+    ],
+    "visual_explanation": "The visual keeps Worker-7 fixed while requests change, revealing that the value follows the thread rather than the request.",
+    "written_questions": [
+      "Which context values in your services are currently tied to worker threads?",
+      "How would you test cleanup on authentication, timeout, and exception paths?"
+    ],
+    "source_checked_on": "2026-10-23"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A shared quota is a shared failure domain",
+    "goal": "Expose which teams can exhaust the same finite platform limit.",
+    "tag": "Architecture judgment · quota isolation",
+    "concept": "<p>Three apartments can share one electrical breaker. Each apartment looks healthy until their combined load trips the breaker and everyone goes dark.</p><p>A cloud quota works the same way. If unrelated workloads share one account, Region, NAT gateway, API burst pool, or database connection ceiling, one workload can consume another's safety margin.</p>",
+    "example": "<p>The account allows 1,000 concurrent jobs. Finance normally uses 350 and ML uses 300, leaving 350 spare. A retraining surge pushes ML to 750. Total demand becomes 1,100; the shared ceiling rejects 100 jobs, and the failure crosses team boundaries.</p>",
+    "use_case": {
+      "when": "Use quota failure-domain analysis when multiple critical workloads share an account, Region, network path, control plane, or managed-service limit.",
+      "example": "Two data platforms share one regional API quota; an ML backfill can throttle finance ingestion.",
+      "decision": "Monitor aggregate headroom and per-workload contribution. Split accounts/resources when the shared failure consequence exceeds the benefit of pooling; otherwise reserve capacity and enforce tenant limits."
+    },
+    "practice": "Move ML demand. Watch shared headroom disappear and identify when finance becomes exposed despite unchanged demand.",
+    "boundary": "This arithmetic model assumes one hard quota and simultaneous demand. Real services use multiple adjustable/fixed quotas, bursts, asynchronous enforcement, retries, per-resource limits, and different failure modes.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.15rem;font-weight:850}.trust{display:grid;grid-template-columns:1fr 60px 1fr 60px 1fr;gap:8px;align-items:center}.lane{display:grid;grid-template-columns:125px 1fr;gap:10px;margin:8px 0}.track{height:32px;background:#d8e4df;border-radius:8px;overflow:hidden}.fill{height:100%;padding:4px 8px;font-weight:800;white-space:nowrap}.quota-a{background:#f2bb5f}.quota-b{background:#8dcac0}.secret{background:#ddc8f2}.script{font-family:ui-monospace,monospace;white-space:pre-wrap}.fiber-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}.fiber{height:72px;border-radius:50%;background:linear-gradient(#ffd55e,#de6b45);position:relative}.fiber.off{background:#73827e}.state-line{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:10px;padding:12px}.context-map{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:stretch}.packet{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb}.status{padding:8px;border-radius:8px;font-weight:800}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.trust,.state-line,.context-map{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.lane{grid-template-columns:1fr}.fiber-grid{grid-template-columns:repeat(4,1fr)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label>ML concurrent jobs <input id=\"mlJobs\" type=\"range\" min=\"100\" max=\"800\" value=\"300\"></label><div id=\"quotaWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintQuota(){const finance=350,ml=+mlJobs.value,cap=1000,total=finance+ml,over=Math.max(0,total-cap);quotaWorld.innerHTML='<div class=lane><strong>Finance</strong><div class=track><div class=\"fill quota-a\" style=\"width:'+finance/cap*100+'%\">'+finance+'</div></div></div><div class=lane><strong>ML</strong><div class=track><div class=\"fill quota-b\" style=\"width:'+ml/cap*100+'%\">'+ml+'</div></div></div><p>Total '+total+' / '+cap+' · '+(over?'<strong class=fail>'+over+' rejected; shared blast radius</strong>':'headroom '+(cap-total))+'</p>';};mlJobs.oninput=paintQuota;paintQuota();",
+    "questions": [
+      [
+        "Finance stays at 350 while ML rises to 750 under a 1,000 quota. What happens?",
+        [
+          "Combined demand exceeds the shared ceiling by 100",
+          "Finance is isolated automatically",
+          "The quota becomes 1,100"
+        ],
+        0,
+        "Shared limits couple otherwise unrelated demand."
+      ],
+      [
+        "Why track per-workload contribution as well as total utilization?",
+        [
+          "It identifies who consumes headroom and where controls belong",
+          "It makes quotas disappear",
+          "It replaces load tests"
+        ],
+        0,
+        "Ownership data turns an aggregate alert into an actionable design decision."
+      ],
+      [
+        "When is a separate account or resource boundary justified?",
+        [
+          "When cross-workload failure cost outweighs pooling benefits",
+          "Whenever utilization is nonzero",
+          "Only after a global outage"
+        ],
+        0,
+        "Isolation is a tradeoff, not a reflex."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "quota = 1000; finance = 350; ml_normal = 300",
+          "note": "Record the shared ceiling and normal demand."
+        },
+        {
+          "code": "normal_headroom = quota - finance - ml_normal",
+          "note": "Normal operation leaves 350 jobs of margin."
+        },
+        {
+          "code": "ml_surge = 750; surge_total = finance + ml_surge",
+          "note": "ML surges while finance demand is unchanged."
+        },
+        {
+          "code": "rejected = max(0, surge_total - quota)",
+          "note": "One shared ceiling rejects 100 jobs across the failure domain."
+        }
+      ],
+      "expect": {
+        "normal_headroom": 350,
+        "surge_total": 1100,
+        "rejected": 100
+      },
+      "limit": "This arithmetic model assumes one hard quota and simultaneous demand. Real services use multiple adjustable/fixed quotas, bursts, asynchronous enforcement, retries, per-resource limits, and different failure modes.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "quota": 1000,
+            "finance": 350,
+            "ml_normal": 300
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "quota": 1000,
+            "finance": 350,
+            "ml_normal": 300,
+            "normal_headroom": 350
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "quota": 1000,
+            "finance": 350,
+            "ml_normal": 300,
+            "normal_headroom": 350,
+            "ml_surge": 750,
+            "surge_total": 1100
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "quota": 1000,
+            "finance": 350,
+            "ml_normal": 300,
+            "normal_headroom": 350,
+            "ml_surge": 750,
+            "surge_total": 1100,
+            "rejected": 100
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Well-Architected REL01-BP01: quotas and constraints",
+        "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_manage_service_limits_aware_quotas_and_constraints.html",
+        "Living guidance"
+      ],
+      [
+        "AWS Well-Architected REL01-BP02: quotas across accounts and Regions",
+        "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_manage_service_limits_limits_considered.html",
+        "Living guidance"
+      ],
+      [
+        "AWS Well-Architected REL01-BP03: fixed quotas",
+        "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_manage_service_limits_aware_fixed_limits.html",
+        "Living guidance"
+      ]
+    ],
+    "visual_explanation": "Separate bars show each tenant's demand against one denominator, so the shared coupling is visible instead of hidden inside a single percentage.",
+    "written_questions": [
+      "Which three quotas create the largest cross-team blast radius in your platform?",
+      "What evidence would justify isolation instead of a quota increase and tenant limits?"
+    ],
+    "source_checked_on": "2026-10-23"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "The model can use a database handle without ever seeing it",
+    "goal": "Separate local run context from text sent to the model.",
+    "tag": "Harness engineering · local context",
+    "concept": "<p>A restaurant waiter can ask the kitchen for order 42 without receiving the kitchen's master key. An agent should work the same way.</p><p>In the OpenAI Agents SDK, the run context is a local Python object for dependencies and application data. It is not sent to the LLM. Tool code can receive that context and use a database client while the model sees only the tool schema, arguments, and returned result.</p>",
+    "example": "<p>The model asks <code>lookup_order(order_id=42)</code>. The tool receives a local context containing <code>db_client</code> and tenant <code>east</code>, queries the database, then returns <code>status=shipped</code>. The model never needs the connection object or password.</p>",
+    "use_case": {
+      "when": "Use local run context for dependency injection, authenticated user IDs, loggers, data clients, helper functions, and other values tool code needs but the model does not.",
+      "example": "A support agent calls an order lookup tool whose local context contains a tenant-scoped database client.",
+      "decision": "Keep only tool-relevant dependencies in local context and return the minimum result. Do not mistake 'not in the prompt' for a complete security boundary: tool outputs, logs, traces, exceptions, and serialization can still leak data."
+    },
+    "practice": "Toggle an unsafe tool response. Watch which values stay in the local context and which cross into model context.",
+    "boundary": "This browser moves synthetic fields and does not run the Agents SDK, an LLM, authentication, a database, tracing, or serialization. The Python replay is a dependency-injection analogy, not an SDK execution.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.15rem;font-weight:850}.trust{display:grid;grid-template-columns:1fr 60px 1fr 60px 1fr;gap:8px;align-items:center}.lane{display:grid;grid-template-columns:125px 1fr;gap:10px;margin:8px 0}.track{height:32px;background:#d8e4df;border-radius:8px;overflow:hidden}.fill{height:100%;padding:4px 8px;font-weight:800;white-space:nowrap}.quota-a{background:#f2bb5f}.quota-b{background:#8dcac0}.secret{background:#ddc8f2}.script{font-family:ui-monospace,monospace;white-space:pre-wrap}.fiber-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}.fiber{height:72px;border-radius:50%;background:linear-gradient(#ffd55e,#de6b45);position:relative}.fiber.off{background:#73827e}.state-line{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:10px;padding:12px}.context-map{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:stretch}.packet{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb}.status{padding:8px;border-radius:8px;font-weight:800}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.trust,.state-line,.context-map{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.lane{grid-template-columns:1fr}.fiber-grid{grid-template-columns:repeat(4,1fr)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label><input id=\"unsafeReturn\" type=\"checkbox\"> tool accidentally returns connection detail</label><div id=\"contextWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintContext(){const unsafe=unsafeReturn.checked;contextWorld.innerHTML='<div class=context-map><div class=\"packet secret\"><strong>Local run context</strong><br>tenant=east<br>db_client=&lt;private&gt;</div><div class=arrow>tool call<br>→</div><div class=\"packet '+(unsafe?'fail':'ok')+'\"><strong>Model receives tool result</strong><br>order=42<br>status=shipped'+(unsafe?'<br>dsn=db.internal ← leak':'')+'</div></div><p>The context object stays local; returned strings do not.</p>';};unsafeReturn.onchange=paintContext;paintContext();",
+    "questions": [
+      [
+        "What does the SDK send to the LLM from the local context object automatically?",
+        [
+          "Nothing; local context is not sent to the LLM",
+          "Every attribute",
+          "Only passwords"
+        ],
+        0,
+        "The context object is for local code and dependencies."
+      ],
+      [
+        "Why return only order status from the tool?",
+        [
+          "Tool output enters model-visible context",
+          "It changes the database role",
+          "It disables traces"
+        ],
+        0,
+        "A local secret can still leak if tool code puts it in the result."
+      ],
+      [
+        "What remains a security boundary to design separately?",
+        [
+          "Tool authorization, result filtering, logs and traces",
+          "Python type hints alone",
+          "The browser color scheme"
+        ],
+        0,
+        "Local context placement is useful but not complete access control."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "local_context = {'tenant': 'east', 'db_dsn': 'db.internal'}",
+          "note": "Keep dependencies and identity in application memory."
+        },
+        {
+          "code": "tool_arguments = {'order_id': 42}",
+          "note": "The model supplies only the declared tool argument."
+        },
+        {
+          "code": "database_row = {'order_id': 42, 'status': 'shipped'}",
+          "note": "Local tool code queries through its dependency."
+        },
+        {
+          "code": "model_visible_result = {'status': database_row['status']}",
+          "note": "Return the minimum useful result, not the local context."
+        }
+      ],
+      "expect": {
+        "model_visible_result": {
+          "status": "shipped"
+        }
+      },
+      "limit": "This browser moves synthetic fields and does not run the Agents SDK, an LLM, authentication, a database, tracing, or serialization. The Python replay is a dependency-injection analogy, not an SDK execution.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "local_context": {
+              "tenant": "east",
+              "db_dsn": "db.internal"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "local_context": {
+              "tenant": "east",
+              "db_dsn": "db.internal"
+            },
+            "tool_arguments": {
+              "order_id": 42
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "local_context": {
+              "tenant": "east",
+              "db_dsn": "db.internal"
+            },
+            "tool_arguments": {
+              "order_id": 42
+            },
+            "database_row": {
+              "order_id": 42,
+              "status": "shipped"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "local_context": {
+              "tenant": "east",
+              "db_dsn": "db.internal"
+            },
+            "tool_arguments": {
+              "order_id": 42
+            },
+            "database_row": {
+              "order_id": 42,
+              "status": "shipped"
+            },
+            "model_visible_result": {
+              "status": "shipped"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI Agents SDK context management",
+        "https://openai.github.io/openai-agents-python/context/",
+        "Living documentation; checked October 23, 2026"
+      ],
+      [
+        "OpenAI Agents SDK RunContextWrapper reference",
+        "https://openai.github.io/openai-agents-python/ref/run_context/",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The side-by-side packets answer what stays local and what becomes model-visible; the unsafe toggle shows the exact leak path through tool output.",
+    "written_questions": [
+      "Which dependencies belong in local context for one of your agents, and which identity fields should be immutable?",
+      "How would you test that tool results, exceptions, logs, and traces never serialize a credential?"
+    ],
+    "source_checked_on": "2026-10-23"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "A soft sheet reads its shape from bent light",
+    "goal": "Understand how crossed optical waveguides turn surface curvature into a reconstructable signal.",
+    "tag": "Research deep dive · published July 29, 2026",
+    "concept": "<p>A drinking straw carries light. Bend it and some light escapes. If many soft light paths cross a rubber sheet, their changing brightness becomes clues about the sheet's shape.</p><p>A 2026 study embeds 14 elastomeric optical waveguides in two zig-zag layers. Surface roughness creates a tunable, near-linear response to bending in two directions. Combining signals resolves shapes that one fiber alone could confuse.</p>",
+    "example": "<p>The reported prototype is a 16 × 16 × 0.5 cm soft sheet. Electronics stay at the perimeter. In the paper's experiments, combined waveguide responses supported real-time, damage-resistant, sub-centimeter shape reconstruction and a pressure-sensing proof of concept.</p>",
+    "use_case": {
+      "when": "This is research for wearable motion sensing, physical therapy, teleoperation, VR, and soft robotics where rigid sensors would interfere with deformation.",
+      "example": "A sheet wrapped around an upper arm distinguishes joint motion from an external press through its changing optical signals.",
+      "decision": "Treat it as a research prototype. Validate calibration, sampling speed, durability, fit, motion artifacts, repairability, electronics, user comfort, and performance on the intended body before product use."
+    },
+    "practice": "Bend the synthetic sheet and damage fibers. Watch signal diversity and reconstruction confidence change.",
+    "boundary": "This original teaching model maps curvature to simple light-loss values. It is not the paper's reconstruction algorithm, calibration, geometry, dataset, error analysis, pressure decoupling, or hardware. It cannot establish clinical or product performance.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.15rem;font-weight:850}.trust{display:grid;grid-template-columns:1fr 60px 1fr 60px 1fr;gap:8px;align-items:center}.lane{display:grid;grid-template-columns:125px 1fr;gap:10px;margin:8px 0}.track{height:32px;background:#d8e4df;border-radius:8px;overflow:hidden}.fill{height:100%;padding:4px 8px;font-weight:800;white-space:nowrap}.quota-a{background:#f2bb5f}.quota-b{background:#8dcac0}.secret{background:#ddc8f2}.script{font-family:ui-monospace,monospace;white-space:pre-wrap}.fiber-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}.fiber{height:72px;border-radius:50%;background:linear-gradient(#ffd55e,#de6b45);position:relative}.fiber.off{background:#73827e}.state-line{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:10px;padding:12px}.context-map{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:stretch}.packet{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb}.status{padding:8px;border-radius:8px;font-weight:800}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.trust,.state-line,.context-map{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.lane{grid-template-columns:1fr}.fiber-grid{grid-template-columns:repeat(4,1fr)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label>Curvature <input id=\"curvature\" type=\"range\" min=\"-5\" max=\"5\" value=\"3\"></label><label>Damaged fibers <input id=\"damaged\" type=\"range\" min=\"0\" max=\"6\" value=\"1\"></label><div id=\"fiberWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintFiber(){const c=+curvature.value,d=+damaged.value;let fibers='';for(let i=0;i<14;i++){const dead=i<d,signal=dead?0:Math.max(5,100-Math.abs(c)*(5+(i%4)));fibers+='<div class=\"fiber '+(dead?'off':'')+'\" title=\"fiber '+(i+1)+'\"><small>'+(dead?'off':signal+'%')+'</small></div>';}const live=14-d,conf=live>=10?'shape still constrained':live>=7?'ambiguous in places':'insufficient redundancy';fiberWorld.innerHTML='<div class=fiber-grid>'+fibers+'</div><p>'+live+'/14 signals live · curvature='+c+' · <strong>'+conf+'</strong></p>';};curvature.oninput=paintFiber;damaged.oninput=paintFiber;paintFiber();",
+    "questions": [
+      [
+        "Why use multiple waveguides in two layers?",
+        [
+          "Combined directional signals reduce shape ambiguity",
+          "One fiber measures every point exactly",
+          "The LEDs become wireless"
+        ],
+        0,
+        "Signal synergy supplies spatial and directional constraints."
+      ],
+      [
+        "What physical change carries information?",
+        [
+          "Bending changes transmitted light",
+          "The sheet creates GPS coordinates",
+          "Pressure changes HTTP headers"
+        ],
+        0,
+        "The optical path's response varies with curvature and force."
+      ],
+      [
+        "What prevents a clinical claim from this prototype alone?",
+        [
+          "Application-specific validation, durability and calibration remain",
+          "The sheet contains no light",
+          "Sub-centimeter results guarantee every body"
+        ],
+        0,
+        "A research demonstration is not validated clinical performance."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "curvature = 3",
+          "note": "Choose one synthetic bend magnitude."
+        },
+        {
+          "code": "fiber_sensitivity = [5, 6, 7, 8]",
+          "note": "Give four waveguides different directional responses."
+        },
+        {
+          "code": "signals = [100 - abs(curvature) * value for value in fiber_sensitivity]",
+          "note": "Bending produces a distinct vector of transmitted-light values."
+        },
+        {
+          "code": "live_signal_count = len(signals) - 1",
+          "note": "One damaged channel still leaves three teaching signals."
+        }
+      ],
+      "expect": {
+        "signals": [
+          85,
+          82,
+          79,
+          76
+        ],
+        "live_signal_count": 3
+      },
+      "limit": "This original teaching model maps curvature to simple light-loss values. It is not the paper's reconstruction algorithm, calibration, geometry, dataset, error analysis, pressure decoupling, or hardware. It cannot establish clinical or product performance.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "curvature": 3
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "curvature": 3,
+            "fiber_sensitivity": [
+              5,
+              6,
+              7,
+              8
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "curvature": 3,
+            "fiber_sensitivity": [
+              5,
+              6,
+              7,
+              8
+            ],
+            "signals": [
+              85,
+              82,
+              79,
+              76
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "curvature": 3,
+            "fiber_sensitivity": [
+              5,
+              6,
+              7,
+              8
+            ],
+            "signals": [
+              85,
+              82,
+              79,
+              76
+            ],
+            "live_signal_count": 3
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Toward Fully Soft and Multifunctional Shape Sensing via Optical Waveguide Arrays",
+        "https://advanced.onlinelibrary.wiley.com/doi/10.1002/aisy.70488",
+        "First published July 29, 2026"
+      ],
+      [
+        "MIT News: shape-sensing sheet",
+        "https://news.mit.edu/2026/shape-sensing-sheet-digitally-tracks-movement-bends-twists-1008",
+        "Published October 8, 2026"
+      ]
+    ],
+    "visual_explanation": "The 14 live signal columns make redundancy and damage visible; changing curvature alters a vector, not one decorative number.",
+    "written_questions": [
+      "Which calibration experiment would separate joint bending from an external press?",
+      "What durability and error evidence would you require for physical-therapy use?"
+    ],
+    "source_checked_on": "2026-10-23"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "Do not paste a pull-request title into a shell script",
+    "goal": "Keep untrusted GitHub context out of generated runner code.",
+    "tag": "GitHub Actions security · script injection",
+    "concept": "<p>A shipping label is data. If a warehouse robot reads the label as a program, an attacker can print “open every door” on the box.</p><p>GitHub expressions inside <code>run:</code> are expanded before the temporary shell script executes. A malicious title can therefore become shell syntax. Pass the value through an environment variable and quote it, or use an action that treats the input as data.</p>",
+    "example": "<p>The title <code>a\"; echo PWNED; #</code> is substituted into <code>title=\"...\"</code>. It closes the quote and adds a command. With <code>env: TITLE: ${{ ... }}</code>, the generated script contains <code>\"$TITLE\"</code>; the title arrives as one environment value.</p>",
+    "use_case": {
+      "when": "Use this control whenever workflow scripts consume attacker-influenced titles, bodies, branch names, labels, commit messages, or email fields.",
+      "example": "A required PR-title check runs with repository permissions and must evaluate fork-authored titles safely.",
+      "decision": "Prefer a maintained action for complex parsing. For inline shell, put the expression in an intermediate environment variable, quote expansions, grant minimum permissions, and test hostile values. Avoid privileged workflows for untrusted code."
+    },
+    "practice": "Switch between direct expression substitution and an environment binding. Inspect the exact temporary script shape before it would run.",
+    "boundary": "The browser never launches a shell and intentionally does not execute the payload. It only renders two strings. Shells, quoting rules, operating systems, action implementations, permissions, events, and runner isolation need separate validation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.15rem;font-weight:850}.trust{display:grid;grid-template-columns:1fr 60px 1fr 60px 1fr;gap:8px;align-items:center}.lane{display:grid;grid-template-columns:125px 1fr;gap:10px;margin:8px 0}.track{height:32px;background:#d8e4df;border-radius:8px;overflow:hidden}.fill{height:100%;padding:4px 8px;font-weight:800;white-space:nowrap}.quota-a{background:#f2bb5f}.quota-b{background:#8dcac0}.secret{background:#ddc8f2}.script{font-family:ui-monospace,monospace;white-space:pre-wrap}.fiber-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}.fiber{height:72px;border-radius:50%;background:linear-gradient(#ffd55e,#de6b45);position:relative}.fiber.off{background:#73827e}.state-line{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:10px;padding:12px}.context-map{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:stretch}.packet{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb}.status{padding:8px;border-radius:8px;font-weight:800}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.trust,.state-line,.context-map{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.lane{grid-template-columns:1fr}.fiber-grid{grid-template-columns:repeat(4,1fr)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><label>Binding <select id=\"binding\"><option value=\"direct\">direct expression in run</option><option value=\"env\">environment variable</option></select></label><div id=\"scriptWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintScript(){const safe=binding.value==='env',title='a\\\"; echo PWNED; #';const script=safe?'TITLE=<untrusted environment value>\\nif [[ \\\"$TITLE\\\" =~ ^feat: ]]; then':'title=\\\"'+title+'\\\"\\nif [[ $title =~ ^feat: ]]; then';scriptWorld.innerHTML='<div class=\"node script '+(safe?'ok':'fail')+'\"><strong>temporary script shape</strong><br>'+script.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('\\n','<br>')+'</div><p>'+(safe?'Title remains data when correctly quoted.':'Title text changes shell grammar before execution.')+'</p>';};binding.onchange=paintScript;paintScript();",
+    "questions": [
+      [
+        "Why is ${{ github.event.pull_request.title }} dangerous inside run:?",
+        [
+          "GitHub substitutes it into generated shell code",
+          "Titles are always secret",
+          "Expressions disable runners"
+        ],
+        0,
+        "Attacker-controlled text can change the script's grammar."
+      ],
+      [
+        "What does an intermediate environment variable improve?",
+        [
+          "The generated script no longer contains the title text",
+          "It grants more permissions",
+          "It validates every title automatically"
+        ],
+        0,
+        "The value reaches the shell as data rather than template-generated code."
+      ],
+      [
+        "What is still required after using env:?",
+        [
+          "Correct shell quoting and least privilege",
+          "Running arbitrary fork code as admin",
+          "Removing all tests"
+        ],
+        0,
+        "Environment binding prevents this substitution path, not every command-injection or privilege risk."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "title = 'a\\\"; echo PWNED; #'",
+          "note": "Use a harmless string representation of hostile input; do not execute it."
+        },
+        {
+          "code": "direct_script = 'title=\\\"' + title + '\\\"'",
+          "note": "Direct templating lets input alter the script text."
+        },
+        {
+          "code": "safe_script = 'if [[ \\\"$TITLE\\\" =~ ^feat: ]]'",
+          "note": "The fixed script references a quoted environment variable."
+        },
+        {
+          "code": "script_contains_payload = 'PWNED' in direct_script and 'PWNED' not in safe_script",
+          "note": "Only the directly generated script contains attacker text."
+        }
+      ],
+      "expect": {
+        "script_contains_payload": true
+      },
+      "limit": "The browser never launches a shell and intentionally does not execute the payload. It only renders two strings. Shells, quoting rules, operating systems, action implementations, permissions, events, and runner isolation need separate validation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "title": "a\"; echo PWNED; #"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "title": "a\"; echo PWNED; #",
+            "direct_script": "title=\"a\"; echo PWNED; #\""
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "title": "a\"; echo PWNED; #",
+            "direct_script": "title=\"a\"; echo PWNED; #\"",
+            "safe_script": "if [[ \"$TITLE\" =~ ^feat: ]]"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "title": "a\"; echo PWNED; #",
+            "direct_script": "title=\"a\"; echo PWNED; #\"",
+            "safe_script": "if [[ \"$TITLE\" =~ ^feat: ]]",
+            "script_contains_payload": true
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Docs: script injections",
+        "https://docs.github.com/en/actions/concepts/security/script-injections",
+        "Living documentation; checked October 23, 2026"
+      ],
+      [
+        "GitHub Actions secure use reference",
+        "https://docs.github.com/en/actions/reference/security/secure-use",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The visual shows the runner's generated script, because the security boundary is code generation—not a generic shield icon.",
+    "written_questions": [
+      "Which untrusted GitHub context values enter your workflows today?",
+      "How would you test hostile titles across Bash, PowerShell, and called actions?"
+    ],
+    "source_checked_on": "2026-10-23"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "The second DELETE may say 404 and still be idempotent",
+    "goal": "Separate the repeated request's intended effect from its response code.",
+    "tag": "HTTP semantics · DELETE",
+    "concept": "<p>Pressing an elevator's “door close” button twice should not close a second door. The display may change from “closing” to “already closed,” but the intended state stays closed.</p><p>HTTP idempotence means repeating the same request has the same intended effect. It does not require identical responses. A first <code>DELETE /jobs/42</code> can return 204; a retry can return 404 because the job is already absent.</p>",
+    "example": "<p>Job 42 exists. The first DELETE removes it and returns 204. The client loses that response and retries. The server finds no job and returns 404. Database state after both calls is still “job 42 absent.” Logging each attempt also does not change the requested effect.</p>",
+    "use_case": {
+      "when": "Rely on DELETE idempotence when clients, gateways, or SDKs may retry after losing a response and the requested resource state is simply absent.",
+      "example": "An operator cancels a scheduled data job; the network drops after deletion, so the client repeats the DELETE.",
+      "decision": "Define and document the chosen response for an already-absent resource. Make downstream side effects retry-safe too. Use an operation resource when deletion is asynchronous, and an idempotency key when the operation is actually a non-idempotent POST."
+    },
+    "practice": "Run the same DELETE twice. Compare response codes with the resource state after each call.",
+    "boundary": "The browser holds one Boolean resource. It does not model authorization, soft deletes, cascades, async deletion, concurrent recreation, caches, replicas, billing effects, audit logs, or framework behavior.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-size:1.15rem;font-weight:850}.trust{display:grid;grid-template-columns:1fr 60px 1fr 60px 1fr;gap:8px;align-items:center}.lane{display:grid;grid-template-columns:125px 1fr;gap:10px;margin:8px 0}.track{height:32px;background:#d8e4df;border-radius:8px;overflow:hidden}.fill{height:100%;padding:4px 8px;font-weight:800;white-space:nowrap}.quota-a{background:#f2bb5f}.quota-b{background:#8dcac0}.secret{background:#ddc8f2}.script{font-family:ui-monospace,monospace;white-space:pre-wrap}.fiber-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}.fiber{height:72px;border-radius:50%;background:linear-gradient(#ffd55e,#de6b45);position:relative}.fiber.off{background:#73827e}.state-line{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:10px;padding:12px}.context-map{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:stretch}.packet{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb}.status{padding:8px;border-radius:8px;font-weight:800}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere;word-break:break-word}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.trust,.state-line,.context-map{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.lane{grid-template-columns:1fr}.fiber-grid{grid-template-columns:repeat(4,1fr)}table{display:block;overflow-x:auto;max-width:100%}}\n</style><div id=\"world\"><button id=\"deleteOnce\">Send DELETE</button><button id=\"resetDelete\">Restore job 42</button><div id=\"deleteWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "let present=true,attempt=0,last='not sent';function paintDelete(){deleteWorld.innerHTML='<div class=state-line><div class=\"node '+(present?'wait':'ok')+'\"><strong>Database</strong><br>job 42 '+(present?'exists':'absent')+'</div><div class=arrow>← DELETE</div><div class=response><strong>Attempt '+attempt+'</strong><br>response: '+last+'</div></div><p>Idempotent effect: desired state is <strong>absent</strong>; response codes may differ.</p>';};deleteOnce.onclick=()=>{attempt++;if(present){present=false;last='204 No Content';}else{last='404 Not Found';}paintDelete();};resetDelete.onclick=()=>{present=true;attempt=0;last='not sent';paintDelete();};paintDelete();",
+    "questions": [
+      [
+        "The first DELETE removed job 42, but its 204 response was lost. What can a retry return while remaining idempotent?",
+        [
+          "404 with job 42 still absent",
+          "201 with a new job",
+          "It must repeat byte-identical 204"
+        ],
+        0,
+        "Idempotence concerns intended effect, not identical response messages."
+      ],
+      [
+        "Why can the server log both DELETE attempts?",
+        [
+          "Incidental logging does not change the requested resource effect",
+          "DELETE is a safe method",
+          "Logs recreate the job"
+        ],
+        0,
+        "The specification distinguishes requested semantics from incidental side effects."
+      ],
+      [
+        "What requires extra design beyond HTTP method semantics?",
+        [
+          "Retry-safe downstream billing or notifications",
+          "The word DELETE",
+          "Returning a status code"
+        ],
+        0,
+        "An idempotent method label cannot make arbitrary external side effects idempotent."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "resource_present = True",
+          "note": "Job 42 exists before the first request."
+        },
+        {
+          "code": "first_status = 204 if resource_present else 404; resource_present = False",
+          "note": "The first DELETE removes the resource."
+        },
+        {
+          "code": "second_status = 204 if resource_present else 404; resource_present = False",
+          "note": "The retry can report absence without changing the final state."
+        },
+        {
+          "code": "final_state = 'absent' if not resource_present else 'present'",
+          "note": "Both executions converge on the same intended resource state."
+        }
+      ],
+      "expect": {
+        "first_status": 204,
+        "second_status": 404,
+        "final_state": "absent"
+      },
+      "limit": "The browser holds one Boolean resource. It does not model authorization, soft deletes, cascades, async deletion, concurrent recreation, caches, replicas, billing effects, audit logs, or framework behavior.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "resource_present": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "resource_present": false,
+            "first_status": 204
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "resource_present": false,
+            "first_status": 204,
+            "second_status": 404
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "resource_present": false,
+            "first_status": 204,
+            "second_status": 404,
+            "final_state": "absent"
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "RFC 9110 §9.2.2 Idempotent Methods",
+        "https://www.rfc-editor.org/rfc/rfc9110#section-9.2.2",
+        "Published June 2022"
+      ],
+      [
+        "RFC 9110 §9.3.5 DELETE",
+        "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.5",
+        "Published June 2022"
+      ]
+    ],
+    "visual_explanation": "The same database state sits beside two different responses, making the exact semantics visible: same intended effect, not same status.",
+    "written_questions": [
+      "What should your API return for DELETE of an already-absent resource, and why?",
+      "Which downstream effects in your delete path would violate retry safety?"
+    ],
+    "source_checked_on": "2026-10-23"
+  }
+]

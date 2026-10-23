@@ -2,7 +2,7 @@
   "schema_version": 1,
   "created_on": "2026-10-08",
   "target_date": "2026-12-31",
-  "source_checked_on": "2026-10-22",
+  "source_checked_on": "2026-10-23",
   "guide_recheck": "weekly and before booking",
   "time_budget_minutes": 30,
   "tracks": [
@@ -531,6 +531,39 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day33/data-engineering",
+      "product_material_added_on": "2026-10-23",
+      "session_type": "focused",
+      "cycle_position": 3,
+      "cycle_origin": "Day31",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "platform",
+        "ingestion",
+        "governance_security"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official current overview verified 2026-10-21; full objective IDs and weights still unverified; planning groups only",
+      "snowflake_planning_groups": [
+        "architecture_connectivity",
+        "account_warehouse_access",
+        "loading_unloading_transformation"
+      ],
+      "source_checked_on": "2026-10-23",
+      "source_versions": {
+        "databricks": "Storage credential and S3 external-location documentation checked 2026-10-23; official exam guide dated 2026-05-04",
+        "snowflake": "Storage integration and S3 configuration documentation checked 2026-10-23; current COF-C03 overview last verified 2026-10-21; full guide IDs/weights unverified"
+      },
+      "depth": "Focused credential-free S3 trust chain, path scoping, product authorization and failure boundaries. No complete exam coverage or mastery claim.",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql_or_cli": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -610,6 +643,11 @@
       "day_number": 32,
       "date": "2026-10-22",
       "key": "Day18/data-engineering+products+7"
+    },
+    {
+      "day_number": 33,
+      "date": "2026-10-23",
+      "key": "Day22/data-engineering+products+3"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
