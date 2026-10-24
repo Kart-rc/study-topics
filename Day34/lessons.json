@@ -1,0 +1,1308 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "A clone starts shared; changed data becomes its own",
+    "goal": "Compare copy-on-write clones in Databricks and Snowflake, then choose shallow, deep, or zero-copy behavior deliberately.",
+    "tag": "Certification focus · cycle 3, position 4",
+    "concept": "<p>A photocopy normally duplicates every page. A data clone can start more like two table-of-contents cards that point to the same sealed pages. Creating it is fast because the pages are not copied. When one side changes, new pages belong only to that side.</p><p>This is <strong>copy-on-write</strong>: share unchanged storage, separate changed storage. The important question is not only “Can I clone?” It is “Which files remain dependencies, which permissions copy, and what happens after the source changes?”</p>",
+    "example": "<p>Production has three immutable files: A, B, and C. A test clone initially reads all three. Test updates one order, so its new file D belongs only to test. Production still reads A+B+C. The clone reads the shared files plus D according to its own metadata. Storage grows for the changed portion, not for a second full copy.</p>",
+    "use_case": {
+      "when": "Use a clone to create a fast, isolated test or recovery starting point from an existing table. It fits short-lived QA, migration rehearsal, incident investigation, and controlled data repair.",
+      "example": "Create a test copy of a 10 TB orders table, change 2% of rows, validate a transformation, then discard the clone.",
+      "decision": "Choose a sharing clone when speed and low initial storage matter and the source lifecycle is controlled. Choose a deep copy when the target must not depend on source files. Recheck grants, retention, external-table, stream, task, and object-type rules before production use."
+    },
+    "practice": "Change the clone percentage and storage mode. Watch which files stay shared and which side owns the changed files.",
+    "boundary": "The browser counts synthetic 100 GB files. It does not run either vendor, calculate compressed bytes, model metadata, retention, VACUUM, Time Travel, Iceberg, external storage, grants, streams, tasks, masking policies, or billing. SQL is sourced but unexecuted.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.file-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}.file{padding:10px;border-radius:9px;background:#dfe9e4;border:2px solid #6d8e83;text-align:center}.file.shared{background:#fff0b7}.file.new{background:#dff3ce}.buckets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.bucket{min-height:80px;border:2px dashed #73988b;border-radius:10px;padding:8px}.plane{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.turns{display:flex;gap:6px;flex-wrap:wrap}.turn{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;border:2px solid #73988b;background:#fbfdfb}.turn.used{background:#fff0b7}.turn.stop{background:#ffe1db}.corr{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;align-items:end;height:170px}.bar{background:#69a99c;border-radius:6px 6px 0 0;min-height:8px;position:relative}.bar span{position:absolute;bottom:-28px;left:0;font-size:.75rem}.runner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.route{border:2px solid #73988b;border-radius:12px;padding:12px}.browser-grid{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:12px;padding:12px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.plane,.browser-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.buckets{grid-template-columns:repeat(2,1fr)}.corr{grid-template-columns:repeat(3,1fr);height:auto}.bar{height:50px!important}.bar span{position:static}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Mode <select id=\"cloneMode\"><option value=\"shared\">share unchanged files</option><option value=\"deep\">deep copy every file</option></select></label><label>Changed files <input id=\"changedFiles\" type=\"range\" min=\"0\" max=\"3\" value=\"1\"></label><div id=\"cloneWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintClone(){const deep=cloneMode.value==='deep',changed=+changedFiles.value;let files='';for(let i=0;i<3;i++){const own=deep||i<changed;files+='<div class=\"file '+(own?'new':'shared')+'\">'+String.fromCharCode(65+i)+'<br>'+(own?'clone-owned':'shared')+'</div>';}const gb=(deep?300:0)+changed*100;cloneWorld.innerHTML='<div class=file-grid>'+files+'</div><p><strong>Extra teaching storage: '+gb+' GB</strong> · '+(deep?'independent full copy':'unchanged files remain shared')+'</p>';};cloneMode.onchange=paintClone;changedFiles.oninput=paintClone;paintClone();",
+    "questions": [
+      [
+        "A zero-copy clone is created and no rows change. What is copied initially?",
+        [
+          "Metadata references; existing data storage is shared",
+          "Every data block",
+          "Only deleted rows"
+        ],
+        0,
+        "The clone begins by sharing existing immutable storage."
+      ],
+      [
+        "Why can clone storage grow later?",
+        [
+          "New or rewritten data belongs to the table that changed",
+          "The clone silently becomes a backup",
+          "SELECT duplicates files"
+        ],
+        0,
+        "Copy-on-write creates separate storage for changed portions."
+      ],
+      [
+        "When is a deep copy safer?",
+        [
+          "The target must not depend on source files or lifecycle",
+          "The target is always temporary",
+          "You want copied grants automatically"
+        ],
+        0,
+        "Independence can justify the higher copy time and storage."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "source_files = ['A', 'B', 'C']",
+          "note": "Production starts with three immutable files."
+        },
+        {
+          "code": "clone_shared = list(source_files)",
+          "note": "A sharing clone initially references the same three files."
+        },
+        {
+          "code": "clone_owned = ['D']; clone_visible = clone_shared + clone_owned",
+          "note": "The clone writes one new file after its update."
+        },
+        {
+          "code": "source_visible = list(source_files); shared_count = len([f for f in source_files if f in clone_visible])",
+          "note": "Production remains unchanged while three files are still shared."
+        }
+      ],
+      "expect": {
+        "source_files": [
+          "A",
+          "B",
+          "C"
+        ],
+        "clone_shared": [
+          "A",
+          "B",
+          "C"
+        ],
+        "clone_owned": [
+          "D"
+        ],
+        "clone_visible": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "source_visible": [
+          "A",
+          "B",
+          "C"
+        ],
+        "shared_count": 3
+      },
+      "limit": "The browser counts synthetic 100 GB files. It does not run either vendor, calculate compressed bytes, model metadata, retention, VACUUM, Time Travel, Iceberg, external storage, grants, streams, tasks, masking policies, or billing. SQL is sourced but unexecuted.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "source_files": [
+              "A",
+              "B",
+              "C"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "source_files": [
+              "A",
+              "B",
+              "C"
+            ],
+            "clone_shared": [
+              "A",
+              "B",
+              "C"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "source_files": [
+              "A",
+              "B",
+              "C"
+            ],
+            "clone_shared": [
+              "A",
+              "B",
+              "C"
+            ],
+            "clone_owned": [
+              "D"
+            ],
+            "clone_visible": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "source_files": [
+              "A",
+              "B",
+              "C"
+            ],
+            "clone_shared": [
+              "A",
+              "B",
+              "C"
+            ],
+            "clone_owned": [
+              "D"
+            ],
+            "clone_visible": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ],
+            "source_visible": [
+              "A",
+              "B",
+              "C"
+            ],
+            "shared_count": 3
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks: Clone a table",
+        "https://docs.databricks.com/aws/en/tables/operations/clone",
+        "Living documentation; checked October 24, 2026"
+      ],
+      [
+        "Databricks SQL CREATE TABLE CLONE",
+        "https://docs.databricks.com/aws/en/sql/language-manual/delta-clone",
+        "Living documentation; checked October 24, 2026"
+      ],
+      [
+        "Snowflake cloning considerations",
+        "https://docs.snowflake.com/en/user-guide/object-clone",
+        "Living documentation; checked October 24, 2026"
+      ],
+      [
+        "Snowflake storage costs and zero-copy cloning",
+        "https://docs.snowflake.com/en/user-guide/cost-understanding-data-storage",
+        "Living documentation; checked October 24, 2026"
+      ]
+    ],
+    "visual_explanation": "The file tiles answer what is physically shared after cloning and why later writes increase storage.",
+    "written_questions": [
+      "Which tables in your platform are safe to clone for QA, and which contain data that should be masked first?",
+      "What evidence would prove that a clone can survive the source cleanup policy?"
+    ],
+    "source_checked_on": "2026-10-24",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: choose SHALLOW or DEEP CLONE",
+        "minutes": 9,
+        "html": "<p><strong>Mechanism.</strong> A shallow clone copies table metadata and references source data files. A deep clone copies metadata and data files. After creation, source and target have independent metadata histories, but a shallow clone still needs readable source files.</p><pre><code><span>-- sourced SQL; not executed</span><span>CREATE TABLE qa.orders</span><span>SHALLOW CLONE prod.orders;</span><span></span><span>CREATE TABLE archive.orders</span><span>DEEP CLONE prod.orders;</span></code></pre><label>Source files remain readable? <select id=\"dbSource\"><option value=\"yes\">yes</option><option value=\"no\">no</option></select></label><label>Clone type <select id=\"dbClone\"><option value=\"shallow\">shallow</option><option value=\"deep\">deep</option></select></label><div id=\"dbCloneWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> A shallow clone can fail if source files are removed. Keep the source lifecycle compatible or use a deep clone when independence is required.</p><p><strong>Limits.</strong> Runtime, catalog, source type, streaming table, materialized view, history, and privilege rules vary. The SQL above did not run.</p>",
+        "markdown": "Databricks shallow clone references source files; deep clone copies data and metadata. Source and target metadata histories diverge, but shallow readers still depend on readable source files. SQL is sourced and unexecuted.",
+        "javascript": "const dbSource=$('dbSource'),dbClone=$('dbClone'),dbCloneWorld=$('dbCloneWorld');function paintDb(){const deep=dbClone.value==='deep',ok=deep||dbSource.value==='yes';dbCloneWorld.innerHTML='<div class=plane><div class=\"node '+(dbSource.value==='yes'?'ok':'fail')+'\"><strong>Source files</strong><br>'+dbSource.value+'</div><div class=arrow>→</div><div class=\"node '+(ok?'ok':'fail')+'\"><strong>'+dbClone.value+' clone</strong><br>'+(ok?'read succeeds':'broken reference')+'</div></div><p>Local dependency model; no Databricks call ran.</p>';};dbSource.onchange=paintDb;dbClone.onchange=paintDb;paintDb();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: zero-copy clone, then copy-on-write",
+        "minutes": 9,
+        "html": "<p><strong>Mechanism.</strong> <code>CREATE … CLONE</code> creates a new object whose tables initially share existing micro-partitions. Each table has its own lifecycle. DML creates new micro-partitions owned by the table that changed.</p><pre><code><span>-- sourced SQL; not executed</span><span>CREATE SCHEMA qa CLONE prod;</span><span></span><span>UPDATE qa.orders</span><span>SET status = 'REVIEW'</span><span>WHERE order_id = 42;</span></code></pre><label>Clone changes <input id=\"sfChanges\" type=\"range\" min=\"0\" max=\"100\" value=\"20\"></label><div id=\"sfCloneWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> Cloning a database or schema does not mean every dependent object behaves identically. Review privileges, COPY GRANTS, tasks, streams, external objects, policies, and object-specific clone rules.</p><p><strong>Limits.</strong> This local percentage model is not Snowflake storage accounting. SQL above did not run.</p>",
+        "markdown": "Snowflake zero-copy clones initially share micro-partitions. Later DML creates table-owned partitions. Review object-specific clone and grant behavior; SQL is sourced and unexecuted.",
+        "javascript": "const sfChanges=$('sfChanges'),sfCloneWorld=$('sfCloneWorld');function paintSf(){const changed=+sfChanges.value;sfCloneWorld.innerHTML='<div class=row><div class=\"node shared\"><strong>Shared micro-partitions</strong><br>'+(100-changed)+'%</div><div class=\"node new\"><strong>Clone-owned after DML</strong><br>'+changed+'%</div></div><p>Local percentage model; no Snowflake query ran.</p>';};sfChanges.oninput=paintSf;paintSf();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Fast sharing form</td><td>SHALLOW CLONE references source files</td><td>Zero-copy clone shares micro-partitions</td></tr><tr><td>Independent copy</td><td>DEEP CLONE copies data and metadata</td><td>No direct deep-clone keyword; materialize/copy deliberately when full physical independence is required</td></tr><tr><td>After writes</td><td>Metadata and new files diverge</td><td>New micro-partitions belong to the changed object</td></tr><tr><td>Key boundary</td><td>Shallow source-file lifecycle</td><td>Object-specific clone, grants, streams/tasks, and retention behavior</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Fast form | shallow clone | zero-copy clone |\n| Full independent copy | deep clone | deliberate materialization/copy; no direct deep-clone keyword |\n| Changes | new files/metadata diverge | new micro-partitions diverge |\n| Boundary | source-file lifecycle | object/grant/retention rules |"
+    },
+    "product_questions": [
+      [
+        "A Databricks shallow clone must survive source-file cleanup. Best change?",
+        [
+          "Use a deep clone or preserve the source lifecycle",
+          "Run VACUUM sooner",
+          "Drop the clone metadata"
+        ],
+        0,
+        "A shallow clone depends on readable source files."
+      ],
+      [
+        "A Snowflake zero-copy clone updates 2% of rows. What grows?",
+        [
+          "Storage for new/replaced micro-partitions, not an automatic second full copy",
+          "Every shared partition is duplicated immediately",
+          "No storage can ever grow"
+        ],
+        0,
+        "Copy-on-write separates changed storage."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks table cloning",
+        "https://docs.databricks.com/aws/en/tables/operations/clone",
+        "Checked October 24, 2026"
+      ],
+      [
+        "Databricks CLONE syntax",
+        "https://docs.databricks.com/aws/en/sql/language-manual/delta-clone",
+        "Checked October 24, 2026"
+      ],
+      [
+        "Snowflake cloning considerations",
+        "https://docs.snowflake.com/en/user-guide/object-clone",
+        "Checked October 24, 2026"
+      ],
+      [
+        "Snowflake CREATE CLONE",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-clone",
+        "Checked October 24, 2026"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-24",
+      "session_type": "focused",
+      "cycle_position": 4,
+      "cycle_origin": "Day31",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "transformation_modeling",
+          "deployment",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Shallow versus deep clone, source-file dependency, independent metadata history, and use-case tradeoffs. Delivered coverage is not mastery."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "blueprint_status": "Official current overview verified 2026-10-21; full objective IDs and weights remain unverified",
+        "planning_groups": [
+          "data_protection",
+          "performance",
+          "collaboration"
+        ],
+        "scope": "Zero-copy cloning, shared micro-partitions, copy-on-write storage, and object-specific boundaries. Complete COF-C03 coverage is not claimed."
+      },
+      "product_lab_execution": "not_run"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "If a map key changes, the entry does not move",
+    "goal": "See why mutable fields used by equals and hashCode can make a stored Java key unreachable.",
+    "tag": "Java collections · key identity",
+    "concept": "<p>A library puts a book on shelf 2 because its call number begins with B. If someone changes the label to Z without moving the book, the catalog now sends readers to shelf 7. The book still exists, but lookup misses it.</p><p>A hash map chooses a bucket from the key's hash code. If a field used by <code>equals</code> or <code>hashCode</code> changes after insertion, the entry stays in its old bucket while a new lookup searches another bucket.</p>",
+    "example": "<p>An order-cache key starts as tenant <code>east</code>, order <code>42</code>, with bucket 1. Code mutates the same key to tenant <code>west</code>. A lookup hashes <code>west:42</code> to bucket 3. The stored entry did not move, so <code>get</code> can return null.</p>",
+    "use_case": {
+      "when": "Use hash maps for stable identifiers, deduplication keys, caches, and grouping only when the key's equality-defining state will not change while stored.",
+      "example": "A cache uses (tenant, orderId) as the key. Model it as an immutable Java record instead of a mutable request object.",
+      "decision": "Prefer immutable records, strings, UUIDs, or copied key objects. If identity really changes, remove the old key before mutation and insert a new key. Do not try to repair a map by relying on an implementation's current bucket layout."
+    },
+    "practice": "Change the tenant after insertion. The visual keeps the entry in its original bucket and moves only the lookup probe.",
+    "boundary": "The browser uses a simple four-bucket teaching hash, not Java HashMap's spread function, resizing, tree bins, collisions, or implementation details. The Java replay demonstrates the public Map contract boundary, not guaranteed bucket numbers.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.file-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}.file{padding:10px;border-radius:9px;background:#dfe9e4;border:2px solid #6d8e83;text-align:center}.file.shared{background:#fff0b7}.file.new{background:#dff3ce}.buckets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.bucket{min-height:80px;border:2px dashed #73988b;border-radius:10px;padding:8px}.plane{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.turns{display:flex;gap:6px;flex-wrap:wrap}.turn{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;border:2px solid #73988b;background:#fbfdfb}.turn.used{background:#fff0b7}.turn.stop{background:#ffe1db}.corr{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;align-items:end;height:170px}.bar{background:#69a99c;border-radius:6px 6px 0 0;min-height:8px;position:relative}.bar span{position:absolute;bottom:-28px;left:0;font-size:.75rem}.runner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.route{border:2px solid #73988b;border-radius:12px;padding:12px}.browser-grid{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:12px;padding:12px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.plane,.browser-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.buckets{grid-template-columns:repeat(2,1fr)}.corr{grid-template-columns:repeat(3,1fr);height:auto}.bar{height:50px!important}.bar span{position:static}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Key tenant <select id=\"keyTenant\"><option value=\"east\">east</option><option value=\"west\">west</option></select></label><div id=\"mapWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintMap(){const mutated=keyTenant.value==='west',probe=mutated?3:1;let b='';for(let i=0;i<4;i++){b+='<div class=\"bucket '+(i===probe?'wait':'')+'\"><strong>bucket '+i+'</strong><br>'+(i===1?'stored object<br>now '+keyTenant.value+':42':'')+(i===probe?'<br>lookup probe':'')+'</div>';}mapWorld.innerHTML='<div class=buckets>'+b+'</div><p class=\"'+(mutated?'fail':'ok')+'\">'+(mutated?'MISS: probe moved, entry did not':'HIT: probe and entry share bucket')+'</p>';};keyTenant.onchange=paintMap;paintMap();",
+    "questions": [
+      [
+        "A key's tenant field affects equals/hashCode and changes after put. What is specified?",
+        [
+          "Map behavior is unspecified",
+          "The entry moves automatically",
+          "The map rehashes every get"
+        ],
+        0,
+        "The Java Map contract warns against equality-affecting key mutation."
+      ],
+      [
+        "Why can get return null even when iteration still shows the entry?",
+        [
+          "Lookup searches using the new hash while the entry remains stored under the old placement",
+          "Iteration deletes keys",
+          "Null means the map is empty"
+        ],
+        0,
+        "The object's current identity and stored location no longer agree."
+      ],
+      [
+        "Best key for (tenant, orderId)?",
+        [
+          "An immutable record",
+          "A mutable request DTO",
+          "A reused StringBuilder"
+        ],
+        0,
+        "Stable equality and hash state keep lookup behavior coherent."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "record OrderKey(String tenant, int orderId) {}",
+          "note": "Define an immutable key whose equality fields cannot change."
+        },
+        {
+          "code": "var cache = new java.util.HashMap<OrderKey, String>();",
+          "note": "Create the map."
+        },
+        {
+          "code": "var east42 = new OrderKey(\"east\", 42); cache.put(east42, \"shipped\");",
+          "note": "Insert one stable key and value."
+        },
+        {
+          "code": "var lookup = cache.get(new OrderKey(\"east\", 42));",
+          "note": "An equal immutable key retrieves shipped."
+        }
+      ],
+      "expect": {
+        "cache": "{OrderKey[tenant=east, orderId=42]=shipped}",
+        "east42": "OrderKey[tenant=east, orderId=42]",
+        "lookup": "shipped"
+      },
+      "limit": "The browser uses a simple four-bucket teaching hash, not Java HashMap's spread function, resizing, tree bins, collisions, or implementation details. The Java replay demonstrates the public Map contract boundary, not guaranteed bucket numbers.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {
+            "cache": "{}"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "cache": "{OrderKey[tenant=east, orderId=42]=shipped}",
+            "east42": "OrderKey[tenant=east, orderId=42]"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "cache": "{OrderKey[tenant=east, orderId=42]=shipped}",
+            "east42": "OrderKey[tenant=east, orderId=42]",
+            "lookup": "shipped"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java SE 21 Map contract",
+        "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Map.html",
+        "Living Java API documentation"
+      ],
+      [
+        "Java SE Object hashCode contract",
+        "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html#hashCode()",
+        "Living Java API documentation"
+      ]
+    ],
+    "visual_explanation": "The buckets answer why the object can still be present yet unreachable: mutation moves the probe, not the stored entry.",
+    "written_questions": [
+      "Which objects in your services are currently used as map or set keys, and are their identity fields immutable?",
+      "What test would expose a key mutation bug before it reaches a cache under load?"
+    ],
+    "source_checked_on": "2026-10-24"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Let the data plane keep working when the control plane is sick",
+    "goal": "Design a platform so existing traffic can continue on last-known-good configuration during management outages.",
+    "tag": "Deeper installment · static stability",
+    "concept": "<p>The control plane is the front desk: it creates, updates, and deletes resources. The data plane is the elevator: it performs the service people already depend on. If the front desk computer fails, the elevator should not immediately stop.</p><p>Keep the high-volume data path simple. Distribute versioned configuration ahead of need. Cache the last-known-good version. During a control-plane outage, reject new changes but continue serving with known state.</p>",
+    "example": "<p>A Kafka gateway has routing config version 17. The control API becomes unavailable. A weak design checks the API on every record and stops. A statically stable design keeps routing existing records with version 17, raises an age alarm, and blocks new tenant provisioning until the control plane recovers.</p>",
+    "use_case": {
+      "when": "Use control/data-plane separation for gateways, schedulers, feature configuration, authorization snapshots, routing, and infrastructure whose existing service is more critical than management changes.",
+      "example": "An EKS data gateway continues routing known tenants from a signed S3 configuration snapshot while its tenant-management API is down.",
+      "decision": "Define which operations must continue, how stale configuration may become, how revocation works, and which emergency changes need a separate highly available data-plane mechanism. Static stability is not permission to serve indefinitely stale or unsafe state."
+    },
+    "practice": "Toggle control-plane health and cached configuration. Watch existing traffic and new changes take different paths.",
+    "boundary": "The browser uses two booleans and one version. It omits config signing, distribution, cache expiry, revocation, split brain, schema compatibility, regional failure, load shedding, observability, and recovery reconciliation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.file-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}.file{padding:10px;border-radius:9px;background:#dfe9e4;border:2px solid #6d8e83;text-align:center}.file.shared{background:#fff0b7}.file.new{background:#dff3ce}.buckets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.bucket{min-height:80px;border:2px dashed #73988b;border-radius:10px;padding:8px}.plane{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.turns{display:flex;gap:6px;flex-wrap:wrap}.turn{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;border:2px solid #73988b;background:#fbfdfb}.turn.used{background:#fff0b7}.turn.stop{background:#ffe1db}.corr{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;align-items:end;height:170px}.bar{background:#69a99c;border-radius:6px 6px 0 0;min-height:8px;position:relative}.bar span{position:absolute;bottom:-28px;left:0;font-size:.75rem}.runner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.route{border:2px solid #73988b;border-radius:12px;padding:12px}.browser-grid{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:12px;padding:12px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.plane,.browser-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.buckets{grid-template-columns:repeat(2,1fr)}.corr{grid-template-columns:repeat(3,1fr);height:auto}.bar{height:50px!important}.bar span{position:static}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"controlHealthy\" type=\"checkbox\" checked> control plane healthy</label><label><input id=\"cachedConfig\" type=\"checkbox\" checked> version 17 cached</label><div id=\"planeWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintPlane(){const c=controlHealthy.checked,cache=cachedConfig.checked,existing=c||cache;planeWorld.innerHTML='<div class=plane><div class=\"node '+(c?'ok':'fail')+'\"><strong>Control plane</strong><br>'+(c?'new changes accepted':'new changes blocked')+'</div><div class=arrow>config v17<br>→</div><div class=\"node '+(existing?'ok':'fail')+'\"><strong>Data plane</strong><br>'+(existing?(c?'fresh v17':'cached v17; existing traffic flows'):'no usable config; traffic stops')+'</div></div>';};controlHealthy.onchange=paintPlane;cachedConfig.onchange=paintPlane;paintPlane();",
+    "questions": [
+      [
+        "The control plane is down but data nodes have valid version 17. Desired behavior?",
+        [
+          "Continue existing traffic on version 17 and block management changes",
+          "Stop all traffic immediately",
+          "Invent version 18 locally"
+        ],
+        0,
+        "Static stability preserves known-good service while management is impaired."
+      ],
+      [
+        "Why avoid a control-plane API call on every data request?",
+        [
+          "It couples the larger, critical path to a smaller, more complex dependency",
+          "It removes all monitoring",
+          "It makes configs immutable forever"
+        ],
+        0,
+        "Scale mismatch and dependency failures can turn management impairment into service failure."
+      ],
+      [
+        "What must still bound last-known-good operation?",
+        [
+          "Staleness, revocation, safety, and reconciliation policy",
+          "A decorative dashboard",
+          "Unlimited cache age"
+        ],
+        0,
+        "Continuity must not silently defeat urgent security or correctness changes."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "control_plane_healthy = False",
+          "note": "Simulate the management API outage."
+        },
+        {
+          "code": "cached_config_version = 17",
+          "note": "The data node already has one known-good version."
+        },
+        {
+          "code": "existing_traffic_served = cached_config_version == 17",
+          "note": "Existing routing continues without a live control-plane read."
+        },
+        {
+          "code": "new_changes_accepted = control_plane_healthy",
+          "note": "New provisioning stays blocked until management recovers."
+        }
+      ],
+      "expect": {
+        "control_plane_healthy": false,
+        "cached_config_version": 17,
+        "existing_traffic_served": true,
+        "new_changes_accepted": false
+      },
+      "limit": "The browser uses two booleans and one version. It omits config signing, distribution, cache expiry, revocation, split brain, schema compatibility, regional failure, load shedding, observability, and recovery reconciliation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "control_plane_healthy": false
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "control_plane_healthy": false,
+            "cached_config_version": 17
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "control_plane_healthy": false,
+            "cached_config_version": 17,
+            "existing_traffic_served": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "control_plane_healthy": false,
+            "cached_config_version": 17,
+            "existing_traffic_served": true,
+            "new_changes_accepted": false
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Builders' Library: Static stability using Availability Zones",
+        "https://aws.amazon.com/builders-library/static-stability-using-availability-zones/",
+        "Published December 5, 2019"
+      ],
+      [
+        "AWS Fault Isolation Boundaries: control planes and data planes",
+        "https://docs.aws.amazon.com/whitepapers/latest/aws-fault-isolation-boundaries/control-planes-and-data-planes.html",
+        "Living AWS guidance"
+      ],
+      [
+        "AWS Builders' Library: putting the smaller service in control",
+        "https://aws.amazon.com/builders-library/avoiding-overload-in-distributed-systems-by-putting-the-smaller-service-in-control/",
+        "Published October 6, 2020"
+      ]
+    ],
+    "visual_explanation": "The split-plane visual answers which actions stop and which continue when management is unavailable.",
+    "written_questions": [
+      "For one platform you own, list control-plane and data-plane operations separately.",
+      "Which revocation or safety event must bypass cached configuration, and how would it work during an outage?"
+    ],
+    "source_checked_on": "2026-10-24"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "A turn limit stops the loop; it does not make the loop useful",
+    "goal": "Use max_turns as a hard orchestration budget, then detect progress separately.",
+    "tag": "Harness engineering · bounded agent loops",
+    "concept": "<p>A taxi meter limits how long you can ride. It does not guarantee the driver is getting closer. Agent turn limits work the same way.</p><p>In the OpenAI Agents SDK, one turn is one model invocation, including any tool calls it requests. If the run exceeds <code>max_turns</code>, the runner raises <code>MaxTurnsExceeded</code> unless handled. That bounds model-loop iterations; it is not a completion proof or a complete cost and latency limit.</p>",
+    "example": "<p>An agent alternates <code>search_logs</code> and “need more evidence” without producing a final output. With <code>max_turns=4</code>, the fourth model call consumes the budget and the run stops instead of looping forever. A useful harness also records that the evidence set did not change across turns 2–4.</p>",
+    "use_case": {
+      "when": "Set a turn budget on every autonomous or tool-using run where the model can call tools, hand off, or continue reasoning.",
+      "example": "An incident agent may inspect logs, metrics, and one deployment diff, but must escalate after four model turns if no new evidence appears.",
+      "decision": "Choose a budget from task complexity, latency, and cost. Add deadline/tool timeouts, cancellation, repeated-action detection, evidence-progress checks, and a useful exception/escalation path. Never interpret 'did not exceed the cap' as success."
+    },
+    "practice": "Set the budget and the turn where progress stops. The model marks productive turns, repeated turns, and the hard stop.",
+    "boundary": "This is a local turn counter. It does not run the Agents SDK or a model; model invocations may contain multiple tool calls, and external tool latency/cost can dominate. SDK semantics can evolve, so recheck the cited docs.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.file-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}.file{padding:10px;border-radius:9px;background:#dfe9e4;border:2px solid #6d8e83;text-align:center}.file.shared{background:#fff0b7}.file.new{background:#dff3ce}.buckets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.bucket{min-height:80px;border:2px dashed #73988b;border-radius:10px;padding:8px}.plane{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.turns{display:flex;gap:6px;flex-wrap:wrap}.turn{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;border:2px solid #73988b;background:#fbfdfb}.turn.used{background:#fff0b7}.turn.stop{background:#ffe1db}.corr{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;align-items:end;height:170px}.bar{background:#69a99c;border-radius:6px 6px 0 0;min-height:8px;position:relative}.bar span{position:absolute;bottom:-28px;left:0;font-size:.75rem}.runner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.route{border:2px solid #73988b;border-radius:12px;padding:12px}.browser-grid{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:12px;padding:12px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.plane,.browser-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.buckets{grid-template-columns:repeat(2,1fr)}.corr{grid-template-columns:repeat(3,1fr);height:auto}.bar{height:50px!important}.bar span{position:static}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>max_turns <input id=\"maxTurns\" type=\"range\" min=\"1\" max=\"7\" value=\"4\"></label><label>last productive turn <input id=\"progressTurn\" type=\"range\" min=\"1\" max=\"7\" value=\"2\"></label><div id=\"turnWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintTurns(){const max=+maxTurns.value,progress=+progressTurn.value;let x='';for(let i=1;i<=7;i++){let c=i>max?'stop':i<=progress?'used':'wait';x+='<div class=\"turn '+c+'\">'+i+'<br><small>'+(i>max?'blocked':i<=progress?'new':'repeat')+'</small></div>';}turnWorld.innerHTML='<div class=turns>'+x+'</div><p>Budget='+max+' · useful progress through turn '+progress+' · '+(progress<max?'hard stop prevents '+(max-progress)+' repeated model calls from continuing':'budget ends with progress')+'</p>';};maxTurns.oninput=paintTurns;progressTurn.oninput=paintTurns;paintTurns();",
+    "questions": [
+      [
+        "What counts as one SDK turn?",
+        [
+          "One model invocation, including any tool calls it requests",
+          "One individual HTTP packet",
+          "The entire application lifetime"
+        ],
+        0,
+        "The runner defines a turn at the model-invocation boundary."
+      ],
+      [
+        "What happens when max_turns is exceeded by default?",
+        [
+          "MaxTurnsExceeded is raised",
+          "The SDK claims success",
+          "All tools are rolled back"
+        ],
+        0,
+        "The cap terminates the loop through an exception unless handled."
+      ],
+      [
+        "What remains outside the turn cap?",
+        [
+          "Proof of progress and complete tool latency/cost control",
+          "The number of model invocations",
+          "The ability to stop a loop"
+        ],
+        0,
+        "A bounded loop can still waste every allowed turn."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "max_turns = 4",
+          "note": "Set the maximum model-invocation budget."
+        },
+        {
+          "code": "evidence_counts = [1, 2, 2, 2]",
+          "note": "Record how much distinct evidence exists after each turn."
+        },
+        {
+          "code": "progress_deltas = [evidence_counts[i] - evidence_counts[i-1] for i in range(1, len(evidence_counts))]",
+          "note": "Only the second turn adds evidence; later turns repeat."
+        },
+        {
+          "code": "stopped_without_progress = evidence_counts[-1] == evidence_counts[-2]",
+          "note": "The cap stops the run, while a separate signal explains why escalation is needed."
+        }
+      ],
+      "expect": {
+        "max_turns": 4,
+        "evidence_counts": [
+          1,
+          2,
+          2,
+          2
+        ],
+        "progress_deltas": [
+          1,
+          0,
+          0
+        ],
+        "stopped_without_progress": true
+      },
+      "limit": "This is a local turn counter. It does not run the Agents SDK or a model; model invocations may contain multiple tool calls, and external tool latency/cost can dominate. SDK semantics can evolve, so recheck the cited docs.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "max_turns": 4
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "max_turns": 4,
+            "evidence_counts": [
+              1,
+              2,
+              2,
+              2
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "max_turns": 4,
+            "evidence_counts": [
+              1,
+              2,
+              2,
+              2
+            ],
+            "progress_deltas": [
+              1,
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "max_turns": 4,
+            "evidence_counts": [
+              1,
+              2,
+              2,
+              2
+            ],
+            "progress_deltas": [
+              1,
+              0,
+              0
+            ],
+            "stopped_without_progress": true
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI Agents SDK: running agents",
+        "https://openai.github.io/openai-agents-python/running_agents/",
+        "Living documentation; checked October 24, 2026"
+      ],
+      [
+        "OpenAI Agents SDK Runner reference",
+        "https://openai.github.io/openai-agents-python/ref/run/",
+        "Living documentation; checked October 24, 2026"
+      ],
+      [
+        "OpenAI Agents SDK run.py source",
+        "https://github.com/openai/openai-agents-python/blob/main/src/agents/run.py",
+        "Current source checked October 24, 2026"
+      ]
+    ],
+    "visual_explanation": "The numbered turns separate two questions: where useful evidence stopped changing and where the harness forces termination.",
+    "written_questions": [
+      "What turn, wall-clock, and tool-call budgets would you set for an incident-analysis agent?",
+      "How would you define progress so a looping agent cannot satisfy it by restating the same evidence?"
+    ],
+    "source_checked_on": "2026-10-24"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Stronger spin scattering tracks a higher superconducting temperature",
+    "goal": "Understand the new correlation that supports spin-fluctuation pairing in electron-doped cuprates—and its limits.",
+    "tag": "New research · Nature Physics · October 2026",
+    "concept": "<p>Ordinary superconductors pair electrons through vibrations of the crystal lattice. Copper-oxide superconductors work at higher temperatures, but the pairing “glue” has been uncertain.</p><p>A 2026 study measured one smooth electron-doped cuprate film whose critical temperature changed along its length. High magnetic fields exposed the normal-state resistance. The team reported that stronger scattering from fluctuating electron spins tracked higher critical temperature, supporting spin-fluctuation-mediated pairing on the electron-doped side.</p>",
+    "example": "<p>Think of six contacts placed along one film. Disorder stays nearly constant, while cerium doping and <code>Tc</code> vary smoothly. At each contact, the researchers extract a scattering strength from resistance measurements. The two quantities rise together. This controlled gradient makes the comparison stronger than comparing unrelated samples.</p>",
+    "use_case": {
+      "when": "Use this as a research deep dive when evaluating how carefully designed gradients and high-field measurements can isolate a mechanism in quantum materials.",
+      "example": "A materials team asks whether one candidate interaction changes systematically with the measured transition temperature across a single fabricated film.",
+      "decision": "Treat the finding as evidence for electron-doped cuprates, not a recipe for room-temperature superconductors. Reproduction, theory, other compounds, and the higher-Tc hole-doped side remain necessary."
+    },
+    "practice": "Change the synthetic correlation and inspect whether scattering and Tc rise together. Then separate correlation evidence from a complete mechanism claim.",
+    "boundary": "The browser draws invented teaching values, not the paper's data or fit. It omits sample fabrication, field strength, uncertainty, resistance analysis, competing mechanisms, and hole-doped materials. The research claim should be assessed in the original paper.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.file-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}.file{padding:10px;border-radius:9px;background:#dfe9e4;border:2px solid #6d8e83;text-align:center}.file.shared{background:#fff0b7}.file.new{background:#dff3ce}.buckets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.bucket{min-height:80px;border:2px dashed #73988b;border-radius:10px;padding:8px}.plane{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.turns{display:flex;gap:6px;flex-wrap:wrap}.turn{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;border:2px solid #73988b;background:#fbfdfb}.turn.used{background:#fff0b7}.turn.stop{background:#ffe1db}.corr{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;align-items:end;height:170px}.bar{background:#69a99c;border-radius:6px 6px 0 0;min-height:8px;position:relative}.bar span{position:absolute;bottom:-28px;left:0;font-size:.75rem}.runner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.route{border:2px solid #73988b;border-radius:12px;padding:12px}.browser-grid{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:12px;padding:12px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.plane,.browser-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.buckets{grid-template-columns:repeat(2,1fr)}.corr{grid-template-columns:repeat(3,1fr);height:auto}.bar{height:50px!important}.bar span{position:static}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Spin-scattering correlation <input id=\"correlation\" type=\"range\" min=\"0\" max=\"10\" value=\"8\"></label><div id=\"corrWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintCorr(){const c=+correlation.value;let bars='';for(let i=1;i<=6;i++){const h=20+i*c*2;bars+='<div class=bar style=\"height:'+h+'px\"><span>point '+i+'<br>Tc '+Math.round(h/4)+' K</span></div>';}corrWorld.innerHTML='<div class=corr>'+bars+'</div><p><strong>'+c+'/10 coupling in this teaching model.</strong> A rising trend supports a relationship; it does not solve the hole-doped side or prove a universal recipe.</p>';};correlation.oninput=paintCorr;paintCorr();",
+    "questions": [
+      [
+        "Why use a smooth Tc gradient along one film?",
+        [
+          "It compares many states while keeping disorder more controlled",
+          "It guarantees room-temperature behavior",
+          "It removes the need for measurement"
+        ],
+        0,
+        "The gradient helps isolate the changing variable within one sample."
+      ],
+      [
+        "What did the reported correlation support?",
+        [
+          "Spin-fluctuation-mediated pairing in the electron-doped material",
+          "A finished theory for all superconductors",
+          "Zero-resistance copper at room temperature"
+        ],
+        0,
+        "The claim is important but scoped."
+      ],
+      [
+        "What major boundary remains?",
+        [
+          "The higher-Tc hole-doped side needs an additional ingredient",
+          "No electrons were measured",
+          "The sample was a web simulation"
+        ],
+        0,
+        "The authors explicitly say only part of the cuprate problem is solved."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "scattering_strength = [1, 2, 3, 4, 5, 6]",
+          "note": "Create six ordered teaching measurements."
+        },
+        {
+          "code": "critical_temperature = [4, 7, 10, 13, 16, 19]",
+          "note": "Use synthetic temperatures that rise with scattering."
+        },
+        {
+          "code": "paired = list(zip(scattering_strength, critical_temperature))",
+          "note": "Pair each contact's two values."
+        },
+        {
+          "code": "trend_is_positive = all(paired[i][1] > paired[i-1][1] for i in range(1, len(paired)))",
+          "note": "The teaching data have a positive trend, not a causal proof."
+        }
+      ],
+      "expect": {
+        "scattering_strength": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "critical_temperature": [
+          4,
+          7,
+          10,
+          13,
+          16,
+          19
+        ],
+        "paired": [
+          [
+            1,
+            4
+          ],
+          [
+            2,
+            7
+          ],
+          [
+            3,
+            10
+          ],
+          [
+            4,
+            13
+          ],
+          [
+            5,
+            16
+          ],
+          [
+            6,
+            19
+          ]
+        ],
+        "trend_is_positive": true
+      },
+      "limit": "The browser draws invented teaching values, not the paper's data or fit. It omits sample fabrication, field strength, uncertainty, resistance analysis, competing mechanisms, and hole-doped materials. The research claim should be assessed in the original paper.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "scattering_strength": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "scattering_strength": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "critical_temperature": [
+              4,
+              7,
+              10,
+              13,
+              16,
+              19
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "scattering_strength": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "critical_temperature": [
+              4,
+              7,
+              10,
+              13,
+              16,
+              19
+            ],
+            "paired": [
+              [
+                1,
+                4
+              ],
+              [
+                2,
+                7
+              ],
+              [
+                3,
+                10
+              ],
+              [
+                4,
+                13
+              ],
+              [
+                5,
+                16
+              ],
+              [
+                6,
+                19
+              ]
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "scattering_strength": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "critical_temperature": [
+              4,
+              7,
+              10,
+              13,
+              16,
+              19
+            ],
+            "paired": [
+              [
+                1,
+                4
+              ],
+              [
+                2,
+                7
+              ],
+              [
+                3,
+                10
+              ],
+              [
+                4,
+                13
+              ],
+              [
+                5,
+                16
+              ],
+              [
+                6,
+                19
+              ]
+            ],
+            "trend_is_positive": true
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Evidence for spin-fluctuation-mediated pairing in electron-doped cuprates",
+        "https://www.nature.com/articles/s41567-026-03454-6",
+        "Nature Physics; published October 2026"
+      ],
+      [
+        "University of Bristol research release",
+        "https://www.bristol.ac.uk/news/2026/october/researchers-help-solve-mystery-of-high-temperature-superconductivity.html",
+        "Published October 20, 2026"
+      ]
+    ],
+    "visual_explanation": "The rising bars answer what the experiment linked: an interaction strength and a critical temperature across controlled positions—not a generic superconductivity icon.",
+    "written_questions": [
+      "Which alternative explanation would you try to rule out when two measured quantities rise together?",
+      "What result on hole-doped cuprates would strengthen or weaken the proposed mechanism?"
+    ],
+    "source_checked_on": "2026-10-24"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A job must match every runner label",
+    "goal": "Route work with labels and groups, while keeping scheduling separate from security and isolation.",
+    "tag": "GitHub Actions · runner routing",
+    "concept": "<p>A delivery request that says “refrigerated, electric, Manhattan depot” needs a truck with every listed capability. A truck matching only two conditions is not eligible.</p><p>In GitHub Actions, an array in <code>runs-on</code> is an AND filter: a runner must match every value. A runner group narrows which repositories may target a pool. Labels describe scheduling capability; the group access policy and runner hardening form the stronger boundary.</p>",
+    "example": "<p>A GPU test requests <code>[self-hosted, linux, x64, gpu]</code>. Runner A has linux+x64 but no gpu, so it waits. Runner B has all four labels and is eligible. If the job also requires group <code>ml-secure</code>, a perfectly labeled runner in another group remains ineligible.</p>",
+    "use_case": {
+      "when": "Use labels to select OS, architecture, accelerators, size, or installed capabilities. Use runner groups to limit which repositories can access sensitive or expensive runner pools.",
+      "example": "Only trusted ML repositories may target a private-network GPU pool; ordinary builds stay on ephemeral GitHub-hosted runners.",
+      "decision": "Keep labels few and factual, monitor queue time, and use autoscaling/ephemeral runners where appropriate. Treat self-hosted runners as privileged infrastructure. Groups reduce scope, but they do not make untrusted workflow code safe."
+    },
+    "practice": "Toggle runner labels and the group. The job becomes eligible only when every label and the required group match.",
+    "boundary": "The browser is a set-intersection model. It does not contact GitHub, inspect runner registration, model scale sets, custom label limits, permissions, repository policy, queue priority, concurrency, compromised runners, or network isolation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.file-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}.file{padding:10px;border-radius:9px;background:#dfe9e4;border:2px solid #6d8e83;text-align:center}.file.shared{background:#fff0b7}.file.new{background:#dff3ce}.buckets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.bucket{min-height:80px;border:2px dashed #73988b;border-radius:10px;padding:8px}.plane{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.turns{display:flex;gap:6px;flex-wrap:wrap}.turn{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;border:2px solid #73988b;background:#fbfdfb}.turn.used{background:#fff0b7}.turn.stop{background:#ffe1db}.corr{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;align-items:end;height:170px}.bar{background:#69a99c;border-radius:6px 6px 0 0;min-height:8px;position:relative}.bar span{position:absolute;bottom:-28px;left:0;font-size:.75rem}.runner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.route{border:2px solid #73988b;border-radius:12px;padding:12px}.browser-grid{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:12px;padding:12px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.plane,.browser-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.buckets{grid-template-columns:repeat(2,1fr)}.corr{grid-template-columns:repeat(3,1fr);height:auto}.bar{height:50px!important}.bar span{position:static}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"runnerGpu\" type=\"checkbox\"> runner has gpu label</label><label><input id=\"runnerGroup\" type=\"checkbox\" checked> runner belongs to ml-secure group</label><div id=\"runnerWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintRunner(){const labels=runnerGpu.checked,group=runnerGroup.checked,ok=labels&&group;runnerWorld.innerHTML='<div class=runner-grid><div class=\"route ok\"><strong>Job requires</strong><br>self-hosted · linux · x64 · gpu<br>group: ml-secure</div><div class=\"route '+(labels?'ok':'fail')+'\"><strong>Label filter</strong><br>'+(labels?'all four match':'gpu missing')+'</div><div class=\"route '+(group?'ok':'fail')+'\"><strong>Group filter</strong><br>'+(group?'ml-secure matches':'wrong group')+'</div></div><p class=\"'+(ok?'ok':'wait')+'\">'+(ok?'ELIGIBLE: job can be scheduled':'QUEUED: no eligible runner')+'</p>';};runnerGpu.onchange=paintRunner;runnerGroup.onchange=paintRunner;paintRunner();",
+    "questions": [
+      [
+        "A job lists self-hosted, linux, x64, gpu. Which runner is eligible?",
+        [
+          "One matching all four labels",
+          "One matching any single label",
+          "Every organization runner"
+        ],
+        0,
+        "Array labels are combined as an AND filter."
+      ],
+      [
+        "Why add a runner group?",
+        [
+          "To restrict which repositories may access the pool",
+          "To turn labels into secrets",
+          "To skip workflow permissions"
+        ],
+        0,
+        "Groups add an access boundary around runner sets."
+      ],
+      [
+        "What do labels not prove?",
+        [
+          "That a runner is hardened against untrusted code",
+          "That a capability is advertised",
+          "That the scheduler can match a value"
+        ],
+        0,
+        "Scheduling metadata is not a substitute for isolation and trust policy."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "required_labels = ['self-hosted', 'linux', 'x64', 'gpu']",
+          "note": "Declare every job capability."
+        },
+        {
+          "code": "runner_labels = ['self-hosted', 'linux', 'x64']",
+          "note": "The first runner is missing gpu."
+        },
+        {
+          "code": "eligible_before = all(label in runner_labels for label in required_labels)",
+          "note": "The check is false, so the job waits."
+        },
+        {
+          "code": "runner_labels.append('gpu'); eligible_after = all(label in runner_labels for label in required_labels)",
+          "note": "Adding the last label makes the runner eligible."
+        }
+      ],
+      "expect": {
+        "required_labels": [
+          "self-hosted",
+          "linux",
+          "x64",
+          "gpu"
+        ],
+        "runner_labels": [
+          "self-hosted",
+          "linux",
+          "x64",
+          "gpu"
+        ],
+        "eligible_before": false,
+        "eligible_after": true
+      },
+      "limit": "The browser is a set-intersection model. It does not contact GitHub, inspect runner registration, model scale sets, custom label limits, permissions, repository policy, queue priority, concurrency, compromised runners, or network isolation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "required_labels": [
+              "self-hosted",
+              "linux",
+              "x64",
+              "gpu"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "required_labels": [
+              "self-hosted",
+              "linux",
+              "x64",
+              "gpu"
+            ],
+            "runner_labels": [
+              "self-hosted",
+              "linux",
+              "x64"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "required_labels": [
+              "self-hosted",
+              "linux",
+              "x64",
+              "gpu"
+            ],
+            "runner_labels": [
+              "self-hosted",
+              "linux",
+              "x64"
+            ],
+            "eligible_before": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "required_labels": [
+              "self-hosted",
+              "linux",
+              "x64",
+              "gpu"
+            ],
+            "runner_labels": [
+              "self-hosted",
+              "linux",
+              "x64",
+              "gpu"
+            ],
+            "eligible_before": false,
+            "eligible_after": true
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Docs: choosing the runner for a job",
+        "https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job",
+        "Living documentation; checked October 24, 2026"
+      ],
+      [
+        "GitHub Docs: runner groups",
+        "https://docs.github.com/en/actions/concepts/runners/runner-groups",
+        "Living documentation; checked October 24, 2026"
+      ],
+      [
+        "GitHub Docs: secure use of self-hosted runners",
+        "https://docs.github.com/en/actions/reference/security/secure-use",
+        "Living documentation; checked October 24, 2026"
+      ]
+    ],
+    "visual_explanation": "The three filters show scheduling as set intersection: job labels, runner labels, and group membership must all align.",
+    "written_questions": [
+      "Which runner capabilities in your organization deserve labels, and which deserve separate groups?",
+      "What evidence would show a self-hosted runner is ephemeral, patched, and isolated from untrusted repositories?"
+    ],
+    "source_checked_on": "2026-10-24"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "CORS controls browser sharing; it is not API authorization",
+    "goal": "Trace preflight and response sharing, then keep authentication and authorization on the server.",
+    "tag": "Browser APIs · CORS",
+    "concept": "<p>A hotel curtain can stop someone in one room from seeing into another. It does not stop a person outside the hotel from calling the front desk. CORS is a browser-enforced sharing rule, not a universal network firewall.</p><p>For some cross-origin requests, the browser first sends an <code>OPTIONS</code> preflight. The server's CORS response says which origins, methods, headers, and credential modes the browser may expose to JavaScript. A curl client or another service is not constrained by the browser's CORS checks.</p>",
+    "example": "<p><code>app.example</code> wants to call <code>api.example/orders</code> with <code>Authorization</code>. The browser preflights. If the server allows that origin and header, JavaScript may read the response. If not, the browser blocks sharing. The API still must validate the token and verify that this user may read order 42.</p>",
+    "use_case": {
+      "when": "Configure CORS when browser JavaScript must call an API on another origin. Keep the allowed origin, method, header, and credential policy narrow.",
+      "example": "A React operations console on app.example calls an order API on api.example with a bearer token.",
+      "decision": "Use server-side authentication and object-level authorization for protection. Use CORS only for browser sharing. Avoid reflecting arbitrary origins, and never combine wildcard origin with credential assumptions. Test simple requests, preflighted requests, and failures."
+    },
+    "practice": "Choose caller type, origin permission, and token validity. Watch browser sharing and server authorization as separate decisions.",
+    "boundary": "The browser model simplifies the Fetch Standard. Real simple requests may skip preflight; credentials, redirects, caches, exposed headers, opaque responses, service workers, cookies, CSRF, and framework behavior add detail. It makes no network calls.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.file-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}.file{padding:10px;border-radius:9px;background:#dfe9e4;border:2px solid #6d8e83;text-align:center}.file.shared{background:#fff0b7}.file.new{background:#dff3ce}.buckets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.bucket{min-height:80px;border:2px dashed #73988b;border-radius:10px;padding:8px}.plane{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.turns{display:flex;gap:6px;flex-wrap:wrap}.turn{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;border:2px solid #73988b;background:#fbfdfb}.turn.used{background:#fff0b7}.turn.stop{background:#ffe1db}.corr{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;align-items:end;height:170px}.bar{background:#69a99c;border-radius:6px 6px 0 0;min-height:8px;position:relative}.bar span{position:absolute;bottom:-28px;left:0;font-size:.75rem}.runner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.route{border:2px solid #73988b;border-radius:12px;padding:12px}.browser-grid{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.response{border:2px solid #73988b;border-radius:12px;padding:12px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.plane,.browser-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.buckets{grid-template-columns:repeat(2,1fr)}.corr{grid-template-columns:repeat(3,1fr);height:auto}.bar{height:50px!important}.bar span{position:static}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Caller <select id=\"caller\"><option value=\"browser\">browser JavaScript</option><option value=\"service\">server-to-server</option></select></label><label><input id=\"originAllowed\" type=\"checkbox\"> origin allowed by CORS</label><label><input id=\"tokenValid\" type=\"checkbox\" checked> valid token and order permission</label><div id=\"corsWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintCors(){const browser=caller.value==='browser',cors=originAllowed.checked,auth=tokenValid.checked;const sent=!browser||cors;const shared=browser?cors&&auth:auth;corsWorld.innerHTML='<div class=browser-grid><div class=\"node '+(browser&&!cors?'fail':'ok')+'\"><strong>'+(browser?'Browser CORS gate':'No browser CORS gate')+'</strong><br>'+(browser?(cors?'preflight permits sharing':'response not shared to JS'):'request goes to API')+'</div><div class=arrow>→</div><div class=\"response '+(auth?'ok':'fail')+'\"><strong>API authorization</strong><br>'+(auth?'order 42 allowed':'401/403')+'</div></div><p><strong>'+(shared?'Caller receives allowed data':'Caller does not receive allowed data')+'</strong>. CORS decision and authorization decision remain separate.</p>';};caller.onchange=paintCors;originAllowed.onchange=paintCors;tokenValid.onchange=paintCors;paintCors();",
+    "questions": [
+      [
+        "CORS denies app.example. What does that establish?",
+        [
+          "A conforming browser will not share the response with that JavaScript",
+          "The API cannot be called by curl",
+          "The user is unauthenticated"
+        ],
+        0,
+        "CORS is a browser response-sharing protocol."
+      ],
+      [
+        "What must still protect GET /orders/42?",
+        [
+          "Server-side authentication and object-level authorization",
+          "Access-Control-Allow-Origin alone",
+          "A JavaScript variable"
+        ],
+        0,
+        "Non-browser clients bypass browser CORS enforcement."
+      ],
+      [
+        "Why can a preflight succeed but the API still return 403?",
+        [
+          "CORS and authorization answer different questions",
+          "OPTIONS logs the user in",
+          "403 means the origin is always allowed"
+        ],
+        0,
+        "The browser may be allowed to make/read a request whose user lacks business permission."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "origin_allowed = True",
+          "note": "The API permits browser sharing with app.example."
+        },
+        {
+          "code": "token_valid = True",
+          "note": "The caller presents a valid token."
+        },
+        {
+          "code": "order_permission = False",
+          "note": "The authenticated subject still lacks access to order 42."
+        },
+        {
+          "code": "browser_may_share = origin_allowed; api_returns = 200 if token_valid and order_permission else 403",
+          "note": "CORS passes while authorization correctly denies the object."
+        }
+      ],
+      "expect": {
+        "origin_allowed": true,
+        "token_valid": true,
+        "order_permission": false,
+        "browser_may_share": true,
+        "api_returns": 403
+      },
+      "limit": "The browser model simplifies the Fetch Standard. Real simple requests may skip preflight; credentials, redirects, caches, exposed headers, opaque responses, service workers, cookies, CSRF, and framework behavior add detail. It makes no network calls.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "origin_allowed": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "origin_allowed": true,
+            "token_valid": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "origin_allowed": true,
+            "token_valid": true,
+            "order_permission": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "origin_allowed": true,
+            "token_valid": true,
+            "order_permission": false,
+            "browser_may_share": true,
+            "api_returns": 403
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "WHATWG Fetch Standard: CORS protocol",
+        "https://fetch.spec.whatwg.org/#http-cors-protocol",
+        "Living standard; checked October 24, 2026"
+      ],
+      [
+        "WHATWG Fetch Standard: CORS-preflight fetch",
+        "https://fetch.spec.whatwg.org/#cors-preflight-fetch",
+        "Living standard; checked October 24, 2026"
+      ],
+      [
+        "MDN CORS guide",
+        "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS",
+        "Living reference; checked October 24, 2026"
+      ]
+    ],
+    "visual_explanation": "The two gates answer the common misconception directly: browser sharing can pass or fail independently of API authorization.",
+    "written_questions": [
+      "Which browser origins, methods, and headers should your most sensitive API actually allow?",
+      "How would you prove that curl cannot read order 42 without authorization even though curl ignores CORS?"
+    ],
+    "source_checked_on": "2026-10-24"
+  }
+]
