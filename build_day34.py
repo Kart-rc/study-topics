@@ -177,7 +177,7 @@ if not any(d.get('generation_key')==DATE for d in state['days']):
     state['days'].append({'number':34,'folder':DAY,'date':DATE,'generation_key':DATE,
       'status':'generated','completion':'not_assessed','review_keys':[],
       'lesson_slugs':[x['slug'] for x in L],
-      'validation':'Seven models, recorded code replays, product scoring, quizzes, save/export hooks, links, review scheduling and certification metadata passed local semantic checks. Chromium was unavailable locally; hosted browser validation pending. Vendor SQL not run; mastery not assessed. See Day34/VALIDATION.md.'})
+      'validation':'Seven models, recorded code replays, product scoring, quizzes, save/export hooks, links, review scheduling and certification metadata passed local semantic checks. All 16 Day34 desktop/mobile hosted browser cases passed; the overall historical suite still fails on a pre-existing Day28 test-helper error. Vendor SQL not run; mastery not assessed. See Day34/VALIDATION.md.'})
 state['last_generated_day']=max(d['number'] for d in state['days'])
 (R/'study-state.json').write_text(json.dumps(state,indent=2)+'\n')
 

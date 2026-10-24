@@ -700,7 +700,7 @@
         "ci-cd-github-actions",
         "apis-microservices"
       ],
-      "validation": "Seven models, recorded code replays, product scoring, quizzes, save/export hooks, links, review scheduling and certification metadata passed local semantic checks. Chromium was unavailable locally; hosted browser validation pending. Vendor SQL not run; mastery not assessed. See Day34/VALIDATION.md."
+      "validation": "Seven models, recorded code replays, product scoring, quizzes, save/export hooks, links, review scheduling and certification metadata passed local semantic checks. All 16 Day34 desktop/mobile hosted browser cases passed; the overall historical suite still fails on a pre-existing Day28 test-helper error. Vendor SQL not run; mastery not assessed. See Day34/VALIDATION.md."
     },
     {
       "number": 32,
