@@ -20,4 +20,7 @@ Checked October 25, 2026.
 
 ## Hosted browser result
 
-Pending after the atomic content commit.
+- GitHub Actions run [`40242680313`](https://github.com/Kart-rc/study-topics/actions/runs/40242680313) installed the pinned Chromium build and ran the complete browser suite.
+- All 18 Day35 desktop/mobile cases passed: latest-day navigation, the daily hub, seven lesson pages, responsive layout/no horizontal overflow, local links, disclosures, interactive controls, replay stepping, empty/partial/0/2/3 quiz paths, product scoring, save/restore, real JSON downloads, and back/forward navigation.
+- Overall historical result: 218 passed, 2 failed. Both failures are the already-known Day28 test-helper error, `openLesson is not a function`, in desktop and mobile. No Day35 browser case failed.
+- Synthetic browser evidence was retained by the workflow for seven days. No learner answers were persisted in repository content or artifacts.

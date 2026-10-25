@@ -788,7 +788,7 @@
         "ci-cd-github-actions",
         "apis-microservices"
       ],
-      "validation": "Pending local validation; vendor commands not run; mastery not assessed."
+      "validation": "All seven Day35 semantic interaction checks and recorded execution replays passed. All 18 Day35 desktop/mobile hosted Chromium cases passed for layout, links, disclosures, model controls, scoring, save/restore, export/download and navigation. The overall historical browser suite still has the pre-existing Day28 test-helper error (openLesson is not a function): 218 passed, 2 failed. Vendor PySpark/SQL was not run; mastery was not assessed. See Day35/VALIDATION.md."
     }
   ],
   "submitted_assessments": [],
