@@ -810,7 +810,7 @@
         "ci-cd-github-actions",
         "apis-microservices"
       ],
-      "validation": "All seven Day36 semantic interaction checks, 232 recorded execution replays, model regression tests, product scoring, quizzes, save/export hooks, links, review scheduling, generation-key uniqueness, and certification metadata passed locally. Hosted Chromium validation pending publication. Vendor SQL/PySpark was not run; mastery was not assessed. See Day36/VALIDATION.md."
+      "validation": "All seven Day36 semantic interaction checks, 232 recorded execution replays, model regression tests, product scoring, quizzes, save/export hooks, links, review scheduling, generation-key uniqueness, and certification metadata passed locally. All 16 Day36 desktop/mobile hosted Chromium cases passed; the overall historical workflow still has only the pre-existing Day28 test-helper error (openLesson is not a function): 218 passed, 2 failed. Vendor SQL/PySpark was not run; mastery was not assessed. See Day36/VALIDATION.md."
     }
   ],
   "submitted_assessments": [],
