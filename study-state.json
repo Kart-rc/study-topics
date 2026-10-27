@@ -21,7 +21,7 @@
     30
   ],
   "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
-  "last_generated_day": 36,
+  "last_generated_day": 37,
   "days": [
     {
       "number": 1,
@@ -766,7 +766,7 @@
         "ci-cd-github-actions",
         "apis-microservices"
       ],
-      "validation": "Pending local validation; vendor commands not run; mastery not assessed."
+      "validation": "All seven Day37 semantic interaction checks, 239 recorded execution replays, 15 manifest/model regression tests, product scoring, quizzes, save/export hooks, links, review scheduling, generation-key uniqueness, and certification metadata passed locally. Hosted Chromium validation is pending. Vendor SQL/PySpark was not run; mastery was not assessed. See Day37/VALIDATION.md."
     },
     {
       "number": 35,
@@ -811,6 +811,28 @@
         "apis-microservices"
       ],
       "validation": "All seven Day36 semantic interaction checks, 232 recorded execution replays, model regression tests, product scoring, quizzes, save/export hooks, links, review scheduling, generation-key uniqueness, and certification metadata passed locally. All 16 Day36 desktop/mobile hosted Chromium cases passed; the overall historical workflow still has only the pre-existing Day28 test-helper error (openLesson is not a function): 218 passed, 2 failed. Vendor SQL/PySpark was not run; mastery was not assessed. See Day36/VALIDATION.md."
+    },
+    {
+      "number": 37,
+      "folder": "Day37",
+      "date": "2026-10-27",
+      "generation_key": "2026-10-27",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day22+7",
+        "Day26+3"
+      ],
+      "lesson_slugs": [
+        "data-engineering",
+        "software-engineering",
+        "distinguished-engineer",
+        "genai-engineering",
+        "technology-breakthroughs",
+        "ci-cd-github-actions",
+        "apis-microservices"
+      ],
+      "validation": "Pending local validation; vendor commands not run; mastery not assessed."
     }
   ],
   "submitted_assessments": [],

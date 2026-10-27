@@ -1,0 +1,1104 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Retrieval lab: name the failed boundary before changing the pipeline",
+    "goal": "Diagnose five look-alike order-pipeline incidents, then choose a product-specific observation and a safe first action.",
+    "tag": "Certification retrieval + gap check · cycle 3, position 7",
+    "concept": "<p>A parcel disappears. Replacing the truck will not help if the real problem is a locked loading dock, a rejected label, the wrong customer shelf, an expired tracking bookmark, or a test copy that still depends on the original box.</p><p>Data incidents often look alike from the dashboard. Diagnose the <strong>boundary that stopped preserving truth</strong> before changing pipeline code: identity, schema, row policy, change position, or clone dependency.</p>",
+    "example": "<p>The same synthetic order <code>O-42</code> from Day36 now produces one of five symptoms. An S3 read returns access denied. A new <code>coupon_code</code> is absent from the published table. Tenant <code>beta</code> can see an <code>acme</code> row. Fulfillment misses changes after downtime. A QA clone fails after source files or policy dependencies change.</p><p>Each symptom points to a different first inspection. A retry is useful only after the failed boundary is known.</p>",
+    "use_case": {
+      "when": "Use this retrieval map during incident triage, certification practice, design reviews, and post-release checks for governed incremental pipelines.",
+      "example": "An on-call engineer sees missing fulfillment updates after a weekend outage and must decide whether to inspect cloud access, schema rescue data, tenant policy, the change cursor, or clone dependencies.",
+      "decision": "Start with the earliest boundary whose evidence contradicts the expected state. Collect read-only evidence first. Do not infer a personal knowledge gap from this generated exercise; use submitted answers and authorized product labs to decide what needs more study."
+    },
+    "practice": "Choose a symptom, predict the broken boundary, then reveal the safest first observation. Notice that retrying is never the first universal answer.",
+    "boundary": "This local JavaScript teaching model maps five synthetic symptoms to likely first inspections. It does not run AWS, Databricks, or Snowflake, prove root cause, inspect logs, test privileges, recover expired history, validate policy semantics, or establish certification mastery. Vendor SQL/PySpark is sourced but unexecuted.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Observed symptom <select id=\"incidentSymptom\"><option value=\"access\">S3 read says access denied</option><option value=\"schema\">coupon_code is missing</option><option value=\"tenant\">beta sees an acme row</option><option value=\"cursor\">changes are missing after downtime</option><option value=\"clone\">QA copy breaks after source change</option></select></label><div id=\"triageWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "const triage={access:['identity/path','inspect the cloud trust and allowed prefix'],schema:['schema gate','inspect rescue/quarantine and evolution history'],tenant:['row policy','test the effective identity and policy context'],cursor:['change position','compare durable cursor with retained history'],clone:['clone dependency','inspect source files and referenced policy objects']};function paintTriage(){const [boundary,action]=triage[incidentSymptom.value];triageWorld.innerHTML='<div class=step-flow><div class=\"node fail\">symptom<br>'+incidentSymptom.options[incidentSymptom.selectedIndex].text+'</div><div class=\"node wait\">likely boundary<br><strong>'+boundary+'</strong></div><div class=\"node ok\">first observation<br>'+action+'</div></div>';};incidentSymptom.onchange=paintTriage;paintTriage();",
+    "questions": [
+      [
+        "Changes disappear only after a long outage. Which evidence is most useful first?",
+        [
+          "The durable cursor and retained change-history window",
+          "The clone name",
+          "The number of columns"
+        ],
+        0,
+        "The symptom is about an incremental position crossing a retention boundary."
+      ],
+      [
+        "Why inspect evidence before retrying?",
+        [
+          "A retry can repeat the same failure or hide the boundary that lost truth",
+          "Retries repair every policy",
+          "Retries recreate expired history"
+        ],
+        0,
+        "A retry is an action, not a diagnosis."
+      ],
+      [
+        "What does this retrieval session establish about your readiness?",
+        [
+          "Only delivered practice; mastery still needs answers and real product evidence",
+          "A passing certification result",
+          "Complete COF-C03 coverage"
+        ],
+        0,
+        "Generated curriculum coverage and personal mastery are separate."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "symptom = 'changes missing after downtime'",
+          "note": "Start with one observable fact, not a guessed root cause."
+        },
+        {
+          "code": "boundary = 'change position and retention'",
+          "note": "Map the symptom to the state most likely to have expired."
+        },
+        {
+          "code": "evidence = ['durable cursor', 'earliest retained version or STALE_AFTER']",
+          "note": "Name read-only evidence for both product paths."
+        },
+        {
+          "code": "first_action = 'reconcile the gap; do not blind-retry'",
+          "note": "Choose a safe action that preserves the missing-interval question."
+        }
+      ],
+      "expect": {
+        "symptom": "changes missing after downtime",
+        "boundary": "change position and retention",
+        "evidence": [
+          "durable cursor",
+          "earliest retained version or STALE_AFTER"
+        ],
+        "first_action": "reconcile the gap; do not blind-retry"
+      },
+      "limit": "This local JavaScript teaching model maps five synthetic symptoms to likely first inspections. It does not run AWS, Databricks, or Snowflake, prove root cause, inspect logs, test privileges, recover expired history, validate policy semantics, or establish certification mastery. Vendor SQL/PySpark is sourced but unexecuted.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "symptom": "changes missing after downtime"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "symptom": "changes missing after downtime",
+            "boundary": "change position and retention"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "symptom": "changes missing after downtime",
+            "boundary": "change position and retention",
+            "evidence": [
+              "durable cursor",
+              "earliest retained version or STALE_AFTER"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "symptom": "changes missing after downtime",
+            "boundary": "change position and retention",
+            "evidence": [
+              "durable cursor",
+              "earliest retained version or STALE_AFTER"
+            ],
+            "first_action": "reconcile the gap; do not blind-retry"
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks change data feed",
+        "https://docs.databricks.com/aws/en/tables/features/change-data-feed",
+        "Updated October 9, 2026"
+      ],
+      [
+        "Databricks Structured Streaming checkpoints",
+        "https://docs.databricks.com/aws/en/structured-streaming/checkpoints",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Databricks row filters and column masks",
+        "https://docs.databricks.com/aws/en/tables/row-and-column-filters",
+        "Living documentation"
+      ],
+      [
+        "Snowflake Streams introduction",
+        "https://docs.snowflake.com/en/user-guide/streams-intro",
+        "Living documentation"
+      ],
+      [
+        "Snowflake SHOW STREAMS",
+        "https://docs.snowflake.com/en/sql-reference/sql/show-streams",
+        "Living documentation"
+      ],
+      [
+        "Snowflake row access policies",
+        "https://docs.snowflake.com/en/user-guide/security-row-intro",
+        "Living documentation"
+      ]
+    ],
+    "visual_explanation": "The three-stage incident path answers which state to inspect before touching code. Changing the symptom changes both the suspected boundary and the first observation; the visual does not pretend that one green pipeline status explains all failures.",
+    "written_questions": [
+      "Pick one recent data incident. Which boundary-owned state would have shortened diagnosis most?",
+      "Which Day31–36 product behavior can you explain from memory, and which one needs a real sandbox check?"
+    ],
+    "source_checked_on": "2026-10-27",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks retrieval: separate access, schema, policy, cursor, and clone evidence",
+        "minutes": 9,
+        "html": "<p><strong>One incident, five evidence locations.</strong> Access denial starts at the storage credential and external-location path. A missing field starts at Auto Loader schema history and rescued data. Wrong rows start at the effective identity and row filter. Missing changes start at the CDF starting version and checkpoint. A broken shallow clone starts at its source-file dependency.</p><pre><code><span>-- sourced diagnostic sketches; not executed here</span><span>DESCRIBE HISTORY ops.orders_internal;</span><span>SELECT * FROM table_changes('ops.orders_internal', :from_version);</span><span>DESCRIBE DETAIL qa.orders;</span></code></pre><label>Symptom <select id=\"dbIncident\"><option value=\"expired\">CDF start version no longer retained</option><option value=\"filtered\">automatic CDF placed on filtered table</option><option value=\"shallow\">shallow clone lost source files</option></select></label><div id=\"dbRetrievalWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> If the requested CDF history is gone, a retry cannot recreate it. Reconcile from an authoritative snapshot or other retained source, reset the consumer position deliberately, and document the gap. If automatic CDF conflicts with row filters, split the internal change surface from filtered serving.</p><p><strong>Execution label.</strong> The commands above are unexecuted source examples. The selector below is a local teaching model.</p>",
+        "markdown": "Classify the symptom before acting: external-location trust, Auto Loader schema/rescue state, effective row-filter context, CDF/checkpoint position, or shallow-clone source dependency. Expired history requires reconciliation, not a blind retry. Vendor commands are unexecuted.",
+        "javascript": "const dbIncident=$('dbIncident'),dbRetrievalWorld=$('dbRetrievalWorld');const dbRetrieval={expired:['CDF position','reconcile snapshot, then reset cursor'],filtered:['feature composition','split internal CDF from filtered serving'],shallow:['source-file dependency','restore source or recreate an independent test copy']};function paintDbRetrieval(){const [b,a]=dbRetrieval[dbIncident.value];dbRetrievalWorld.innerHTML='<div class=step-flow><div class=\"node fail\">'+dbIncident.options[dbIncident.selectedIndex].text+'</div><div class=\"node wait\">inspect '+b+'</div><div class=\"node ok\">'+a+'</div></div><p>Local diagnostic model; no Databricks call.</p>';};dbIncident.onchange=paintDbRetrieval;paintDbRetrieval();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake retrieval: read the Stream clock and policy context before recreating anything",
+        "minutes": 9,
+        "html": "<p><strong>Start with the Stream state.</strong> A Stream becomes stale when its offset falls outside retained history. <code>SHOW STREAMS</code> exposes <code>STALE</code> and <code>STALE_AFTER</code>. Recreating the Stream resumes future tracking; it does not by itself recover the missed interval. Wrong row visibility is a separate policy-context problem. A clone can also have policy references or historical-change boundaries that differ from the source.</p><pre><code><span>-- sourced diagnostic sketches; not executed here</span><span>SHOW STREAMS LIKE 'ORDERS_DELTA';</span><span>SELECT SYSTEM$STREAM_HAS_DATA('ORDERS_DELTA');</span><span>-- reconcile missed rows before CREATE OR REPLACE STREAM</span></code></pre><label>Symptom <select id=\"sfIncident\"><option value=\"stale\">Stream reports STALE</option><option value=\"policy\">role sees wrong tenant rows</option><option value=\"clone\">clone cannot resolve policy dependency</option></select></label><div id=\"sfRetrievalWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> Consume before <code>STALE_AFTER</code> and monitor the clock. After staleness, preserve the gap question, reconcile from retained authoritative data where possible, then recreate the Stream for future changes.</p><p><strong>Execution label.</strong> No Snowflake SQL ran. The selector is a local teaching model.</p>",
+        "markdown": "Inspect STALE and STALE_AFTER, policy context, and clone dependencies as separate states. Recreating a stale Stream resumes future tracking but does not automatically recover the missed interval. Vendor SQL is unexecuted.",
+        "javascript": "const sfIncident=$('sfIncident'),sfRetrievalWorld=$('sfRetrievalWorld');const sfRetrieval={stale:['offset outside retention','reconcile missed interval, then recreate Stream'],policy:['effective policy context','test the role and mapping table'],clone:['policy dependency boundary','restore or rebind the referenced policy object']};function paintSfRetrieval(){const [b,a]=sfRetrieval[sfIncident.value];sfRetrievalWorld.innerHTML='<div class=step-flow><div class=\"node fail\">'+sfIncident.options[sfIncident.selectedIndex].text+'</div><div class=\"node wait\">'+b+'</div><div class=\"node ok\">'+a+'</div></div><p>Local diagnostic model; no Snowflake query.</p>';};sfIncident.onchange=paintSfRetrieval;paintSfRetrieval();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Where is progress?</td><td>stream checkpoint / requested CDF version</td><td>Stream offset, STALE, STALE_AFTER</td></tr><tr><td>History gone?</td><td>reconcile from authoritative retained data; reset deliberately</td><td>reconcile missed interval; recreate Stream for future changes</td></tr><tr><td>Policy symptom?</td><td>effective row-filter identity and feature composition</td><td>row-access-policy context and mapping objects</td></tr><tr><td>Clone symptom?</td><td>shallow clone can depend on source files</td><td>clone history starts at clone point; policy references need validation</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Progress | checkpoint / CDF version | Stream offset and STALE_AFTER |\n| History gone | reconcile, then reset deliberately | reconcile, then recreate for future changes |\n| Policy | effective identity + composition | policy context + mapping objects |\n| Clone | shallow source-file dependency | clone-point history + policy references |"
+    },
+    "product_questions": [
+      [
+        "A Databricks CDF read requests a version that retention removed. Best first response?",
+        [
+          "Preserve the gap, reconcile from authoritative data, then reset deliberately",
+          "Retry until history reappears",
+          "Replace the row filter"
+        ],
+        0,
+        "Expired history is not recreated by retrying."
+      ],
+      [
+        "A Snowflake Stream is stale. What does recreating it prove?",
+        [
+          "Only that future tracking can restart; missed changes still need reconciliation",
+          "That every missed row was recovered",
+          "That row policies are correct"
+        ],
+        0,
+        "A new Stream does not automatically reconstruct the lost interval."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks change data feed",
+        "https://docs.databricks.com/aws/en/tables/features/change-data-feed",
+        "Updated October 9, 2026"
+      ],
+      [
+        "Databricks Structured Streaming checkpoints",
+        "https://docs.databricks.com/aws/en/structured-streaming/checkpoints",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Databricks row filters and column masks",
+        "https://docs.databricks.com/aws/en/tables/row-and-column-filters",
+        "Living documentation"
+      ],
+      [
+        "Snowflake Streams introduction",
+        "https://docs.snowflake.com/en/user-guide/streams-intro",
+        "Living documentation"
+      ],
+      [
+        "Snowflake SHOW STREAMS",
+        "https://docs.snowflake.com/en/sql-reference/sql/show-streams",
+        "Living documentation"
+      ],
+      [
+        "Snowflake row access policies",
+        "https://docs.snowflake.com/en/user-guide/security-row-intro",
+        "Living documentation"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-27",
+      "session_type": "retrieval_gap",
+      "cycle_position": 7,
+      "cycle_origin": "Day31",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "platform",
+          "ingestion",
+          "transformation_modeling",
+          "lakeflow_jobs",
+          "ci_cd",
+          "troubleshooting_optimization",
+          "governance_security"
+        ],
+        "scope": "Retrieval across Days31–36: CDF/checkpoints, row filters, external locations, schema evolution, clones, and release diagnosis. Delivered practice is not mastery; no personal gap is inferred."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "blueprint_status": "Official current overview last verified 2026-10-26; full objective IDs and weights remain unverified",
+        "planning_groups": [
+          "architecture_connectivity",
+          "account_warehouse_access",
+          "loading_unloading_transformation",
+          "data_formats",
+          "performance",
+          "collaboration_protection"
+        ],
+        "scope": "Retrieval across Days31–36: Streams, row policies, storage integrations, schema evolution, cloning, and gap reconciliation. Complete COF-C03 coverage is not claimed."
+      },
+      "product_lab_execution": "not_run"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "computeIfAbsent is atomic; the loader must still be short",
+    "goal": "Use ConcurrentHashMap.computeIfAbsent for small atomic initialization without turning a map bin into a slow remote-call queue.",
+    "tag": "Java concurrency · atomic map update",
+    "concept": "<p>A coat-check clerk can assign one hook number atomically. If the clerk leaves the desk for an eight-second phone call while holding the assignment book, other updates may wait.</p><p><code>ConcurrentHashMap.computeIfAbsent</code> performs the invocation atomically for an absent key. Oracle documents that some attempted updates may block while the function runs, so the mapping function should be short and simple and must not update the same map.</p>",
+    "example": "<p>Two requests miss tenant <code>acme</code> at the same time. A fast mapping creates an empty <code>PolicyHolder</code>; asynchronous refresh fills it later. A slow mapping that calls a policy service for 800 ms can make unrelated updates contend and makes failure handling live inside an atomic map operation.</p>",
+    "use_case": {
+      "when": "Use computeIfAbsent for cheap construction such as a local holder, counter, lock, or memoized value with bounded computation.",
+      "example": "Create one per-tenant circuit-breaker holder atomically, then let the holder manage remote refresh outside the map computation.",
+      "decision": "Keep the mapping pure, short, and non-recursive. For slow I/O, store a promise/holder deliberately or use a cache library with explicit loading, expiry, failure, and refresh behavior."
+    },
+    "practice": "Change loader duration and whether it performs remote I/O. Watch the single absent-key lane become a waiting line.",
+    "boundary": "The browser uses a deterministic wait arithmetic model. It does not run threads, model ConcurrentHashMap bin structure, scheduler timing, exceptions, null returns, cache eviction, stampedes after failure, visibility beyond documented map guarantees, or prove throughput. The Java replay only executes one local map initialization.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Mapping duration ms <input id=\"mapLoadMs\" type=\"range\" min=\"1\" max=\"1000\" value=\"800\"></label><label><input id=\"remoteLoad\" type=\"checkbox\" checked> mapping performs remote I/O</label><div id=\"mapWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintMap(){const ms=+mapLoadMs.value,slow=remoteLoad.checked||ms>50;mapWorld.innerHTML='<div class=step-flow><div class=\"node fail\">two misses<br>key acme</div><div class=\"node '+(slow?'fail':'ok')+'\">atomic mapping<br>'+ms+' ms</div><div class=\"node '+(slow?'wait':'ok')+'\">second updater<br>'+(slow?'may wait':'quickly observes holder')+'</div></div>';};mapLoadMs.oninput=paintMap;remoteLoad.onchange=paintMap;paintMap();",
+    "questions": [
+      [
+        "The mapping function calls a remote service for 800 ms. Main risk?",
+        [
+          "Other attempted updates may block while the atomic computation runs",
+          "The value is inserted twice by definition",
+          "ConcurrentHashMap becomes a HashMap"
+        ],
+        0,
+        "Atomicity does not make slow work cheap."
+      ],
+      [
+        "Why create a small holder in the mapping function?",
+        [
+          "It keeps atomic initialization short while moving lifecycle work elsewhere",
+          "It disables concurrency",
+          "It guarantees cache eviction"
+        ],
+        0,
+        "Separate map publication from remote loading policy."
+      ],
+      [
+        "What must the mapping function avoid?",
+        [
+          "Recursive updates to the same map",
+          "Returning a local object",
+          "Reading its key"
+        ],
+        0,
+        "The documented contract forbids modifying the map during computation."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var cache = new java.util.concurrent.ConcurrentHashMap<String,String>();",
+          "note": "Create a thread-safe map."
+        },
+        {
+          "code": "String value = cache.computeIfAbsent(\"acme\", key -> \"policy-holder-v1\");",
+          "note": "Atomically install one small local value."
+        },
+        {
+          "code": "boolean secondCallHits = cache.computeIfAbsent(\"acme\", key -> \"other\") == value;",
+          "note": "The second call observes the existing mapping."
+        },
+        {
+          "code": "String outcome = secondCallHits ? \"one holder\" : \"unexpected\";",
+          "note": "Record the local result; this does not benchmark contention."
+        }
+      ],
+      "expect": {
+        "cache": "{acme=policy-holder-v1}",
+        "value": "policy-holder-v1",
+        "secondCallHits": "true",
+        "outcome": "one holder"
+      },
+      "limit": "The browser uses a deterministic wait arithmetic model. It does not run threads, model ConcurrentHashMap bin structure, scheduler timing, exceptions, null returns, cache eviction, stampedes after failure, visibility beyond documented map guarantees, or prove throughput. The Java replay only executes one local map initialization.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "cache": "{}"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "cache": "{acme=policy-holder-v1}",
+            "value": "policy-holder-v1"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "cache": "{acme=policy-holder-v1}",
+            "value": "policy-holder-v1",
+            "secondCallHits": "true"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "cache": "{acme=policy-holder-v1}",
+            "value": "policy-holder-v1",
+            "secondCallHits": "true",
+            "outcome": "one holder"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java SE 17 ConcurrentHashMap",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html",
+        "Official Java 17 API"
+      ],
+      [
+        "Java SE 17 Map",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/Map.html",
+        "Official Java 17 API"
+      ]
+    ],
+    "visual_explanation": "The single-key lane shows why an atomic function can become a queue. The waiting updater changes state when the mapping crosses the declared short-work threshold or performs remote I/O.",
+    "written_questions": [
+      "Which computeIfAbsent functions in your services perform I/O, logging, or recursive cache access?",
+      "Design a holder or explicit loader that keeps publication short without hiding refresh failures."
+    ],
+    "source_checked_on": "2026-10-27"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Match decision process to reversal cost",
+    "goal": "Use a light, local experiment for reversible choices and deeper review for choices whose rollback is slow or harmful.",
+    "tag": "Distinguished Engineer · decision velocity",
+    "concept": "<p>Choosing a movable whiteboard does not need the same committee as cutting a load-bearing wall. The first is easy to undo; the second is not.</p><p>Amazon describes reversible choices as two-way doors and difficult-to-reverse choices as one-way doors. The engineering move is to make reversibility concrete: rollback time, customer blast radius, data migration cost, and contract commitments.</p>",
+    "example": "<p>Changing an internal dashboard color behind a flag is a two-way door. Repartitioning 10 PB while deleting the old layout, changing a public event schema without dual-read support, or selecting an irreversible vendor data format moves toward a one-way door.</p>",
+    "use_case": {
+      "when": "Use a reversibility check when architecture reviews, standards, migrations, or platform choices are either moving too slowly or moving with hidden lock-in.",
+      "example": "A team wants a six-week review for a feature-flagged library trial but only a short meeting for a destructive table migration.",
+      "decision": "Write the rollback path first. Delegate reversible experiments with guardrails and evidence. Add review depth, staged migration, and explicit ownership as rollback time, irreversible data change, or cross-team blast radius grows."
+    },
+    "practice": "Change rollback time, blast radius, and whether old data remains. Watch the decision move between team experiment, architecture review, and executive risk acceptance.",
+    "boundary": "This is a judgment aid, not an organizational approval policy. It does not price legal, regulatory, vendor, security, or reputation risk; decide thresholds locally and keep emergency authority explicit.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Rollback hours <input id=\"rollbackHours\" type=\"range\" min=\"0\" max=\"168\" value=\"2\"></label><label>Teams affected <input id=\"blastTeams\" type=\"range\" min=\"1\" max=\"20\" value=\"2\"></label><label><input id=\"oldPathKept\" type=\"checkbox\" checked> old path remains available</label><div id=\"doorWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintDoor(){const hard=+rollbackHours.value>24||+blastTeams.value>5||!oldPathKept.checked;doorWorld.innerHTML='<div class=step-flow><div class=\"node '+(hard?'fail':'ok')+'\">rollback '+rollbackHours.value+' h</div><div class=\"node '+(hard?'fail':'ok')+'\">'+blastTeams.value+' teams</div><div class=\"node '+(oldPathKept.checked?'ok':'fail')+'\">old path '+(oldPathKept.checked?'kept':'removed')+'</div><div class=\"node '+(hard?'wait':'ok')+'\"><strong>'+(hard?'methodical review':'local guarded experiment')+'</strong></div></div>';};[rollbackHours,blastTeams].forEach(x=>x.oninput=paintDoor);oldPathKept.onchange=paintDoor;paintDoor();",
+    "questions": [
+      [
+        "A change is flag-protected and rolls back in five minutes for one team. Default process?",
+        [
+          "A local guarded experiment with evidence",
+          "Executive review by default",
+          "Irreversible migration"
+        ],
+        0,
+        "Reversible choices should not inherit one-way-door ceremony."
+      ],
+      [
+        "What makes a data migration less reversible?",
+        [
+          "Deleting the old representation before validation and rollback windows close",
+          "Writing an ADR",
+          "Using a dashboard"
+        ],
+        0,
+        "The rollback path must survive long enough to be real."
+      ],
+      [
+        "Why classify reversibility explicitly?",
+        [
+          "To spend review depth where a wrong choice is hardest to undo",
+          "To avoid all architecture review",
+          "To guarantee the decision is correct"
+        ],
+        0,
+        "The model improves decision-process fit, not certainty."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "rollback_hours = 2",
+          "note": "State the time needed to restore the old behavior."
+        },
+        {
+          "code": "teams_affected = 2; old_path_kept = True",
+          "note": "Add blast radius and rollback-path evidence."
+        },
+        {
+          "code": "hard_to_reverse = rollback_hours > 24 or teams_affected > 5 or not old_path_kept",
+          "note": "Apply a declared teaching threshold."
+        },
+        {
+          "code": "process = 'methodical review' if hard_to_reverse else 'local guarded experiment'",
+          "note": "Match process weight to reversal cost."
+        }
+      ],
+      "expect": {
+        "rollback_hours": 2,
+        "teams_affected": 2,
+        "old_path_kept": true,
+        "hard_to_reverse": false,
+        "process": "local guarded experiment"
+      },
+      "limit": "This is a judgment aid, not an organizational approval policy. It does not price legal, regulatory, vendor, security, or reputation risk; decide thresholds locally and keep emergency authority explicit.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "rollback_hours": 2
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "rollback_hours": 2,
+            "teams_affected": 2,
+            "old_path_kept": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "rollback_hours": 2,
+            "teams_affected": 2,
+            "old_path_kept": true,
+            "hard_to_reverse": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "rollback_hours": 2,
+            "teams_affected": 2,
+            "old_path_kept": true,
+            "hard_to_reverse": false,
+            "process": "local guarded experiment"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Amazon 2016 Letter to Shareholders",
+        "https://www.aboutamazon.com/news/company-news/2016-letter-to-shareholders",
+        "Published April 2017; foundational decision framework"
+      ],
+      [
+        "Amazon CEO on two-way and one-way doors",
+        "https://www.aboutamazon.com/news/workplace/amazon-ceo-andy-jassy-on-asking-why",
+        "Official Amazon explanation; checked October 27, 2026"
+      ]
+    ],
+    "visual_explanation": "The decision door is driven by rollback time, affected teams, and whether the old path still exists. It shows why a supposedly reversible change becomes one-way when the rollback artifact is removed.",
+    "written_questions": [
+      "Name one current review that is too heavy for its reversal cost and one that is too light.",
+      "What evidence would make your highest-risk migration genuinely reversible for another week?"
+    ],
+    "source_checked_on": "2026-10-27"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Approval allows a tool call; an idempotency key prevents duplicate effects",
+    "goal": "Carry one stable logical-action key through retries so an approved side effect is applied once at the destination.",
+    "tag": "GenAI harness · approval + idempotency",
+    "concept": "<p>A manager signs one payment form. A courier delivers the same signed form twice after a network retry. The signature authorizes the payment; it does not tell the bank whether this is a duplicate delivery.</p><p>Human approval and idempotency solve different problems. Approval answers “may this exact action run?” A stable idempotency key lets the destination atomically recognize repeated delivery of the same logical action.</p>",
+    "example": "<p>An agent proposes <code>refund order O-42 for $25</code>. The human approves those exact arguments. The harness sends key <code>refund:O-42:v1</code>. A timeout causes the same request to be retried with the same key and parameters. The refund service returns the stored result instead of issuing a second refund.</p>",
+    "use_case": {
+      "when": "Use stable action keys for approved payments, refunds, ticket creation, email sends, infrastructure mutations, and any tool that can be retried after an ambiguous timeout.",
+      "example": "A refund tool times out after the payment processor committed the refund but before the agent received the response.",
+      "decision": "Bind approval to exact arguments, derive or persist one logical-action key, reuse both across retries, and let the destination atomically store the first outcome. If the destination has no idempotency contract, treat ambiguous timeouts as reconciliation work, not safe automatic retry."
+    },
+    "practice": "Choose whether the retry reuses the key and whether parameters changed. Watch authorization and duplicate-effect protection fail independently.",
+    "boundary": "The browser models a set of seen keys. It does not run an agent, authenticate a user, persist approvals, define key-retention windows, prevent malicious key reuse, reconcile partial external effects, or prove a destination implements atomic idempotency.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"toolApproved\" type=\"checkbox\" checked> exact refund arguments approved</label><label><input id=\"reuseActionKey\" type=\"checkbox\" checked> retry reuses refund:O-42:v1</label><label><input id=\"sameArguments\" type=\"checkbox\" checked> retry keeps $25 parameters</label><div id=\"idempotencyWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintIdempotency(){const allowed=toolApproved.checked&&sameArguments.checked,duplicate=allowed&&reuseActionKey.checked;idempotencyWorld.innerHTML='<div class=step-flow><div class=\"node '+(toolApproved.checked?'ok':'fail')+'\">approval '+(toolApproved.checked?'present':'missing')+'</div><div class=\"node '+(sameArguments.checked?'ok':'fail')+'\">arguments '+(sameArguments.checked?'match':'changed')+'</div><div class=\"node '+(reuseActionKey.checked?'ok':'fail')+'\">retry key '+(reuseActionKey.checked?'stable':'new')+'</div><div class=\"node '+(allowed?(duplicate?'ok':'fail'):'wait')+'\">'+(!allowed?'do not execute':duplicate?'one refund result':'duplicate refund risk')+'</div></div>';};[toolApproved,reuseActionKey,sameArguments].forEach(x=>x.onchange=paintIdempotency);paintIdempotency();",
+    "questions": [
+      [
+        "The approved refund times out after the processor may have committed. Safe retry?",
+        [
+          "Only with the same approved arguments and a destination-enforced stable idempotency key",
+          "Yes, approval guarantees exactly once",
+          "Yes, if the agent apologizes"
+        ],
+        0,
+        "Approval is permission; the destination key handles duplicate delivery."
+      ],
+      [
+        "Retry changes $25 to $30 but keeps the old key. What now?",
+        [
+          "Reject and seek a new approval/logical action",
+          "Execute because the key exists",
+          "Assume parameters do not matter"
+        ],
+        0,
+        "The key must remain bound to the same logical action and parameters."
+      ],
+      [
+        "Destination has no idempotency support after an ambiguous timeout. Best boundary?",
+        [
+          "Stop automatic replay and reconcile the external state",
+          "Generate random keys until one works",
+          "Repeat the approval text"
+        ],
+        0,
+        "Without atomic destination deduplication, the effect is uncertain."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "seen = []; effects = []",
+          "note": "Create a tiny destination-side idempotency record."
+        },
+        {
+          "code": "key = 'refund:O-42:v1'; amount = 25",
+          "note": "Bind one stable key to one logical refund."
+        },
+        {
+          "code": "seen.append(key); effects.append({'order': 'O-42', 'amount': amount})",
+          "note": "The first delivery records key and effect together in the teaching model."
+        },
+        {
+          "code": "retry_applied = False if key in seen else True; outcome = 'stored result, no second refund'",
+          "note": "The retry finds the same key and returns the prior outcome."
+        }
+      ],
+      "expect": {
+        "seen": [
+          "refund:O-42:v1"
+        ],
+        "effects": [
+          {
+            "order": "O-42",
+            "amount": 25
+          }
+        ],
+        "key": "refund:O-42:v1",
+        "amount": 25,
+        "retry_applied": false,
+        "outcome": "stored result, no second refund"
+      },
+      "limit": "The browser models a set of seen keys. It does not run an agent, authenticate a user, persist approvals, define key-retention windows, prevent malicious key reuse, reconcile partial external effects, or prove a destination implements atomic idempotency.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "seen": [],
+            "effects": []
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "seen": [],
+            "effects": [],
+            "key": "refund:O-42:v1",
+            "amount": 25
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "seen": [
+              "refund:O-42:v1"
+            ],
+            "effects": [
+              {
+                "order": "O-42",
+                "amount": 25
+              }
+            ],
+            "key": "refund:O-42:v1",
+            "amount": 25
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "seen": [
+              "refund:O-42:v1"
+            ],
+            "effects": [
+              {
+                "order": "O-42",
+                "amount": 25
+              }
+            ],
+            "key": "refund:O-42:v1",
+            "amount": 25,
+            "retry_applied": false,
+            "outcome": "stored result, no second refund"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI Agents SDK: human-in-the-loop",
+        "https://openai.github.io/openai-agents-python/human_in_the_loop/",
+        "Living official documentation; checked October 27, 2026"
+      ],
+      [
+        "OpenAI Agents SDK: tools",
+        "https://openai.github.io/openai-agents-python/tools/",
+        "Living official documentation; checked October 27, 2026"
+      ]
+    ],
+    "visual_explanation": "The four independent gates show that approval, argument binding, stable retry identity, and destination deduplication are separate. Turning off only key reuse keeps authorization green while exposing a duplicate-effect risk.",
+    "written_questions": [
+      "Which agent tools can cross an ambiguous timeout after committing a side effect?",
+      "Where will the stable key and first result be stored atomically, and how long must that record live?"
+    ],
+    "source_checked_on": "2026-10-27"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "A helical molecule can turn current into one-way rotation",
+    "goal": "Trace how voltage polarity, a rotation threshold, and molecular shape connect direction of motion to higher conductance in a new prototype.",
+    "tag": "New research · Nature · October 22, 2026",
+    "concept": "<p>An Archimedes screw turns in one direction to move water. Shrink the spiral down to one molecule and replace flowing water with electric current.</p><p>Researchers suspended a helical organic molecule between two gold electrode tips. Applied voltage produced cyclic motion with reported 100% directional preference; reversing voltage polarity reversed direction. Above a threshold, calculations and measurements linked rotation to access to higher-conductance configurations.</p>",
+    "example": "<p>Use normalized voltage rather than claiming the experiment's exact operating value. At <code>+0.8</code>, the toy rotor stays below threshold. At <code>+1.2</code>, it rotates forward and enters an enhanced-conductance state. At <code>-1.2</code>, direction reverses while the magnitude remains above threshold.</p>",
+    "use_case": {
+      "when": "Use this research when studying molecular machines, current-induced forces, or future single-molecule electronic components.",
+      "example": "A laboratory prototype explores whether a single molecular junction can couple directional mechanical motion to an electrically readable conductance change.",
+      "decision": "Treat it as early-stage physics, not a production motor or transistor. Practical use needs room-temperature operation, repeatable fabrication, lifetime, control, scaling, and device-integration evidence."
+    },
+    "practice": "Change normalized voltage polarity and molecular compression. Predict direction and whether the threshold is crossed before reading the state.",
+    "boundary": "This is an original normalized threshold model, not the paper's quantum-transport or molecular-dynamics calculation. It does not reproduce voltage, temperature, conductance magnitude, gold-tip geometry, stochastic jumps, friction, stretching forces, device lifetime, or fabrication variability.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Normalized voltage <input id=\"moleculeVoltage\" type=\"range\" min=\"-15\" max=\"15\" value=\"12\"></label><label>Compression shifts threshold <input id=\"moleculeCompression\" type=\"range\" min=\"-3\" max=\"3\" value=\"0\"></label><div id=\"moleculeWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintMolecule(){const v=+moleculeVoltage.value/10,threshold=1+(+moleculeCompression.value/10),rotates=Math.abs(v)>=threshold,dir=v>0?'forward':v<0?'reverse':'none';moleculeWorld.innerHTML='<div class=step-flow><div class=\"node '+(v===0?'wait':'ok')+'\">polarity '+(v>0?'+':v<0?'-':'0')+'</div><div class=\"node '+(rotates?'ok':'wait')+'\">|V| '+Math.abs(v).toFixed(1)+' vs threshold '+threshold.toFixed(1)+'</div><div class=\"node '+(rotates?'ok':'wait')+'\">rotation '+(rotates?dir:'stepwise / below toy threshold')+'</div><div class=\"node '+(rotates?'ok':'wait')+'\">conductance '+(rotates?'enhanced state':'rest-state range')+'</div></div>';};[moleculeVoltage,moleculeCompression].forEach(x=>x.oninput=paintMolecule);paintMolecule();",
+    "questions": [
+      [
+        "Voltage polarity reverses while magnitude stays above threshold. Toy prediction?",
+        [
+          "Rotation direction reverses and the enhanced state remains available",
+          "Rotation must stop",
+          "The molecule becomes achiral"
+        ],
+        0,
+        "The reported direction follows polarity; the toy threshold uses magnitude."
+      ],
+      [
+        "What did the Nature paper report?",
+        [
+          "A single-molecule prototype with current-driven directional motion and rotation-enhanced conductance",
+          "A commercial molecular motor",
+          "A room-temperature processor"
+        ],
+        0,
+        "The work is a controlled prototype, not a deployed device."
+      ],
+      [
+        "Which boundary matters most for application claims?",
+        [
+          "Fabrication, temperature, lifetime, control, and scaling remain open",
+          "A normalized slider proves the mechanism",
+          "Directional preference guarantees mass production"
+        ],
+        0,
+        "A single-junction experiment does not establish engineering readiness."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "voltage = 1.2",
+          "note": "Use a normalized positive voltage."
+        },
+        {
+          "code": "threshold = 1.0",
+          "note": "Declare a teaching threshold rather than an experimental value."
+        },
+        {
+          "code": "rotates = abs(voltage) >= threshold; direction = 'forward' if voltage > 0 else 'reverse'",
+          "note": "Magnitude crosses the threshold; polarity selects direction."
+        },
+        {
+          "code": "conductance_state = 'enhanced' if rotates else 'rest-state range'",
+          "note": "Connect rotation to the qualitative conductance state."
+        }
+      ],
+      "expect": {
+        "voltage": 1.2,
+        "threshold": 1.0,
+        "rotates": true,
+        "direction": "forward",
+        "conductance_state": "enhanced"
+      },
+      "limit": "This is an original normalized threshold model, not the paper's quantum-transport or molecular-dynamics calculation. It does not reproduce voltage, temperature, conductance magnitude, gold-tip geometry, stochastic jumps, friction, stretching forces, device lifetime, or fabrication variability.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "voltage": 1.2
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "voltage": 1.2,
+            "threshold": 1.0
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "voltage": 1.2,
+            "threshold": 1.0,
+            "rotates": true,
+            "direction": "forward"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "voltage": 1.2,
+            "threshold": 1.0,
+            "rotates": true,
+            "direction": "forward",
+            "conductance_state": "enhanced"
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Singh et al., Current-Driven Molecular Machine with Rotation-Enhanced Conductance",
+        "https://www.nature.com/articles/s41586-026-11312-x",
+        "Nature; published October 22, 2026"
+      ],
+      [
+        "PubMed record 42914134",
+        "https://pubmed.ncbi.nlm.nih.gov/42914134/",
+        "Indexed primary-paper record; checked October 27, 2026"
+      ]
+    ],
+    "visual_explanation": "The polarity–threshold–rotation–conductance chain answers two different questions: which way the molecule turns and whether it enters the higher-conductance rotational regime. Compression changes the threshold rather than merely recoloring a card.",
+    "written_questions": [
+      "Which measurements would separate rotation-caused conductance from heating or contact rearrangement?",
+      "What evidence would be required before calling this a usable molecular electronic component?"
+    ],
+    "source_checked_on": "2026-10-27"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "One deployment at a time is not a rollback",
+    "goal": "Use a concurrency group to prevent overlap while keeping cancellation and production recovery as separate designs.",
+    "tag": "GitHub Actions · deployment concurrency",
+    "concept": "<p>A one-lane bridge prevents two trucks from colliding. It does not tow the first truck back if its engine fails halfway across.</p><p>A GitHub Actions concurrency group can limit overlapping production jobs. <code>cancel-in-progress</code> can cancel an older run, but cancellation of workflow steps does not guarantee reversal of external effects already applied to Kubernetes, Databricks, or another target.</p>",
+    "example": "<p>Run A starts deploying image <code>v2</code>. Run B for <code>v3</code> arrives. With cancellation enabled, GitHub stops A's remaining steps. If A already changed half the services, production is mixed until an explicit rollback or a safe v3 reconciliation completes.</p>",
+    "use_case": {
+      "when": "Use deployment concurrency when two releases to the same environment could race, overwrite state, or produce confusing approval and observability signals.",
+      "example": "Two merges trigger production updates to the same EKS namespace or Databricks job bundle within one minute.",
+      "decision": "Give each target environment a stable concurrency key. Queue when every release must run; cancel only when deployment steps are interruption-safe or reconciliatory. Design rollback, health checks, and artifact identity separately."
+    },
+    "practice": "Choose queue or cancel, then move Run A past its external side effect. Watch cancellation stop workflow execution without undoing production.",
+    "boundary": "The model shows two runs and one external flag. It does not call GitHub, guarantee queue order, model multiple pending runs, environment protection, reusable workflows, signal handling, cloud deployment semantics, rollback automation, or runner termination timing.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>When Run B arrives <select id=\"deployPolicy\"><option value=\"cancel\">cancel Run A</option><option value=\"queue\">wait behind Run A</option></select></label><label><input id=\"externalChanged\" type=\"checkbox\" checked> Run A already changed production</label><div id=\"deployWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintDeploy(){const cancel=deployPolicy.value==='cancel',changed=externalChanged.checked;deployWorld.innerHTML='<div class=step-flow><div class=\"node '+(cancel?'fail':'ok')+'\">Run A '+(cancel?'canceled':'continues')+'</div><div class=\"node '+(changed?'fail':'wait')+'\">production '+(changed?'already changed':'unchanged')+'</div><div class=\"node '+(cancel?'ok':'wait')+'\">Run B '+(cancel?'can start':'waits')+'</div><div class=\"node '+(changed?'fail':'ok')+'\">rollback '+(changed?'still required / reconcile':'not needed yet')+'</div></div>';};deployPolicy.onchange=paintDeploy;externalChanged.onchange=paintDeploy;paintDeploy();",
+    "questions": [
+      [
+        "Run A is canceled after applying a database migration. What is guaranteed?",
+        [
+          "Only remaining workflow work is canceled; external recovery still needs a design",
+          "The migration is rolled back",
+          "Run B sees pristine state"
+        ],
+        0,
+        "Workflow cancellation is not transactional rollback."
+      ],
+      [
+        "Why use a target-specific concurrency key?",
+        [
+          "To serialize jobs that can affect the same environment",
+          "To encrypt secrets",
+          "To attest an image"
+        ],
+        0,
+        "The group defines which runs conflict."
+      ],
+      [
+        "When is queueing safer than canceling?",
+        [
+          "When every release must complete or interruption can leave partial effects",
+          "Whenever tests are fast",
+          "Only for pull requests"
+        ],
+        0,
+        "Interruption semantics determine the policy."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "run_a_external_change = True",
+          "note": "Run A has already changed production."
+        },
+        {
+          "code": "run_b_arrives = True; cancel_in_progress = True",
+          "note": "A newer deployment enters the same concurrency group."
+        },
+        {
+          "code": "run_a_canceled = run_b_arrives and cancel_in_progress",
+          "note": "GitHub can stop the older workflow run."
+        },
+        {
+          "code": "production_rolled_back = False; state = 'canceled run; external recovery still required'",
+          "note": "Keep workflow state separate from target state."
+        }
+      ],
+      "expect": {
+        "run_a_external_change": true,
+        "run_b_arrives": true,
+        "cancel_in_progress": true,
+        "run_a_canceled": true,
+        "production_rolled_back": false,
+        "state": "canceled run; external recovery still required"
+      },
+      "limit": "The model shows two runs and one external flag. It does not call GitHub, guarantee queue order, model multiple pending runs, environment protection, reusable workflows, signal handling, cloud deployment semantics, rollback automation, or runner termination timing.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "run_a_external_change": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "run_a_external_change": true,
+            "run_b_arrives": true,
+            "cancel_in_progress": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "run_a_external_change": true,
+            "run_b_arrives": true,
+            "cancel_in_progress": true,
+            "run_a_canceled": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "run_a_external_change": true,
+            "run_b_arrives": true,
+            "cancel_in_progress": true,
+            "run_a_canceled": true,
+            "production_rolled_back": false,
+            "state": "canceled run; external recovery still required"
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Docs: control workflow concurrency",
+        "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency",
+        "Living documentation; checked October 27, 2026"
+      ],
+      [
+        "GitHub Docs: control deployments",
+        "https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments",
+        "Living documentation; checked October 27, 2026"
+      ]
+    ],
+    "visual_explanation": "The four-stage deployment state separates workflow cancellation from production state. The rollback box stays red when the external-change switch is on, even though Run A is successfully canceled.",
+    "written_questions": [
+      "Which deployment steps can be interrupted safely, and which require compensation or reconciliation?",
+      "What concurrency key uniquely identifies each real deployment target in your workflows?"
+    ],
+    "source_checked_on": "2026-10-27"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "202 Accepted means queued, not completed",
+    "goal": "Return an explicit status monitor for asynchronous work and make clients handle eventual failure instead of treating 202 as business success.",
+    "tag": "HTTP semantics · asynchronous operations",
+    "concept": "<p>A repair shop says, “We accepted your car.” That does not mean the repair passed inspection.</p><p>HTTP <code>202 Accepted</code> means processing was accepted but has not completed and might not ultimately happen. RFC 9110 says the response ought to describe current status and point to or embed a status monitor.</p>",
+    "example": "<p><code>POST /exports</code> returns <code>202</code> with job <code>exp-42</code> and <code>/exports/exp-42</code>. The worker later moves it from queued to running to succeeded or failed. The client polls the monitor and downloads only after success.</p>",
+    "use_case": {
+      "when": "Use 202 when work cannot finish within the request latency budget and completion will happen in a separate worker or batch process.",
+      "example": "A user starts a 200 GB governed export, backfill, model build, or cross-region copy that may take minutes.",
+      "decision": "Use synchronous 200/201 when work is complete. For 202, return a durable job identity, status monitor, failure details, retry guidance, and idempotent submission behavior. Do not use 202 merely to hide overload."
+    },
+    "practice": "Move exp-42 through queued, running, failed, and succeeded. Watch which client action is safe at each state.",
+    "boundary": "The model uses one in-memory job. It does not run HTTP, define a standard status-monitor header, persist jobs, authenticate monitor access, guarantee delivery, model webhooks, retries, cancellation, expiry, idempotency keys, rate limits, or RFC-compliant response bodies.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Worker state <select id=\"jobState\"><option value=\"queued\">queued</option><option value=\"running\">running</option><option value=\"failed\">failed</option><option value=\"succeeded\">succeeded</option></select></label><div id=\"acceptedWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintAccepted(){const s=jobState.value,done=s==='succeeded',failed=s==='failed';acceptedWorld.innerHTML='<div class=step-flow><div class=\"node ok\">POST /exports<br>202 + exp-42</div><div class=\"node '+(done?'ok':failed?'fail':'wait')+'\">GET /exports/exp-42<br>'+s+'</div><div class=\"node '+(done?'ok':failed?'fail':'wait')+'\">client '+(done?'downloads':failed?'shows failure':'waits / polls')+'</div></div>';};jobState.onchange=paintAccepted;paintAccepted();",
+    "questions": [
+      [
+        "Server returns 202 for exp-42. What can the client claim?",
+        [
+          "The request was accepted for processing, not that the export succeeded",
+          "The file is complete",
+          "The worker cannot reject it later"
+        ],
+        0,
+        "202 is intentionally noncommittal."
+      ],
+      [
+        "What should the response provide?",
+        [
+          "A durable status description and link or identifier for a monitor",
+          "Only a cheerful message",
+          "A 201 Location for a completed file"
+        ],
+        0,
+        "The client needs a way to observe later outcome."
+      ],
+      [
+        "When should the client download?",
+        [
+          "Only after the monitor reaches succeeded",
+          "Immediately after 202",
+          "Whenever queued lasts ten seconds"
+        ],
+        0,
+        "Business completion is a later state."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "response = {'status': 202, 'job_id': 'exp-42', 'monitor': '/exports/exp-42'}",
+          "note": "Accept work and identify its monitor."
+        },
+        {
+          "code": "job_state = 'queued'",
+          "note": "The business operation is not complete."
+        },
+        {
+          "code": "job_state = 'running'",
+          "note": "A worker starts the asynchronous operation."
+        },
+        {
+          "code": "job_state = 'succeeded'; client_action = 'download result'",
+          "note": "Only the terminal success enables download."
+        }
+      ],
+      "expect": {
+        "response": {
+          "status": 202,
+          "job_id": "exp-42",
+          "monitor": "/exports/exp-42"
+        },
+        "job_state": "succeeded",
+        "client_action": "download result"
+      },
+      "limit": "The model uses one in-memory job. It does not run HTTP, define a standard status-monitor header, persist jobs, authenticate monitor access, guarantee delivery, model webhooks, retries, cancellation, expiry, idempotency keys, rate limits, or RFC-compliant response bodies.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "response": {
+              "status": 202,
+              "job_id": "exp-42",
+              "monitor": "/exports/exp-42"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "response": {
+              "status": 202,
+              "job_id": "exp-42",
+              "monitor": "/exports/exp-42"
+            },
+            "job_state": "queued"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "response": {
+              "status": 202,
+              "job_id": "exp-42",
+              "monitor": "/exports/exp-42"
+            },
+            "job_state": "running"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "response": {
+              "status": 202,
+              "job_id": "exp-42",
+              "monitor": "/exports/exp-42"
+            },
+            "job_state": "succeeded",
+            "client_action": "download result"
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "RFC 9110: 202 Accepted",
+        "https://www.rfc-editor.org/rfc/rfc9110.html#name-202-accepted",
+        "Internet standard; published June 2022"
+      ],
+      [
+        "RFC 9110: 201 Created",
+        "https://www.rfc-editor.org/rfc/rfc9110.html#name-201-created",
+        "Internet standard; published June 2022"
+      ]
+    ],
+    "visual_explanation": "The request, monitor, and client-action states make 202's non-final nature visible. Only the succeeded branch turns the download action green; failed is a first-class terminal outcome.",
+    "written_questions": [
+      "Which APIs currently return 202 without a durable monitor or explicit failure state?",
+      "How will clients safely retry the initial submission without creating a second job?"
+    ],
+    "source_checked_on": "2026-10-27"
+  }
+]

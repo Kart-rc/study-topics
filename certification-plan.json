@@ -2,7 +2,7 @@
   "schema_version": 1,
   "created_on": "2026-10-08",
   "target_date": "2026-12-31",
-  "source_checked_on": "2026-10-26",
+  "source_checked_on": "2026-10-27",
   "guide_recheck": "weekly and before booking",
   "time_budget_minutes": 30,
   "tracks": [
@@ -667,6 +667,46 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day37/data-engineering",
+      "product_material_added_on": "2026-10-27",
+      "session_type": "retrieval_gap",
+      "cycle_position": 7,
+      "cycle_origin": "Day31",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "platform",
+        "ingestion",
+        "transformation_modeling",
+        "lakeflow_jobs",
+        "ci_cd",
+        "troubleshooting_optimization",
+        "governance_security"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official current overview last verified 2026-10-26; full objective IDs and weights still unverified; planning groups only",
+      "snowflake_planning_groups": [
+        "architecture_connectivity",
+        "account_warehouse_access",
+        "loading_unloading_transformation",
+        "data_formats",
+        "performance",
+        "collaboration_protection"
+      ],
+      "source_checked_on": "2026-10-27",
+      "source_versions": {
+        "databricks": "CDF, checkpoints, row-filter, external-location, schema-evolution, and clone documentation retrieved through cycle three; guide dated 2026-05-04",
+        "snowflake": "Streams, SHOW STREAMS, row-policy, storage-integration, schema-evolution, and clone documentation retrieved through cycle three; full guide IDs/weights unverified"
+      },
+      "depth": "Cycle-three retrieval and gap discrimination across Days31\u201336. No personal gaps inferred and no complete exam coverage claim.",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql_pyspark": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -766,6 +806,11 @@
       "day_number": 36,
       "date": "2026-10-26",
       "key": "Day23/data-engineering+products+3"
+    },
+    {
+      "day_number": 37,
+      "date": "2026-10-27",
+      "key": "Day25/data-engineering+products+1"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
@@ -792,6 +837,6 @@
       "7": "retrieval_gap"
     },
     "next_consolidation_day": 43,
-    "next_retrieval_day": 37
+    "next_retrieval_day": 44
   }
 }
