@@ -766,7 +766,7 @@
         "ci-cd-github-actions",
         "apis-microservices"
       ],
-      "validation": "All seven Day37 semantic interaction checks, 239 recorded execution replays, 15 manifest/model regression tests, product scoring, quizzes, save/export hooks, links, review scheduling, generation-key uniqueness, and certification metadata passed locally. Hosted Chromium validation is pending. Vendor SQL/PySpark was not run; mastery was not assessed. See Day37/VALIDATION.md."
+      "validation": "Pending local validation; vendor commands not run; mastery not assessed."
     },
     {
       "number": 35,
@@ -832,7 +832,7 @@
         "ci-cd-github-actions",
         "apis-microservices"
       ],
-      "validation": "Pending local validation; vendor commands not run; mastery not assessed."
+      "validation": "All seven Day37 semantic interaction checks, 239 recorded execution replays, 15 manifest/model regression tests, product scoring, quizzes, save/export hooks, links, review scheduling, generation-key uniqueness, and certification metadata passed locally. Hosted Chromium validation is pending. Vendor SQL/PySpark was not run; mastery was not assessed. See Day37/VALIDATION.md."
     }
   ],
   "submitted_assessments": [],
