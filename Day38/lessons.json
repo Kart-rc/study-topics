@@ -1,0 +1,1193 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Wake on change instead of polling an empty source",
+    "goal": "Choose an event-driven trigger without confusing the wake-up signal with durable ingestion progress.",
+    "tag": "Focused certification lesson · orchestration and ingestion · cycle 4, position 1",
+    "concept": "<p>A shop can check the mailbox every minute, even when it is empty. Or the carrier can ring a bell when mail arrives.</p><p>Polling is the repeated mailbox check. An event-driven trigger is the bell. The bell starts work, but it does not remember which files or rows were safely processed. Durable ingestion state still belongs in Auto Loader checkpoints, a Snowflake Stream, or another explicit progress record.</p>",
+    "example": "<p>Partner <code>acme</code> sends three order files at 09:00:00, 09:00:20, and 09:01:30. A 60-second quiet window groups the first two files into one run at 09:01:20. The third file starts another run at 09:02:30. The trigger decides <em>when to wake</em>; the ingestion state decides <em>what remains</em>.</p>",
+    "use_case": {
+      "when": "Use change-driven orchestration when arrivals are irregular and frequent polling wastes compute or adds avoidable latency.",
+      "example": "Wake a bronze-to-silver order pipeline when partner files or table changes appear instead of running an empty job every five minutes.",
+      "decision": "Use a schedule when arrivals are predictable or the source cannot emit a trustworthy signal. Even with triggers, keep processing idempotent and store progress independently because notifications can be delayed, coalesced, or repeated."
+    },
+    "practice": "Change the arrival gap and quiet window. Predict whether three files create one run, two runs, or three runs before reading the timeline.",
+    "boundary": "The local model groups three synthetic arrival times. It does not call cloud notifications, Lakeflow Jobs, Auto Loader, Snowflake Streams or Tasks; model delivery guarantees; calculate service cost; or prove exactly-once effects. Vendor configurations are sourced examples and were not executed.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Gap before file 3 (seconds) <input id=\"arrivalGap\" type=\"range\" min=\"10\" max=\"180\" value=\"70\"></label><label>Wait after last change (seconds) <input id=\"quietWindow\" type=\"range\" min=\"10\" max=\"120\" value=\"60\"></label><div id=\"eventWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintEvents(){const gap=+arrivalGap.value,quiet=+quietWindow.value,t=[0,20,20+gap],groups=gap>quiet?[[t[0],t[1]],[t[2]]]:[[t[0],t[1],t[2]]];eventWorld.innerHTML='<div class=step-flow>'+t.map((x,i)=>'<div class=\"node ok\">file '+(i+1)+'<br>t='+x+'s</div>').join('')+'</div><p><strong>'+groups.length+' job run'+(groups.length===1?'':'s')+'</strong> after '+quiet+' quiet seconds: '+groups.map(g=>'['+g.join(', ')+']').join(' then ')+'</p><p>Wake-up grouping only; processed-file state is separate.</p>';};arrivalGap.oninput=paintEvents;quietWindow.oninput=paintEvents;paintEvents();",
+    "questions": [
+      [
+        "A file-arrival trigger starts the job twice for the same landing period. What protects the result?",
+        [
+          "Durable ingestion progress and idempotent writes",
+          "The trigger name",
+          "A shorter polling interval"
+        ],
+        0,
+        "A wake-up signal is not the processing ledger."
+      ],
+      [
+        "Why add a quiet window after the last file?",
+        [
+          "To group files that belong to one burst before starting work",
+          "To guarantee every producer is finished forever",
+          "To replace schema validation"
+        ],
+        0,
+        "Debouncing trades a little latency for fewer partial-batch runs."
+      ],
+      [
+        "When is a schedule the simpler choice?",
+        [
+          "Arrivals are predictable or no dependable change signal exists",
+          "Every file has a unique name",
+          "The table has a primary key"
+        ],
+        0,
+        "A trigger adds machinery only when irregular arrivals justify it."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "arrivals = [0, 20, 90]",
+          "note": "Three files arrive; the last gap is 70 seconds."
+        },
+        {
+          "code": "quiet_seconds = 60",
+          "note": "Require one quiet minute before starting a run."
+        },
+        {
+          "code": "run_times = [arrivals[1] + quiet_seconds, arrivals[2] + quiet_seconds]",
+          "note": "The 70-second gap closes the first burst before file 3 arrives."
+        },
+        {
+          "code": "processed_files = ['part-1.json', 'part-2.json', 'part-3.json']; wakeups = len(run_times)",
+          "note": "Keep processed-file identity separate from the two wake-ups."
+        }
+      ],
+      "expect": {
+        "arrivals": [
+          0,
+          20,
+          90
+        ],
+        "quiet_seconds": 60,
+        "run_times": [
+          80,
+          150
+        ],
+        "processed_files": [
+          "part-1.json",
+          "part-2.json",
+          "part-3.json"
+        ],
+        "wakeups": 2
+      },
+      "limit": "The local model groups three synthetic arrival times. It does not call cloud notifications, Lakeflow Jobs, Auto Loader, Snowflake Streams or Tasks; model delivery guarantees; calculate service cost; or prove exactly-once effects. Vendor configurations are sourced examples and were not executed.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "arrivals": [
+              0,
+              20,
+              90
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "arrivals": [
+              0,
+              20,
+              90
+            ],
+            "quiet_seconds": 60
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "arrivals": [
+              0,
+              20,
+              90
+            ],
+            "quiet_seconds": 60,
+            "run_times": [
+              80,
+              150
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "arrivals": [
+              0,
+              20,
+              90
+            ],
+            "quiet_seconds": 60,
+            "run_times": [
+              80,
+              150
+            ],
+            "processed_files": [
+              "part-1.json",
+              "part-2.json",
+              "part-3.json"
+            ],
+            "wakeups": 2
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks Lakeflow Jobs schedules and triggers",
+        "https://docs.databricks.com/aws/en/jobs/triggers",
+        "Updated October 6, 2026"
+      ],
+      [
+        "Databricks file-arrival triggers",
+        "https://docs.databricks.com/aws/en/jobs/file-arrival-triggers",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Snowflake triggered tasks",
+        "https://docs.snowflake.com/en/user-guide/tasks-triggered",
+        "Living official documentation"
+      ],
+      [
+        "Snowflake Streams introduction",
+        "https://docs.snowflake.com/en/user-guide/streams-intro",
+        "Living official documentation"
+      ]
+    ],
+    "visual_explanation": "The arrival timeline answers when bursts split into separate runs. Moving the third file or the quiet window changes the grouping, while the processed-file ledger stays visibly separate from wake-up count.",
+    "written_questions": [
+      "Which current pipelines poll mostly empty sources, and what evidence would justify replacing the schedule?",
+      "Where is durable progress stored if the trigger repeats or arrives late?"
+    ],
+    "source_checked_on": "2026-10-28",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: a file-arrival trigger wakes the job; Auto Loader remembers the files",
+        "minutes": 9,
+        "html": "<p><strong>Different jobs for different responsibilities.</strong> A Lakeflow Jobs file-arrival trigger monitors a Unity Catalog external location or volume. A quiet window can debounce a burst; a minimum interval caps run frequency. The triggered job can use Auto Loader with a checkpoint to discover and record files durably.</p><pre><code><span># sourced PySpark sketch; not executed here</span><span>(spark.readStream.format(\"cloudFiles\")</span><span> .option(\"cloudFiles.format\", \"json\")</span><span> .load(\"/Volumes/ops/in/orders\")</span><span> .writeStream.option(\"checkpointLocation\", checkpoint)</span><span> .trigger(availableNow=True).toTable(\"ops.bronze.orders\"))</span></code></pre><label>Third file gap <input id=\"dbGap\" type=\"range\" min=\"10\" max=\"180\" value=\"70\"></label><div id=\"dbTriggerWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> Overwriting an existing file with the same name does not trigger a file-arrival run. Prefer immutable file names and let Auto Loader track ingestion. High unrelated change volume above a monitored subpath can also hurt trigger evaluation; scope the external location or volume.</p><p><strong>Execution label.</strong> PySpark is an unexecuted vendor sketch. The timeline is a local JavaScript teaching model.</p>",
+        "markdown": "A file-arrival trigger decides when a Lakeflow Job starts. Auto Loader and its checkpoint decide which immutable files remain. Debounce with Wait after last change; cap frequency with Minimum time between triggers. The PySpark sketch was not run.",
+        "javascript": "const dbGap=$('dbGap'),dbTriggerWorld=$('dbTriggerWorld');function paintDbTrigger(){const g=+dbGap.value,split=g>60;dbTriggerWorld.innerHTML='<div class=step-flow><div class=\"node ok\">files at 0s, 20s, '+(20+g)+'s</div><div class=\"node '+(split?'wait':'ok')+'\">60s quiet window</div><div class=\"node ok\">'+(split?'2 runs':'1 run')+'</div><div class=\"node ok\">checkpoint owns progress</div></div>';};dbGap.oninput=paintDbTrigger;paintDbTrigger();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: a Stream exposes change; a triggered Task consumes it",
+        "minutes": 9,
+        "html": "<p><strong>The trigger watches a Stream, not a storage path.</strong> A triggered Task uses <code>WHEN SYSTEM$STREAM_HAS_DATA(...)</code> without a schedule. It starts suspended, so resume it. Snowflake runs one instance at a time and checks again after completion when more Stream data exists.</p><pre><code><span>-- sourced SQL sketch; not executed here</span><span>CREATE TASK load_orders</span><span>  TARGET_COMPLETION_INTERVAL = '15 MINUTES'</span><span>  WHEN SYSTEM$STREAM_HAS_DATA('orders_delta')</span><span>AS MERGE INTO silver.orders USING orders_delta ...;</span><span>ALTER TASK load_orders RESUME;</span></code></pre><label>Rows waiting in Stream <input id=\"sfRows\" type=\"range\" min=\"0\" max=\"200\" value=\"75\"></label><div id=\"sfTriggerWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> The task body must consume changes before the Stream becomes stale. A directory table also needs automatic or manual refresh before a triggered task can detect file changes. Monitor Stream age and task history; do not treat <code>SYSTEM$STREAM_HAS_DATA</code> as a row-count guarantee.</p><p><strong>Execution label.</strong> No Snowflake SQL ran. The Stream/task diagram is a local teaching model.</p>",
+        "markdown": "A triggered Task wakes when a Stream reports data. It has no schedule, starts suspended, and must be resumed. The task must consume changes before Stream retention expires. SQL was not executed.",
+        "javascript": "const sfRows=$('sfRows'),sfTriggerWorld=$('sfTriggerWorld');function paintSfTrigger(){const n=+sfRows.value;sfTriggerWorld.innerHTML='<div class=step-flow><div class=\"node '+(n?'ok':'wait')+'\">Stream '+n+' changed rows</div><div class=\"node '+(n?'ok':'wait')+'\">WHEN '+(n?'true':'false')+'</div><div class=\"node '+(n?'ok':'wait')+'\">Task '+(n?'runs once':'sleeps')+'</div><div class=\"node ok\">Stream offset is progress</div></div>';};sfRows.oninput=paintSfTrigger;paintSfTrigger();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Wake-up surface</td><td>file or table/model update trigger</td><td>change detected in a Stream</td></tr><tr><td>Durable progress</td><td>Auto Loader/streaming checkpoint</td><td>Stream offset</td></tr><tr><td>Burst control</td><td>quiet window and minimum interval</td><td>one task instance; recheck after completion</td></tr><tr><td>Key boundary</td><td>same-name overwrite does not trigger</td><td>Stream can become stale; directory table needs refresh</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Wake-up | file/table/model trigger | Stream change |\n| Progress | checkpoint | Stream offset |\n| Burst control | debounce/cooldown | one instance and recheck |\n| Boundary | same-name overwrite | staleness/directory refresh |"
+    },
+    "product_questions": [
+      [
+        "A Databricks file-arrival job reruns. Which state prevents re-reading every immutable file?",
+        [
+          "The Auto Loader checkpoint",
+          "The trigger's display name",
+          "The job owner"
+        ],
+        0,
+        "Trigger state and ingestion progress are separate."
+      ],
+      [
+        "A Snowflake triggered task exists but never runs. First lifecycle check?",
+        [
+          "The task was resumed and its Stream has detectable, retained changes",
+          "A schedule was added",
+          "The warehouse is named like the Stream"
+        ],
+        0,
+        "Triggered tasks omit SCHEDULE and begin suspended."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks Lakeflow Jobs schedules and triggers",
+        "https://docs.databricks.com/aws/en/jobs/triggers",
+        "Updated October 6, 2026"
+      ],
+      [
+        "Databricks file-arrival triggers",
+        "https://docs.databricks.com/aws/en/jobs/file-arrival-triggers",
+        "Updated September 11, 2026"
+      ],
+      [
+        "Snowflake triggered tasks",
+        "https://docs.snowflake.com/en/user-guide/tasks-triggered",
+        "Living official documentation"
+      ],
+      [
+        "Snowflake Streams introduction",
+        "https://docs.snowflake.com/en/user-guide/streams-intro",
+        "Living official documentation"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-05/databricks-certified-data-engineer-associate-exam-guide-may-2026-000.pdf",
+        "Guide dated May 4, 2026"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official overview; full objective IDs and weights still unverified"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-28",
+      "session_type": "focused",
+      "cycle_position": 1,
+      "cycle_origin": "Day38",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "ingestion",
+          "lakeflow_jobs",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Focused change-driven orchestration, file-arrival rate controls, Auto Loader checkpoint ownership, permissions and limitations. Delivered coverage is not mastery."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "blueprint_status": "Official current overview last verified 2026-10-26; full objective IDs and weights remain unverified",
+        "planning_groups": [
+          "loading_unloading_transformation",
+          "account_warehouse_access",
+          "performance"
+        ],
+        "scope": "Focused triggered Tasks, Streams, serverless target completion, lifecycle, monitoring and retention boundary. Complete COF-C03 coverage is not claimed."
+      },
+      "product_lab_execution": "not_run"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Release the read lock before asking to write",
+    "goal": "Avoid a read-to-write upgrade that cannot succeed; release, acquire the write lock, then recheck the condition.",
+    "tag": "Java concurrency · ReentrantReadWriteLock",
+    "concept": "<p>You are reading a library book at a shared table. You cannot reserve the whole table while still claiming only a reader's seat, because other readers may be doing the same thing.</p><p>With Java's <code>ReentrantReadWriteLock</code>, a writer may acquire the read lock and downgrade safely. A reader cannot upgrade to the write lock. Release the read lock, acquire the write lock, and recheck because another writer may have changed the state in between.</p>",
+    "example": "<p>Thread A reads configuration version <code>7</code> and decides it is stale. <code>tryLock()</code> on the write lock returns false while A holds the read lock. A releases read, takes write, then checks the version again before publishing version <code>8</code>.</p>",
+    "use_case": {
+      "when": "Use a read-write lock when reads are frequent, writes are shorter and less frequent, and measurement shows concurrent readers help.",
+      "example": "Many request threads read a routing snapshot while one refresh thread occasionally replaces it.",
+      "decision": "Prefer an immutable snapshot or simpler mutex unless profiling justifies the extra policy. Never design a read-to-write upgrade; release, acquire write, and revalidate."
+    },
+    "practice": "Toggle whether the reader releases before requesting write. Watch the lock state and the mandatory recheck.",
+    "boundary": "The Java replay uses one thread and tryLock; it proves the documented upgrade result in this runtime, not fairness, contention throughput, starvation, scheduler order, memory costs, or application correctness.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"releaseRead\" type=\"checkbox\"> Release read lock before write request</label><label>Version after another writer <input id=\"observedVersion\" type=\"range\" min=\"7\" max=\"9\" value=\"8\"></label><div id=\"lockWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintLock(){const released=releaseRead.checked,v=+observedVersion.value;lockWorld.innerHTML='<div class=step-flow><div class=\"node ok\">A reads v7</div><div class=\"node '+(released?'ok':'fail')+'\">'+(released?'release read':'still holds read')+'</div><div class=\"node '+(released?'ok':'fail')+'\">write '+(released?'acquired':'cannot upgrade')+'</div><div class=\"node '+(released?'wait':'fail')+'\">'+(released?'recheck: now v'+v:'no write, no publish')+'</div></div>';};releaseRead.onchange=paintLock;observedVersion.oninput=paintLock;paintLock();",
+    "questions": [
+      [
+        "Thread A holds readLock and calls writeLock.tryLock(). Expected result?",
+        [
+          "It fails; read-to-write upgrade is unsupported",
+          "It always succeeds",
+          "It silently drops the read lock"
+        ],
+        0,
+        "A reader cannot upgrade to writer."
+      ],
+      [
+        "Why recheck after releasing read and acquiring write?",
+        [
+          "Another writer may have changed the protected state in the gap",
+          "The JVM forgets the key",
+          "Read locks do not see memory"
+        ],
+        0,
+        "The condition that justified writing may no longer hold."
+      ],
+      [
+        "When should you prefer a simple mutex?",
+        [
+          "Profiling does not show enough read concurrency to justify the policy complexity",
+          "There are multiple readers",
+          "The data is immutable"
+        ],
+        0,
+        "Read-write locks are a measured optimization, not a default."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var lock = new java.util.concurrent.locks.ReentrantReadWriteLock();",
+          "note": "Create one read-write lock."
+        },
+        {
+          "code": "lock.readLock().lock(); boolean upgraded = lock.writeLock().tryLock();",
+          "note": "The current thread holds read; the write upgrade fails."
+        },
+        {
+          "code": "lock.readLock().unlock(); boolean acquiredAfterRelease = lock.writeLock().tryLock();",
+          "note": "Release read, then acquire write."
+        },
+        {
+          "code": "String outcome = acquiredAfterRelease ? \"release-read-then-recheck\" : \"blocked\"; lock.writeLock().unlock();",
+          "note": "Record the safe pattern and release write."
+        }
+      ],
+      "expect": {
+        "upgraded": "false",
+        "acquiredAfterRelease": "true",
+        "outcome": "release-read-then-recheck"
+      },
+      "limit": "The Java replay uses one thread and tryLock; it proves the documented upgrade result in this runtime, not fairness, contention throughput, starvation, scheduler order, memory costs, or application correctness.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "lock": "java.util.concurrent.locks.ReentrantReadWriteLock@45dd4eda[Write locks = 0, Read locks = 0]"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "lock": "java.util.concurrent.locks.ReentrantReadWriteLock@45dd4eda[Write locks = 0, Read locks = 1]",
+            "upgraded": "false"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "lock": "java.util.concurrent.locks.ReentrantReadWriteLock@45dd4eda[Write locks = 1, Read locks = 0]",
+            "upgraded": "false",
+            "acquiredAfterRelease": "true"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "lock": "java.util.concurrent.locks.ReentrantReadWriteLock@45dd4eda[Write locks = 0, Read locks = 0]",
+            "upgraded": "false",
+            "acquiredAfterRelease": "true",
+            "outcome": "release-read-then-recheck"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java 17 ReentrantReadWriteLock",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/locks/ReentrantReadWriteLock.html",
+        "Official Java API; checked October 28, 2026"
+      ],
+      [
+        "Java 17 ReadWriteLock",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/locks/ReadWriteLock.html",
+        "Official Java API; checked October 28, 2026"
+      ]
+    ],
+    "visual_explanation": "The lock-state sequence answers why an upgrade stalls and where another writer can intervene. The version slider makes the recheck necessary instead of ceremonial.",
+    "written_questions": [
+      "Where does your code attempt a lock upgrade or perform I/O while holding a write lock?",
+      "Could an immutable snapshot remove the lock from the read path?"
+    ],
+    "source_checked_on": "2026-10-28"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A risk acceptance needs an owner, a trigger, and an expiry",
+    "goal": "Turn a permanent exception into a time-bounded decision that is re-evaluated when evidence or exposure changes.",
+    "tag": "Distinguished Engineer judgment · risk governance",
+    "concept": "<p>A temporary road detour needs a sign saying who owns it and when it will be removed. Otherwise temporary becomes permanent.</p><p>Accepting risk is an informed response, not the absence of work. Record the residual risk, accountable approver, compensating controls, review date, and evidence that forces an earlier review. AWS Managed Services documents one-year validity for its risk acceptances; your policy can be shorter.</p>",
+    "example": "<p>Platform waiver <code>R-42</code> permits an unsigned internal image for 90 days while a legacy builder is replaced. The owner is the platform director. A public exposure, a critical CVE, or loss of runtime isolation reopens the decision immediately—even on day 20.</p>",
+    "use_case": {
+      "when": "Use a formal acceptance when a known residual risk cannot be removed before a justified delivery deadline and an accountable authority can decide within stated tolerance.",
+      "example": "A regulated data platform temporarily accepts a legacy deployment path while enforcing network isolation, image scanning and a dated migration plan.",
+      "decision": "Mitigate or avoid when impact exceeds tolerance, controls are weak, ownership is unclear, or the exception has no credible retirement path. Acceptance is not a substitute for backlog neglect."
+    },
+    "practice": "Move the waiver age and toggle changed exposure. Watch the decision reopen from either time or evidence.",
+    "boundary": "The model is a governance teaching aid, not a quantitative risk assessment, legal opinion, compliance authorization, threat model, or substitute for the organization's risk authority.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Waiver age (days) <input id=\"riskAge\" type=\"range\" min=\"0\" max=\"180\" value=\"95\"></label><label><input id=\"exposureChanged\" type=\"checkbox\"> Public exposure or critical new evidence</label><div id=\"riskWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintRisk(){const age=+riskAge.value,changed=exposureChanged.checked,reopen=age>=90||changed;riskWorld.innerHTML='<div class=step-flow><div class=\"node ok\">R-42 owner<br>platform director</div><div class=\"node '+(age>=90?'fail':'wait')+'\">age '+age+' / 90 days</div><div class=\"node '+(changed?'fail':'ok')+'\">evidence '+(changed?'changed':'unchanged')+'</div><div class=\"node '+(reopen?'fail':'ok')+'\">'+(reopen?'reassess now':'acceptance still bounded')+'</div></div>';};riskAge.oninput=paintRisk;exposureChanged.onchange=paintRisk;paintRisk();",
+    "questions": [
+      [
+        "R-42 is only 20 days old, but the service becomes public. What happens?",
+        [
+          "Reassess immediately because the evidence trigger changed",
+          "Wait until day 90",
+          "Delete the risk record"
+        ],
+        0,
+        "Expiry is the latest review, not protection from material change."
+      ],
+      [
+        "Why name an accountable approver?",
+        [
+          "Risk acceptance is a decision within authority, not an ownerless technical note",
+          "It guarantees no incident",
+          "It replaces compensating controls"
+        ],
+        0,
+        "Someone must own the residual-risk decision."
+      ],
+      [
+        "When is acceptance invalid as a strategy?",
+        [
+          "Impact exceeds tolerance and no credible controls or retirement path exist",
+          "A migration needs two sprints",
+          "The record has an ID"
+        ],
+        0,
+        "Acceptance cannot manufacture tolerability."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "risk = {'id': 'R-42', 'owner': 'platform-director', 'expires_day': 90}",
+          "note": "Record identity, authority, and a hard review date."
+        },
+        {
+          "code": "age_days = 95; evidence_changed = False",
+          "note": "The waiver has crossed its date even without new evidence."
+        },
+        {
+          "code": "must_reassess = age_days >= risk['expires_day'] or evidence_changed",
+          "note": "Time or changed exposure can reopen the decision."
+        },
+        {
+          "code": "action = 'reassess and choose accept, mitigate, transfer, or avoid' if must_reassess else 'continue controls'",
+          "note": "A review leads to an explicit risk response."
+        }
+      ],
+      "expect": {
+        "risk": {
+          "id": "R-42",
+          "owner": "platform-director",
+          "expires_day": 90
+        },
+        "age_days": 95,
+        "evidence_changed": false,
+        "must_reassess": true,
+        "action": "reassess and choose accept, mitigate, transfer, or avoid"
+      },
+      "limit": "The model is a governance teaching aid, not a quantitative risk assessment, legal opinion, compliance authorization, threat model, or substitute for the organization's risk authority.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "risk": {
+              "id": "R-42",
+              "owner": "platform-director",
+              "expires_day": 90
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "risk": {
+              "id": "R-42",
+              "owner": "platform-director",
+              "expires_day": 90
+            },
+            "age_days": 95,
+            "evidence_changed": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "risk": {
+              "id": "R-42",
+              "owner": "platform-director",
+              "expires_day": 90
+            },
+            "age_days": 95,
+            "evidence_changed": false,
+            "must_reassess": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "risk": {
+              "id": "R-42",
+              "owner": "platform-director",
+              "expires_day": 90
+            },
+            "age_days": 95,
+            "evidence_changed": false,
+            "must_reassess": true,
+            "action": "reassess and choose accept, mitigate, transfer, or avoid"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Managed Services Advanced User Guide: risk acceptance validity and review",
+        "https://docs.aws.amazon.com/pdfs/managedservices/latest/userguide/ams-ug.pdf",
+        "Version May 12, 2026"
+      ],
+      [
+        "NIST RMF Authorize step",
+        "https://csrc.nist.gov/Projects/risk-management/about-rmf/authorize-step",
+        "Updated July 24, 2026"
+      ]
+    ],
+    "visual_explanation": "The decision has two independent clocks: elapsed time and changed evidence. Either path can turn a still-documented acceptance into a required reassessment.",
+    "written_questions": [
+      "Which current architecture exception has no expiry or evidence trigger?",
+      "Who has authority to accept its residual risk, and what compensating control is observable?"
+    ],
+    "source_checked_on": "2026-10-28"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "A child agent gets new input, not an isolated application state",
+    "goal": "Keep structured delegation separate from state isolation when an agent is exposed as a tool.",
+    "tag": "GenAI harness engineering · nested agent context",
+    "concept": "<p>Giving a contractor a separate work order does not automatically give them a separate bank account.</p><p>In the OpenAI Agents SDK, a nested <code>Agent.as_tool()</code> run can receive distinct structured <code>tool_input</code>. But official context guidance says it does not receive an isolated copy of application state by default. Mutable local context can therefore be shared across parent, tools and nested runs.</p>",
+    "example": "<p>The parent starts with budget <code>3</code>. A research child receives only <code>{topic: \"orders\"}</code>, then decrements <code>context.budget</code>. The parent now sees <code>2</code>. The structured input was narrow; the mutable application object was shared.</p>",
+    "use_case": {
+      "when": "Use local context for dependencies and request-scoped policy that tools need but the model should not see.",
+      "example": "Share a logger and usage budget across an orchestration run while passing a narrow research request to one child agent.",
+      "decision": "Share state intentionally for accounting or coordination. Create a scoped copy, immutable view, or capability-limited facade when a child must not mutate parent-owned state. Do not call nested delegation a sandbox."
+    },
+    "practice": "Toggle shared versus copied context and let the child spend one unit. Watch which parent budget changes.",
+    "boundary": "The browser models Python object aliasing. It does not run the Agents SDK, call a model or tool, provide OS/process isolation, serialize RunState, model approvals, or prove concurrency safety. The recorded Python example is local and synthetic.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"copyContext\" type=\"checkbox\"> Give child a copied budget object</label><label>Child spend <input id=\"childSpend\" type=\"range\" min=\"0\" max=\"3\" value=\"1\"></label><div id=\"contextWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintContext(){const copied=copyContext.checked,spend=+childSpend.value,parent=copied?3:Math.max(0,3-spend),child=Math.max(0,3-spend);contextWorld.innerHTML='<div class=step-flow><div class=\"node ok\">parent input<br>full request</div><div class=\"node ok\">child tool_input<br>{topic: orders}</div><div class=\"node '+(copied?'ok':'wait')+'\">app state<br>'+(copied?'copied':'shared alias')+'</div><div class=\"node '+(copied?'ok':'fail')+'\">after spend<br>parent '+parent+' · child '+child+'</div></div>';};copyContext.onchange=paintContext;childSpend.oninput=paintContext;paintContext();",
+    "questions": [
+      [
+        "The child receives narrow tool_input. Is parent application state isolated?",
+        [
+          "No; nested runs do not get an isolated copy by default",
+          "Yes, structured input is a sandbox",
+          "Only when the tool has a description"
+        ],
+        0,
+        "Input schema and object isolation are different controls."
+      ],
+      [
+        "Why share one context intentionally?",
+        [
+          "To coordinate usage accounting or request-scoped dependencies",
+          "To expose secrets to the model",
+          "To guarantee thread safety"
+        ],
+        0,
+        "Some state should be shared, but by design."
+      ],
+      [
+        "What boundary is required for an untrusted child?",
+        [
+          "A scoped copy/facade plus the actual process or sandbox isolation the threat model needs",
+          "A new agent name",
+          "A longer prompt"
+        ],
+        0,
+        "Delegation alone is not a security boundary."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "app_context = {'budget': 3, 'tenant': 'acme'}",
+          "note": "Create one mutable application object."
+        },
+        {
+          "code": "child_context = app_context; tool_input = {'topic': 'orders'}",
+          "note": "Give the child narrow input but alias the same local context."
+        },
+        {
+          "code": "child_context['budget'] -= 1",
+          "note": "The child mutates the shared budget."
+        },
+        {
+          "code": "same_object = child_context is app_context; parent_budget = app_context['budget']",
+          "note": "The parent observes the mutation."
+        }
+      ],
+      "expect": {
+        "app_context": {
+          "budget": 2,
+          "tenant": "acme"
+        },
+        "child_context": {
+          "budget": 2,
+          "tenant": "acme"
+        },
+        "tool_input": {
+          "topic": "orders"
+        },
+        "same_object": true,
+        "parent_budget": 2
+      },
+      "limit": "The browser models Python object aliasing. It does not run the Agents SDK, call a model or tool, provide OS/process isolation, serialize RunState, model approvals, or prove concurrency safety. The recorded Python example is local and synthetic.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "app_context": {
+              "budget": 3,
+              "tenant": "acme"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "app_context": {
+              "budget": 3,
+              "tenant": "acme"
+            },
+            "child_context": {
+              "budget": 3,
+              "tenant": "acme"
+            },
+            "tool_input": {
+              "topic": "orders"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "app_context": {
+              "budget": 2,
+              "tenant": "acme"
+            },
+            "child_context": {
+              "budget": 2,
+              "tenant": "acme"
+            },
+            "tool_input": {
+              "topic": "orders"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "app_context": {
+              "budget": 2,
+              "tenant": "acme"
+            },
+            "child_context": {
+              "budget": 2,
+              "tenant": "acme"
+            },
+            "tool_input": {
+              "topic": "orders"
+            },
+            "same_object": true,
+            "parent_budget": 2
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI Agents SDK: context management",
+        "https://openai.github.io/openai-agents-python/context/",
+        "Living official documentation; checked October 28, 2026"
+      ],
+      [
+        "OpenAI Agents SDK: tools and agents-as-tools",
+        "https://openai.github.io/openai-agents-python/tools/",
+        "Living official documentation; checked October 28, 2026"
+      ]
+    ],
+    "visual_explanation": "The diagram separates three things that are often conflated: parent conversation input, child tool_input, and the local application object. The copy switch changes only the mutation path.",
+    "written_questions": [
+      "Which objects in your harness are intentionally shared across nested runs?",
+      "What must be copied, wrapped, or isolated before an untrusted tool-agent receives control?"
+    ],
+    "source_checked_on": "2026-10-28"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Horizontal liquid in, vertical vapor out: cool the hotspot without water",
+    "goal": "Understand how a two-phase dielectric microfluidic manifold replenishes liquid and evacuates vapor near a chip hotspot.",
+    "tag": "New research · Nature Electronics · October 7, 2026",
+    "concept": "<p>A boiling pot cools only while fresh liquid reaches the hot surface and vapor can escape. If bubbles block the route, the surface dries out and temperature rises.</p><p>Researchers etched a horizontal-inlet, vertical-outlet microfluidic manifold into a chip substrate. Dielectric HFE-7100 flowed toward the hotspot, boiled, and vented upward. The paper reports critical heat flux up to <code>1,570 W/cm²</code>.</p>",
+    "example": "<p>At a synthetic hotspot load of <code>1,200 W/cm²</code>, a 1,000 W/cm² comparison limit is exceeded by 200. The reported prototype limit leaves 370 W/cm² of experimental headroom. Headroom is not a deployment guarantee; it is only distance from the reported critical heat-flux point.</p>",
+    "use_case": {
+      "when": "Use this research when evaluating embedded cooling for unusually high-power-density electronics where coolant electrical conductivity matters.",
+      "example": "A laboratory accelerator chip has localized heat flux beyond conventional dielectric two-phase cooling capability.",
+      "decision": "Treat the result as a research prototype. Production adoption needs pressure-drop, pump, seal, lifetime, contamination, manufacturability, serviceability and full-system energy evidence."
+    },
+    "practice": "Change hotspot load. Watch liquid replenishment, vertical vapor exit and remaining experimental headroom.",
+    "boundary": "This original arithmetic model uses the paper's reported 1,570 W/cm² maximum and a round 1,000 W/cm² comparison. It does not reproduce geometry, flow rate, pressure, temperature, dryout physics, uncertainty, pumping power, fabrication yield, reliability, or a deployable cooling design.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Hotspot load (W/cm²) <input id=\"heatLoad\" type=\"range\" min=\"400\" max=\"1800\" value=\"1200\"></label><div id=\"coolingWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintCooling(){const load=+heatLoad.value,limit=1570,margin=limit-load;coolingWorld.innerHTML='<div class=step-flow><div class=\"node ok\">dielectric liquid →<br>horizontal inlet</div><div class=\"node '+(margin>=0?'ok':'fail')+'\">hotspot boils fluid<br>'+load+' W/cm²</div><div class=\"node ok\">vapor ↑<br>vertical outlet</div><div class=\"node '+(margin>=0?'ok':'fail')+'\">reported-limit margin<br>'+margin+' W/cm²</div></div>';};heatLoad.oninput=paintCooling;paintCooling();",
+    "questions": [
+      [
+        "Synthetic load rises from 1,200 to 1,650 W/cm². What does the model show?",
+        [
+          "It exceeds the paper's reported critical heat-flux value by 80 W/cm²",
+          "The chip is production-safe",
+          "Water becomes dielectric"
+        ],
+        0,
+        "The arithmetic crosses the reported experimental limit."
+      ],
+      [
+        "Why separate horizontal inlets and vertical outlets?",
+        [
+          "Replenish liquid while giving vapor a short escape path",
+          "Increase electrical conductivity",
+          "Eliminate pumping"
+        ],
+        0,
+        "Liquid supply and vapor evacuation are the paired mechanism."
+      ],
+      [
+        "What blocks a production claim?",
+        [
+          "System energy, pressure, seals, lifetime, manufacturing and integration remain open",
+          "The paper has a DOI",
+          "The coolant boils"
+        ],
+        0,
+        "A high laboratory heat-flux result is not a complete product."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "heat_load = 1200",
+          "note": "Choose a synthetic hotspot load in W/cm²."
+        },
+        {
+          "code": "comparison_limit = 1000; reported_prototype_limit = 1570",
+          "note": "Use a round comparison and the paper's reported maximum."
+        },
+        {
+          "code": "comparison_margin = comparison_limit - heat_load",
+          "note": "The comparison case is 200 W/cm² beyond its limit."
+        },
+        {
+          "code": "prototype_margin = reported_prototype_limit - heat_load; within_reported_limit = prototype_margin >= 0",
+          "note": "The prototype result leaves 370 W/cm² of arithmetic headroom."
+        }
+      ],
+      "expect": {
+        "heat_load": 1200,
+        "comparison_limit": 1000,
+        "reported_prototype_limit": 1570,
+        "comparison_margin": -200,
+        "prototype_margin": 370,
+        "within_reported_limit": true
+      },
+      "limit": "This original arithmetic model uses the paper's reported 1,570 W/cm² maximum and a round 1,000 W/cm² comparison. It does not reproduce geometry, flow rate, pressure, temperature, dryout physics, uncertainty, pumping power, fabrication yield, reliability, or a deployable cooling design.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "heat_load": 1200
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "heat_load": 1200,
+            "comparison_limit": 1000,
+            "reported_prototype_limit": 1570
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "heat_load": 1200,
+            "comparison_limit": 1000,
+            "reported_prototype_limit": 1570,
+            "comparison_margin": -200
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "heat_load": 1200,
+            "comparison_limit": 1000,
+            "reported_prototype_limit": 1570,
+            "comparison_margin": -200,
+            "prototype_margin": 370,
+            "within_reported_limit": true
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Xiao et al., Horizontal-up microfluidics for embedded chip cooling with a dielectric fluid",
+        "https://www.nature.com/articles/s41928-026-01724-y",
+        "Nature Electronics; published October 7, 2026"
+      ],
+      [
+        "Nature Electronics 2026 research articles",
+        "https://www.nature.com/natelectron/research-articles?year=2026",
+        "Primary journal index; checked October 28, 2026"
+      ]
+    ],
+    "visual_explanation": "The flow path answers the physical question: fresh dielectric liquid enters laterally, heat vaporizes it at the hotspot, and vapor leaves vertically. The numeric margin changes on the same diagram.",
+    "written_questions": [
+      "Which measurements would show dryout, pressure loss and pump-energy tradeoffs?",
+      "What evidence would be required before integrating this into an accelerator platform?"
+    ],
+    "source_checked_on": "2026-10-28"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "Separate queue time from run time before buying faster runners",
+    "goal": "Diagnose whether a slow GitHub Actions pipeline waits for capacity or spends time executing work.",
+    "tag": "GitHub Actions · pipeline observability",
+    "concept": "<p>A five-minute taxi ride can still take twenty minutes if the taxi arrives fifteen minutes late.</p><p>Pipeline duration has at least two parts: queue time before a job starts and run time after it starts. GitHub Actions performance metrics expose queue time, run time and failure rate. Fix the part that is actually slow.</p>",
+    "example": "<p>Job <code>integration-test</code> is created at 10:00, starts at 10:07, and completes at 10:12. Total latency is 12 minutes: 7 queued and 5 running. A larger runner may shorten the five-minute work but cannot directly remove seven minutes of unavailable capacity.</p>",
+    "use_case": {
+      "when": "Use queue/run/failure metrics when delivery latency grows, runner pools saturate, or teams argue about caching versus more capacity.",
+      "example": "A self-hosted EKS runner group makes pull requests wait while test execution itself remains stable.",
+      "decision": "Add or rebalance runner capacity for queue pressure; optimize code, cache or parallelism for run-time pressure; inspect flaky jobs when failure rate drives reruns. Use percentiles and slices, not only one average."
+    },
+    "practice": "Change queue and run minutes. Watch the dominant bottleneck and recommended first experiment.",
+    "boundary": "The local model uses one job and simple thresholds. It does not query GitHub, calculate percentiles, account for approvals, concurrency groups, billing, retries, matrix fan-out, runner startup, cancellations, or critical-path dependencies.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Queue minutes <input id=\"queueMinutes\" type=\"range\" min=\"0\" max=\"20\" value=\"7\"></label><label>Run minutes <input id=\"runMinutes\" type=\"range\" min=\"1\" max=\"20\" value=\"5\"></label><div id=\"pipelineWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintPipeline(){const q=+queueMinutes.value,r=+runMinutes.value,total=q+r,queuePct=Math.round(q/total*100),diagnosis=q>r?'capacity / scheduling':'execution work';pipelineWorld.innerHTML='<div class=step-flow><div class=\"node '+(q>r?'fail':'wait')+'\">queued '+q+'m<br>'+queuePct+'% of total</div><div class=\"node '+(r>=q?'fail':'ok')+'\">running '+r+'m</div><div class=\"node wait\">total '+total+'m</div><div class=\"node ok\">first inspect<br>'+diagnosis+'</div></div>';};queueMinutes.oninput=paintPipeline;runMinutes.oninput=paintPipeline;paintPipeline();",
+    "questions": [
+      [
+        "Queue is 9 minutes and execution is 2. Best first hypothesis?",
+        [
+          "Runner capacity, labels or scheduling pressure",
+          "The test algorithm alone",
+          "Artifact retention"
+        ],
+        0,
+        "Most latency occurs before execution."
+      ],
+      [
+        "Why separate queue and run time?",
+        [
+          "They point to different control surfaces",
+          "They always add to one minute",
+          "Queue time measures test coverage"
+        ],
+        0,
+        "Capacity and execution optimization are different decisions."
+      ],
+      [
+        "What can an average hide?",
+        [
+          "Tail latency, runner-group hotspots and flaky reruns",
+          "The workflow name",
+          "The commit SHA"
+        ],
+        0,
+        "Slice by job, runner type and percentile before acting."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "created_minute = 0; started_minute = 7; completed_minute = 12",
+          "note": "Record three lifecycle timestamps."
+        },
+        {
+          "code": "queue_time = started_minute - created_minute",
+          "note": "The job waited seven minutes for execution capacity."
+        },
+        {
+          "code": "run_time = completed_minute - started_minute",
+          "note": "The job executed for five minutes."
+        },
+        {
+          "code": "bottleneck = 'runner capacity or scheduling' if queue_time > run_time else 'job execution'",
+          "note": "Choose the first investigation from the dominant component."
+        }
+      ],
+      "expect": {
+        "created_minute": 0,
+        "started_minute": 7,
+        "completed_minute": 12,
+        "queue_time": 7,
+        "run_time": 5,
+        "bottleneck": "runner capacity or scheduling"
+      },
+      "limit": "The local model uses one job and simple thresholds. It does not query GitHub, calculate percentiles, account for approvals, concurrency groups, billing, retries, matrix fan-out, runner startup, cancellations, or critical-path dependencies.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "created_minute": 0,
+            "started_minute": 7,
+            "completed_minute": 12
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "created_minute": 0,
+            "started_minute": 7,
+            "completed_minute": 12,
+            "queue_time": 7
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "created_minute": 0,
+            "started_minute": 7,
+            "completed_minute": 12,
+            "queue_time": 7,
+            "run_time": 5
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "created_minute": 0,
+            "started_minute": 7,
+            "completed_minute": 12,
+            "queue_time": 7,
+            "run_time": 5,
+            "bottleneck": "runner capacity or scheduling"
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions metrics",
+        "https://docs.github.com/en/actions/concepts/metrics",
+        "Living official documentation; checked October 28, 2026"
+      ],
+      [
+        "GitHub REST API: workflow jobs",
+        "https://docs.github.com/en/rest/actions/workflow-jobs?apiVersion=2026-03-10",
+        "Official API documentation; checked October 28, 2026"
+      ]
+    ],
+    "visual_explanation": "The timeline partitions total feedback latency into waiting and working. Changing either segment changes the diagnosis, which prevents a faster-runner purchase from being used as a universal fix.",
+    "written_questions": [
+      "Which three jobs dominate your pull-request critical path by queue and run percentiles?",
+      "What first experiment would distinguish runner scarcity from slow job work?"
+    ],
+    "source_checked_on": "2026-10-28"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "A streaming write may wait until the receiver reads",
+    "goal": "Use gRPC flow control to bound in-flight streaming data without mistaking write acceptance for network delivery.",
+    "tag": "gRPC streaming · flow control",
+    "concept": "<p>A warehouse stops loading boxes when the receiving dock is full. More boxes can move only after the receiver clears space.</p><p>gRPC flow control protects a streaming receiver from a faster sender. A write can wait, and handing a value to the framework does not prove that bytes already crossed the network. Unary RPCs do not use this streaming mechanism.</p>",
+    "example": "<p>The receiver advertises room for two 1-unit messages. The sender offers <code>m1</code>, <code>m2</code>, and <code>m3</code>. The first two enter the window. <code>m3</code> waits until the application reads one message and capacity is acknowledged.</p>",
+    "use_case": {
+      "when": "Use streaming RPCs and their flow control when either side sends a sequence whose production rate can exceed consumption rate.",
+      "example": "A metadata service streams table-lineage updates to a slower catalog indexer.",
+      "decision": "Use unary RPC for one request/response. For streaming, keep reading while writing, bound application queues too, propagate deadlines/cancellation, and avoid manual flow control unless the language API and workload justify it."
+    },
+    "practice": "Change receiver capacity and message count. Watch which messages enter the window and which remain blocked.",
+    "boundary": "This local credit model is not an HTTP/2 or gRPC implementation. It omits byte-sized windows, compression, batching, language-specific APIs, OS buffers, deadlines, cancellation, network failure, fairness and manual-flow-control races.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Receiver credits <input id=\"receiverCredits\" type=\"range\" min=\"1\" max=\"5\" value=\"2\"></label><label>Messages offered <input id=\"messageCount\" type=\"range\" min=\"1\" max=\"8\" value=\"3\"></label><div id=\"flowWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintFlow(){const credits=+receiverCredits.value,count=+messageCount.value,sent=Math.min(credits,count),blocked=count-sent;flowWorld.innerHTML='<div class=step-flow><div class=\"node ok\">sender offers '+count+'</div><div class=\"node '+(blocked?'wait':'ok')+'\">window admits '+sent+'</div><div class=\"node '+(blocked?'fail':'ok')+'\">blocked '+blocked+'</div><div class=\"node ok\">receiver read → +1 credit</div></div>';};receiverCredits.oninput=paintFlow;messageCount.oninput=paintFlow;paintFlow();",
+    "questions": [
+      [
+        "Receiver window holds two messages; sender offers three. What happens?",
+        [
+          "The third may wait until receiver capacity returns",
+          "All three are guaranteed on the wire",
+          "The RPC becomes unary"
+        ],
+        0,
+        "Flow control applies backpressure to the faster sender."
+      ],
+      [
+        "A write call returns. What is not proven?",
+        [
+          "That the message already crossed the network and was consumed",
+          "That the framework accepted the value",
+          "That the stream exists"
+        ],
+        0,
+        "Framework buffering and transport delivery are later stages."
+      ],
+      [
+        "How can manual synchronous flow control deadlock?",
+        [
+          "Both sides write heavily and neither reads to return capacity",
+          "Both sides use unique IDs",
+          "The receiver has a deadline"
+        ],
+        0,
+        "Progress requires reads as well as writes."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "receiver_window = 2; messages = ['m1', 'm2', 'm3']",
+          "note": "The receiver has two units of capacity."
+        },
+        {
+          "code": "admitted = messages[:receiver_window]; blocked = messages[receiver_window:]",
+          "note": "Two messages enter; m3 waits."
+        },
+        {
+          "code": "receiver_reads = admitted.pop(0); receiver_window += 1",
+          "note": "Reading m1 returns one unit of capacity."
+        },
+        {
+          "code": "admitted.append(blocked.pop(0)); outcome = {'delivered_to_app': receiver_reads, 'in_flight': admitted, 'blocked': blocked}",
+          "note": "m3 can now enter the window."
+        }
+      ],
+      "expect": {
+        "receiver_window": 3,
+        "messages": [
+          "m1",
+          "m2",
+          "m3"
+        ],
+        "admitted": [
+          "m2",
+          "m3"
+        ],
+        "blocked": [],
+        "receiver_reads": "m1",
+        "outcome": {
+          "delivered_to_app": "m1",
+          "in_flight": [
+            "m2",
+            "m3"
+          ],
+          "blocked": []
+        }
+      },
+      "limit": "This local credit model is not an HTTP/2 or gRPC implementation. It omits byte-sized windows, compression, batching, language-specific APIs, OS buffers, deadlines, cancellation, network failure, fairness and manual-flow-control races.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "receiver_window": 2,
+            "messages": [
+              "m1",
+              "m2",
+              "m3"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "receiver_window": 2,
+            "messages": [
+              "m1",
+              "m2",
+              "m3"
+            ],
+            "admitted": [
+              "m1",
+              "m2"
+            ],
+            "blocked": [
+              "m3"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "receiver_window": 3,
+            "messages": [
+              "m1",
+              "m2",
+              "m3"
+            ],
+            "admitted": [
+              "m2"
+            ],
+            "blocked": [
+              "m3"
+            ],
+            "receiver_reads": "m1"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "receiver_window": 3,
+            "messages": [
+              "m1",
+              "m2",
+              "m3"
+            ],
+            "admitted": [
+              "m2",
+              "m3"
+            ],
+            "blocked": [],
+            "receiver_reads": "m1",
+            "outcome": {
+              "delivered_to_app": "m1",
+              "in_flight": [
+                "m2",
+                "m3"
+              ],
+              "blocked": []
+            }
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "gRPC flow control guide",
+        "https://grpc.io/docs/guides/flow-control/",
+        "Living official documentation; checked October 28, 2026"
+      ],
+      [
+        "gRPC core concepts: streaming RPCs",
+        "https://grpc.io/docs/what-is-grpc/core-concepts/",
+        "Living official documentation; checked October 28, 2026"
+      ]
+    ],
+    "visual_explanation": "The receiver window makes backpressure visible: offered messages split into admitted and blocked sets, and one receiver read releases one credit. It is a state transition, not a decorative request arrow.",
+    "written_questions": [
+      "Which streaming handlers can produce faster than downstream consumers read?",
+      "Where are application-level queues bounded in addition to transport flow control?"
+    ],
+    "source_checked_on": "2026-10-28"
+  }
+]
