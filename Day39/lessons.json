@@ -1,0 +1,1288 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Skip storage blocks that cannot contain the customer",
+    "goal": "Use min/max statistics and physical layout to avoid reading files or micro-partitions that cannot match a filter.",
+    "tag": "Focused certification lesson · query pruning and performance · cycle 4, position 2",
+    "concept": "<p>A warehouse labels each box with the smallest and largest customer ID inside. An order for customer <code>42</code> does not require opening a box labeled <code>1–20</code>.</p><p>Databricks records statistics for data files. Snowflake records metadata for micro-partitions. At query time, each engine can prune—skip—storage blocks whose ranges cannot match the filter. Better physical grouping creates tighter ranges and more skipping.</p>",
+    "example": "<p>Six blocks hold customer ranges <code>1–20</code>, <code>21–40</code>, <code>41–60</code>, and so on. Filtering for customer <code>42</code> scans only block 3. If every block overlaps <code>1–120</code>, all six remain candidates even though only one contains the row.</p>",
+    "use_case": {
+      "when": "Use pruning evidence when a large table is slow even though queries filter on a selective customer, date, tenant, or region column.",
+      "example": "A 20-TB order table is usually queried by tenant and event date, but each query still scans most files.",
+      "decision": "First confirm the filter is eligible and statistics exist. Improve layout only when repeated workload evidence justifies the write, maintenance, and service cost; do not cluster every column."
+    },
+    "practice": "Move the overlap control. Predict how many of six blocks remain candidates for customer 42 before reading the scan count.",
+    "boundary": "The local model uses six equal synthetic ranges and one equality predicate. It does not execute either engine, measure bytes or cost, model nulls, expressions, joins, cached results, dynamic file pruning, semi-structured data, or optimizer decisions. Vendor SQL was not run.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Range overlap <input id=\"overlap\" type=\"range\" min=\"0\" max=\"5\" value=\"0\"></label><div id=\"pruneWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintPrune(){const o=+overlap.value,target=42,blocks=[1,21,41,61,81,101].map((lo,i)=>({lo:Math.max(1,lo-o*20),hi:Math.min(120,lo+19+o*20),i:i+1})),hits=blocks.filter(b=>target>=b.lo&&target<=b.hi);pruneWorld.innerHTML='<p><strong>Question:</strong> Which blocks can still contain customer 42?</p><div class=step-flow>'+blocks.map(b=>'<div class=\"node '+(target>=b.lo&&target<=b.hi?'wait':'ok')+'\">block '+b.i+'<br>'+b.lo+'–'+b.hi+'<br>'+(target>=b.lo&&target<=b.hi?'scan':'skip')+'</div>').join('')+'</div><p><strong>'+hits.length+' of 6 blocks scanned; '+(6-hits.length)+' pruned.</strong></p>';};overlap.oninput=paintPrune;paintPrune();",
+    "questions": [
+      [
+        "Only block 3 has min/max 41–60. What happens for customer_id = 42?",
+        [
+          "Blocks 1, 2, 4, 5, and 6 can be pruned",
+          "All blocks must be opened",
+          "The row is deleted"
+        ],
+        0,
+        "The other ranges cannot contain 42."
+      ],
+      [
+        "Why can clustering improve pruning?",
+        [
+          "It groups similar filter values so block ranges overlap less",
+          "It makes every query use one CPU",
+          "It replaces permissions"
+        ],
+        0,
+        "Tighter, less-overlapping ranges eliminate more candidate blocks."
+      ],
+      [
+        "When should you avoid adding another clustering key?",
+        [
+          "The workload rarely filters on it or maintenance cost exceeds scan savings",
+          "The column has a name",
+          "The table has six files"
+        ],
+        0,
+        "Layout is a workload-and-cost decision, not a checklist item."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "target = 42; ranges = [(1,20),(21,40),(41,60),(61,80),(81,100),(101,120)]",
+          "note": "Create six storage-block ranges and one equality filter."
+        },
+        {
+          "code": "candidates = [i + 1 for i, (lo, hi) in enumerate(ranges) if lo <= target <= hi]",
+          "note": "Keep only blocks whose metadata range can contain 42."
+        },
+        {
+          "code": "pruned = len(ranges) - len(candidates)",
+          "note": "Five blocks can be skipped without opening them."
+        },
+        {
+          "code": "scan_fraction = len(candidates) / len(ranges)",
+          "note": "The toy query scans one sixth of the blocks."
+        }
+      ],
+      "expect": {
+        "target": 42,
+        "ranges": [
+          [
+            1,
+            20
+          ],
+          [
+            21,
+            40
+          ],
+          [
+            41,
+            60
+          ],
+          [
+            61,
+            80
+          ],
+          [
+            81,
+            100
+          ],
+          [
+            101,
+            120
+          ]
+        ],
+        "candidates": [
+          3
+        ],
+        "pruned": 5,
+        "scan_fraction": 0.16666666666666666
+      },
+      "limit": "The local model uses six equal synthetic ranges and one equality predicate. It does not execute either engine, measure bytes or cost, model nulls, expressions, joins, cached results, dynamic file pruning, semi-structured data, or optimizer decisions. Vendor SQL was not run.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "target": 42,
+            "ranges": [
+              [
+                1,
+                20
+              ],
+              [
+                21,
+                40
+              ],
+              [
+                41,
+                60
+              ],
+              [
+                61,
+                80
+              ],
+              [
+                81,
+                100
+              ],
+              [
+                101,
+                120
+              ]
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "target": 42,
+            "ranges": [
+              [
+                1,
+                20
+              ],
+              [
+                21,
+                40
+              ],
+              [
+                41,
+                60
+              ],
+              [
+                61,
+                80
+              ],
+              [
+                81,
+                100
+              ],
+              [
+                101,
+                120
+              ]
+            ],
+            "candidates": [
+              3
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "target": 42,
+            "ranges": [
+              [
+                1,
+                20
+              ],
+              [
+                21,
+                40
+              ],
+              [
+                41,
+                60
+              ],
+              [
+                61,
+                80
+              ],
+              [
+                81,
+                100
+              ],
+              [
+                101,
+                120
+              ]
+            ],
+            "candidates": [
+              3
+            ],
+            "pruned": 5
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "target": 42,
+            "ranges": [
+              [
+                1,
+                20
+              ],
+              [
+                21,
+                40
+              ],
+              [
+                41,
+                60
+              ],
+              [
+                61,
+                80
+              ],
+              [
+                81,
+                100
+              ],
+              [
+                101,
+                120
+              ]
+            ],
+            "candidates": [
+              3
+            ],
+            "pruned": 5,
+            "scan_fraction": 0.16666666666666666
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks data skipping",
+        "https://docs.databricks.com/aws/en/tables/data-skipping",
+        "Updated October 20, 2026"
+      ],
+      [
+        "Databricks liquid clustering",
+        "https://docs.databricks.com/aws/en/tables/clustering",
+        "Living official documentation; checked October 29, 2026"
+      ],
+      [
+        "Snowflake micro-partitions and data clustering",
+        "https://docs.snowflake.com/en/user-guide/tables-clustering-micropartitions",
+        "Living official documentation; checked October 29, 2026"
+      ],
+      [
+        "Snowflake SYSTEM$CLUSTERING_INFORMATION",
+        "https://docs.snowflake.com/en/sql-reference/functions/system_clustering_information",
+        "Living official documentation; checked October 29, 2026"
+      ]
+    ],
+    "visual_explanation": "The six ranges answer the pruning question directly. Increasing overlap widens ranges, turns skipped blocks into candidates, and makes the scan cost visible without pretending to run a vendor optimizer.",
+    "written_questions": [
+      "Which two filter columns dominate bytes scanned in your largest tables?",
+      "What query-profile evidence would justify paying for layout maintenance?"
+    ],
+    "source_checked_on": "2026-10-29",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: file statistics make data skipping possible",
+        "minutes": 9,
+        "html": "<p><strong>Each file carries a small map.</strong> Delta statistics can include minimum, maximum, null count, and record count. A filter can skip a file only when statistics prove it cannot match. Unity Catalog managed tables with predictive optimization can collect statistics beyond the first 32 schema columns based on workload.</p><pre><code><span>-- sourced SQL sketch; not executed</span><span>ALTER TABLE ops.orders SET TBLPROPERTIES (</span><span>  'delta.dataSkippingStatsColumns'='customer_id,event_date');</span><span>ANALYZE TABLE ops.orders COMPUTE DELTA STATISTICS;</span></code></pre><label>Files whose ranges include 42 <input id=\"dbCandidates\" type=\"range\" min=\"1\" max=\"6\" value=\"2\"></label><div id=\"dbPruneWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> Statistics on the wrong columns or heavily overlapping files reduce skipping. Choose liquid-clustering keys from recurring filters and measure benefit. Predictive optimization applies to Unity Catalog managed tables and has prerequisites; external tables have different defaults.</p><p><strong>Execution label.</strong> SQL is an unexecuted vendor sketch. The file map is local JavaScript.</p>",
+        "markdown": "Delta file min/max statistics let the engine skip impossible files. Collect statistics for recurring filter columns; use liquid clustering only when workload evidence supports its maintenance cost. SQL was not run.",
+        "javascript": "const dbCandidates=$('dbCandidates'),dbPruneWorld=$('dbPruneWorld');function paintDbPrune(){const n=+dbCandidates.value;dbPruneWorld.innerHTML='<div class=step-flow><div class=\"node ok\">6 Delta files</div><div class=\"node wait\">stats include customer_id</div><div class=\"node '+(n>3?'fail':'ok')+'\">'+n+' ranges include 42</div><div class=\"node ok\">skip '+(6-n)+' files</div></div>';};dbCandidates.oninput=paintDbPrune;paintDbPrune();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: micro-partition metadata drives pruning",
+        "minutes": 9,
+        "html": "<p><strong>Micro-partitioning is automatic.</strong> Snowflake stores range and distinct-value metadata for micro-partitions. Query pruning uses that metadata. Overlapping ranges increase clustering depth; a smaller average depth is better clustered for the chosen columns.</p><pre><code><span>-- sourced SQL sketch; not executed</span><span>SELECT SYSTEM$CLUSTERING_INFORMATION(</span><span>  'OPS.ORDERS', '(CUSTOMER_ID)');</span><span>ALTER TABLE OPS.ORDERS CLUSTER BY (CUSTOMER_ID);</span></code></pre><label>Average overlapping depth <input id=\"sfDepth\" type=\"range\" min=\"1\" max=\"12\" value=\"3\"></label><div id=\"sfPruneWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> A clustering key can improve a large table with selective, repeated filters, but Automatic Clustering consumes serverless resources. Inspect pruning and clustering information before paying to maintain a key.</p><p><strong>Execution label.</strong> No Snowflake SQL ran. The depth-to-candidate view is a local model.</p>",
+        "markdown": "Snowflake creates micro-partitions automatically and prunes with their metadata. High overlap depth is evidence of weak clustering for a filter. Clustering can cost serverless credits; measure first. SQL was not run.",
+        "javascript": "const sfDepth=$('sfDepth'),sfPruneWorld=$('sfPruneWorld');function paintSfPrune(){const d=+sfDepth.value,c=Math.min(12,d+1);sfPruneWorld.innerHTML='<div class=step-flow><div class=\"node ok\">12 micro-partitions</div><div class=\"node wait\">average depth '+d+'</div><div class=\"node '+(d>5?'fail':'ok')+'\">about '+c+' candidates</div><div class=\"node ok\">inspect Query Profile</div></div>';};sfDepth.oninput=paintSfPrune;paintSfPrune();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Physical unit</td><td>data file</td><td>micro-partition</td></tr><tr><td>Pruning metadata</td><td>per-file statistics</td><td>automatic micro-partition metadata</td></tr><tr><td>Layout control</td><td>liquid clustering / OPTIMIZE</td><td>clustering key / Automatic Clustering</td></tr><tr><td>Evidence</td><td>scan files/bytes and stats coverage</td><td>Query Profile and clustering information</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Unit | file | micro-partition |\n| Metadata | file statistics | automatic partition metadata |\n| Layout | liquid clustering | clustering key |\n| Evidence | scanned files/bytes | profile and clustering info |"
+    },
+    "product_questions": [
+      [
+        "A Delta query scans every file despite a selective late-schema filter. First check?",
+        [
+          "Whether skipping statistics exist for that column",
+          "Whether the table name is short",
+          "Whether the query returns JSON"
+        ],
+        0,
+        "Pruning needs relevant statistics."
+      ],
+      [
+        "Snowflake average clustering depth rises for CUSTOMER_ID. What does that suggest?",
+        [
+          "More overlapping micro-partitions for that key",
+          "Every query is cached",
+          "The role lost access"
+        ],
+        0,
+        "Higher depth means more overlap and often weaker pruning."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks data skipping",
+        "https://docs.databricks.com/aws/en/tables/data-skipping",
+        "Updated October 20, 2026"
+      ],
+      [
+        "Databricks liquid clustering",
+        "https://docs.databricks.com/aws/en/tables/clustering",
+        "Living official documentation; checked October 29, 2026"
+      ],
+      [
+        "Snowflake micro-partitions and data clustering",
+        "https://docs.snowflake.com/en/user-guide/tables-clustering-micropartitions",
+        "Living official documentation; checked October 29, 2026"
+      ],
+      [
+        "Snowflake SYSTEM$CLUSTERING_INFORMATION",
+        "https://docs.snowflake.com/en/sql-reference/functions/system_clustering_information",
+        "Living official documentation; checked October 29, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-05/databricks-certified-data-engineer-associate-exam-guide-may-2026-000.pdf",
+        "Guide dated May 4, 2026"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official overview last verified October 26, 2026; full IDs/weights unverified"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-29",
+      "session_type": "focused",
+      "cycle_position": 2,
+      "cycle_origin": "Day38",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "transformation_modeling",
+          "troubleshooting_optimization",
+          "platform"
+        ],
+        "scope": "Focused file statistics, data skipping, liquid-clustering choice, workload evidence, and maintenance boundaries. Delivered coverage is not mastery."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "blueprint_status": "Official current overview last verified 2026-10-26; full objective IDs and weights remain unverified",
+        "planning_groups": [
+          "performance",
+          "architecture_connectivity"
+        ],
+        "scope": "Focused micro-partition metadata, pruning, overlap depth, clustering information, Automatic Clustering cost, and Query Profile evidence. Complete COF-C03 coverage is not claimed."
+      },
+      "product_lab_execution": "not_run"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "One barrier timeout breaks the gate for every waiter",
+    "goal": "Handle CyclicBarrier's all-or-none breakage instead of assuming the remaining workers can continue normally.",
+    "tag": "Java concurrency · CyclicBarrier",
+    "concept": "<p>Three runners must reach a starting gate before anyone begins lap two. If runner 3 never arrives, runner 1 eventually leaves. The gate is now broken for runner 2 as well.</p><p>Java's <code>CyclicBarrier</code> coordinates a fixed number of parties. If one waiter times out or is interrupted, the barrier enters a broken state and the other waiters receive <code>BrokenBarrierException</code>. Recovery needs a coordinated new phase, often a new barrier.</p>",
+    "example": "<p>Shard workers A and B finish phase 1. Worker C is stuck. A's 100-ms wait expires. B does not proceed with a partial result; its wait fails because the same barrier is broken.</p>",
+    "use_case": {
+      "when": "Use a barrier when a fixed set of peers must finish each repeated phase before any enters the next phase.",
+      "example": "Three in-memory simulation shards exchange boundary values after every iteration.",
+      "decision": "Use CountDownLatch for a one-time completion signal, Phaser when parties change dynamically, or an external durable coordinator for distributed jobs. Never use an in-process barrier across machines."
+    },
+    "practice": "Toggle whether worker C arrives. Watch all three pass together or the timeout break the phase for everyone.",
+    "boundary": "The recorded Java example uses two waiting threads, one missing party, and a timeout. It does not prove scheduling order, fairness, distributed coordination, recovery correctness, interruption policy, or production timeout values.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"thirdArrives\" type=\"checkbox\"> Worker C arrives before timeout</label><div id=\"barrierWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintBarrier(){const ok=thirdArrives.checked;barrierWorld.innerHTML='<p><strong>Question:</strong> Can phase 2 start?</p><div class=step-flow><div class=\"node ok\">A waits</div><div class=\"node ok\">B waits</div><div class=\"node '+(ok?'ok':'fail')+'\">C '+(ok?'arrives':'missing')+'</div><div class=\"node '+(ok?'ok':'fail')+'\">'+(ok?'all pass':'A times out; barrier broken')+'</div></div><p>'+(ok?'One complete phase advances.':'B receives BrokenBarrierException; no partial advance.')+'</p>';};thirdArrives.onchange=paintBarrier;paintBarrier();",
+    "questions": [
+      [
+        "A times out while B waits at a three-party barrier. What happens to B?",
+        [
+          "B receives BrokenBarrierException",
+          "B passes alone",
+          "B becomes the third party"
+        ],
+        0,
+        "Barrier failure is all-or-none for the generation."
+      ],
+      [
+        "Why not reset immediately from any worker?",
+        [
+          "Workers need another coordination rule to agree that the old generation is over",
+          "reset adds a party",
+          "reset guarantees C finished"
+        ],
+        0,
+        "Uncoordinated reset can mix generations."
+      ],
+      [
+        "When is Phaser a better fit?",
+        [
+          "Parties register and leave dynamically",
+          "Exactly one event must count down once",
+          "Work spans several machines"
+        ],
+        0,
+        "Phaser supports changing party sets."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var barrier = new java.util.concurrent.CyclicBarrier(3); var pool = java.util.concurrent.Executors.newFixedThreadPool(2);",
+          "note": "Create a three-party gate but only two worker threads."
+        },
+        {
+          "code": "var a = pool.submit(() -> { try { barrier.await(100, java.util.concurrent.TimeUnit.MILLISECONDS); return \"passed\"; } catch (java.util.concurrent.TimeoutException e) { return \"timed-out\"; } catch (Exception e) { return \"other\"; } });",
+          "note": "A waits briefly for the missing third party."
+        },
+        {
+          "code": "var b = pool.submit(() -> { try { barrier.await(5, java.util.concurrent.TimeUnit.SECONDS); return \"passed\"; } catch (java.util.concurrent.BrokenBarrierException e) { return \"broken\"; } catch (Exception e) { return \"other\"; } });",
+          "note": "B waits longer, but shares the same generation."
+        },
+        {
+          "code": "String first = a.get(); String second = b.get(); boolean broken = barrier.isBroken(); pool.shutdownNow();",
+          "note": "A times out; B observes the broken barrier."
+        }
+      ],
+      "expect": {
+        "first": "timed-out",
+        "second": "broken",
+        "broken": "true"
+      },
+      "limit": "The recorded Java example uses two waiting threads, one missing party, and a timeout. It does not prove scheduling order, fairness, distributed coordination, recovery correctness, interruption policy, or production timeout values.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "barrier": "java.util.concurrent.CyclicBarrier@479d31f3",
+            "pool": "java.util.concurrent.ThreadPoolExecutor@40ef3420[Running, pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0]"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "barrier": "java.util.concurrent.CyclicBarrier@479d31f3",
+            "pool": "java.util.concurrent.ThreadPoolExecutor@40ef3420[Running, pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]",
+            "a": "java.util.concurrent.FutureTask@14dd9eb7[Not completed, task = Example$$Lambda$223/0x00007ff9e8154208@42e99e4a]"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "barrier": "java.util.concurrent.CyclicBarrier@479d31f3",
+            "pool": "java.util.concurrent.ThreadPoolExecutor@40ef3420[Running, pool size = 2, active threads = 2, queued tasks = 0, completed tasks = 0]",
+            "a": "java.util.concurrent.FutureTask@14dd9eb7[Not completed, task = Example$$Lambda$223/0x00007ff9e8154208@42e99e4a]",
+            "b": "java.util.concurrent.FutureTask@1a451d4d[Not completed, task = Example$$Lambda$224/0x00007ff9e8154430@62150f9e]"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "barrier": "java.util.concurrent.CyclicBarrier@479d31f3",
+            "pool": "java.util.concurrent.ThreadPoolExecutor@40ef3420[Shutting down, pool size = 2, active threads = 0, queued tasks = 0, completed tasks = 2]",
+            "a": "java.util.concurrent.FutureTask@14dd9eb7[Completed normally]",
+            "b": "java.util.concurrent.FutureTask@1a451d4d[Completed normally]",
+            "first": "timed-out",
+            "second": "broken",
+            "broken": "true"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java 17 CyclicBarrier",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/CyclicBarrier.html",
+        "Official Java API; checked October 29, 2026"
+      ],
+      [
+        "Java 17 Phaser",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/Phaser.html",
+        "Official Java API; checked October 29, 2026"
+      ]
+    ],
+    "visual_explanation": "The gate shows one generation, all three parties, and the exact timeout that changes the barrier from waiting to broken. The successful and failed paths use the same workers.",
+    "written_questions": [
+      "Which fixed-phase workflows could deadlock or continue on partial state today?",
+      "What rule creates a fresh generation after one worker fails?"
+    ],
+    "source_checked_on": "2026-10-29"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A game day needs a measurable hypothesis and a stop condition",
+    "goal": "Design resilience experiments that test one claim while automatically limiting unexpected customer impact.",
+    "tag": "Distinguished Engineer judgment · chaos engineering",
+    "concept": "<p>Do not pull a fire alarm just to see what happens. State what should remain safe, choose the fault, and define the reading that stops the exercise.</p><p>A useful game day begins from a measured steady state, forms a hypothesis, injects a bounded fault, watches customer-visible metrics, and stops when a guardrail crosses its threshold. The result is evidence for the architecture and the team's response—not theater.</p>",
+    "example": "<p>Hypothesis: removing 20% of EKS workers keeps order success at or above 99%. Stop the experiment if five-minute success falls below 98%. At 98.6%, continue and observe recovery. At 97.8%, stop and restore capacity.</p>",
+    "use_case": {
+      "when": "Run a game day after non-production resilience tests pass and before relying on a failover, autoscaling, or degraded-mode claim in production.",
+      "example": "Verify that one EKS node-group impairment preserves order processing and pages the right team within three minutes.",
+      "decision": "Use a tabletop exercise first when production fault injection is unsafe or the human procedure is the main uncertainty. Start narrow, obtain authorization, exclude critical periods, and automate stop conditions."
+    },
+    "practice": "Change observed success rate. Watch the hypothesis remain supported or the stop condition terminate the experiment.",
+    "boundary": "This arithmetic model does not inject faults, call AWS FIS, measure a workload, authorize production risk, choose thresholds, restore capacity, or prove resilience. A real experiment requires change controls, owners, observability, rollback, and persisted evidence.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Observed success rate (%) <input id=\"successRate\" type=\"range\" min=\"95\" max=\"100\" step=\"0.1\" value=\"98.6\"></label><div id=\"gameDayWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintGameDay(){const s=+successRate.value,stop=98,target=99,halt=s<stop;gameDayWorld.innerHTML='<div class=step-flow><div class=\"node ok\">steady state ≥99%</div><div class=\"node wait\">remove 20% nodes</div><div class=\"node '+(s>=target?'ok':halt?'fail':'wait')+'\">observe '+s.toFixed(1)+'%</div><div class=\"node '+(halt?'fail':'ok')+'\">'+(halt?'STOP + restore':'continue bounded test')+'</div></div><p>'+(halt?'Guardrail crossed; do not wait for the hypothesis to fail further.':s>=target?'Hypothesis currently supported.':'Below target but above stop; record degradation and continue only within the approved window.')+'</p>';};successRate.oninput=paintGameDay;paintGameDay();",
+    "questions": [
+      [
+        "Success falls to 97.8% and the stop threshold is 98%. What next?",
+        [
+          "Terminate the fault and restore the system",
+          "Continue until total failure",
+          "Lower the threshold mid-test"
+        ],
+        0,
+        "A stop condition is a guardrail, not a suggestion."
+      ],
+      [
+        "Why define steady state before the fault?",
+        [
+          "It gives a customer-visible baseline against which to test the hypothesis",
+          "It guarantees no incident",
+          "It replaces rollback"
+        ],
+        0,
+        "Without a baseline, change has no meaningful comparison."
+      ],
+      [
+        "What does a passed game day not prove?",
+        [
+          "Every untested fault and scale will behave the same way",
+          "The observed hypothesis held under recorded conditions",
+          "The response steps were exercised"
+        ],
+        0,
+        "Evidence is bounded by the scenario and conditions."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "baseline_success = 99.4; hypothesis_floor = 99.0",
+          "note": "Record the healthy baseline and promised steady-state floor."
+        },
+        {
+          "code": "stop_floor = 98.0; observed_success = 98.6",
+          "note": "Define the guardrail before injecting the fault."
+        },
+        {
+          "code": "hypothesis_holds = observed_success >= hypothesis_floor",
+          "note": "The strict hypothesis is currently false."
+        },
+        {
+          "code": "must_stop = observed_success < stop_floor; decision = 'stop-and-restore' if must_stop else 'continue-bounded-observation'",
+          "note": "The 98.6% result stays above the pre-agreed stop line."
+        }
+      ],
+      "expect": {
+        "baseline_success": 99.4,
+        "hypothesis_floor": 99.0,
+        "stop_floor": 98.0,
+        "observed_success": 98.6,
+        "hypothesis_holds": false,
+        "must_stop": false,
+        "decision": "continue-bounded-observation"
+      },
+      "limit": "This arithmetic model does not inject faults, call AWS FIS, measure a workload, authorize production risk, choose thresholds, restore capacity, or prove resilience. A real experiment requires change controls, owners, observability, rollback, and persisted evidence.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "baseline_success": 99.4,
+            "hypothesis_floor": 99.0
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "baseline_success": 99.4,
+            "hypothesis_floor": 99.0,
+            "stop_floor": 98.0,
+            "observed_success": 98.6
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "baseline_success": 99.4,
+            "hypothesis_floor": 99.0,
+            "stop_floor": 98.0,
+            "observed_success": 98.6,
+            "hypothesis_holds": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "baseline_success": 99.4,
+            "hypothesis_floor": 99.0,
+            "stop_floor": 98.0,
+            "observed_success": 98.6,
+            "hypothesis_holds": false,
+            "must_stop": false,
+            "decision": "continue-bounded-observation"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Well-Architected: test resiliency using chaos engineering",
+        "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_testing_resiliency_failure_injection_resiliency.html",
+        "Official guidance; checked October 29, 2026"
+      ],
+      [
+        "AWS Fault Injection Service: planning experiments",
+        "https://docs.aws.amazon.com/fis/latest/userguide/getting-started-planning.html",
+        "Official guidance; checked October 29, 2026"
+      ]
+    ],
+    "visual_explanation": "The experiment path ties a fault to one measurable hypothesis and a separate stop line. Moving the observation shows why 'failed hypothesis' and 'must stop now' are related but not identical decisions.",
+    "written_questions": [
+      "Which resilience claim matters most to test before the next peak period?",
+      "What customer-visible metric and stop threshold would make that experiment safe enough to authorize?"
+    ],
+    "source_checked_on": "2026-10-29"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Two agent turns need one owner of session history",
+    "goal": "Coordinate concurrent writers so each agent turn sees the history that its final ordering claims it saw.",
+    "tag": "GenAI harness engineering · session coordination",
+    "concept": "<p>A shared notebook can contain both Alice's and Bob's notes while still telling the wrong story if both wrote answers from the same earlier page.</p><p>An agent session stores conversation history. The OpenAI Agents SDK serializes reads and mutations through one OpenAI Conversations session instance. Separate instances or external writers still need application-level coordination. Serialize whole turns per session ID when order matters.</p>",
+    "example": "<p>Turns A and B both read history version 8. A answers and appends version 9. B then appends an answer generated without A, even though the final ledger places B after A. With a per-session queue, B reads version 10 and its answer matches the visible order.</p>",
+    "use_case": {
+      "when": "Coordinate by session ID when web requests, workers, retries, or channels can start overlapping turns for the same conversation.",
+      "example": "A user submits a chat message from the web while a webhook starts another run against the same support session.",
+      "decision": "Allow parallel runs for independent session IDs. For one ordered conversation, use one queue/lock and an idempotent request ID; do not rely on one storage method's internal lock to serialize an entire model-tool turn."
+    },
+    "practice": "Toggle serialized turns. Watch the version each turn reads and compare it with the final ledger order.",
+    "boundary": "The browser models ordered history versions, not the Agents SDK, a model, network retries, Redis/SQLite transactions, RunState recovery, idempotency, or distributed locks. The Python replay is synthetic and local.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"serializeTurns\" type=\"checkbox\"> Serialize whole turns for session S-42</label><div id=\"sessionWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintSession(){const serial=serializeTurns.checked;sessionWorld.innerHTML='<p><strong>Question:</strong> What history did B actually see?</p><div class=step-flow><div class=\"node ok\">history v8</div><div class=\"node wait\">A reads v8 → appends v9</div><div class=\"node '+(serial?'ok':'fail')+'\">B reads '+(serial?'v9':'v8')+'</div><div class=\"node '+(serial?'ok':'fail')+'\">ledger v10<br>'+(serial?'order matches context':'B appears later but missed A')+'</div></div>';};serializeTurns.onchange=paintSession;paintSession();",
+    "questions": [
+      [
+        "A and B both read version 8, then the ledger stores A before B. What is wrong?",
+        [
+          "B's answer appears after A but was generated without A's turn",
+          "The session ID is too short",
+          "Both answers must be deleted"
+        ],
+        0,
+        "Stored order and observed context disagree."
+      ],
+      [
+        "What does one session instance's internal serialization not necessarily cover?",
+        [
+          "The entire model-and-tool turn across separate instances or external writers",
+          "Its own add_items call",
+          "Its own close call"
+        ],
+        0,
+        "Application coordination owns cross-instance, whole-turn ordering."
+      ],
+      [
+        "When can turns safely run in parallel?",
+        [
+          "They belong to independent sessions or ordering is explicitly irrelevant",
+          "They share one ordered support chat",
+          "They mutate the same tool budget"
+        ],
+        0,
+        "Parallelism is safest across independent state boundaries."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "history_version = 8; a_read = history_version; b_read = history_version",
+          "note": "Two uncoordinated turns read the same prior history."
+        },
+        {
+          "code": "history_version += 1; a_written = history_version",
+          "note": "A appends first and creates version 9."
+        },
+        {
+          "code": "history_version += 1; b_written = history_version",
+          "note": "B appends second, but its answer was based on version 8."
+        },
+        {
+          "code": "mismatch = b_read != a_written; fix = 'queue whole turns by session_id'",
+          "note": "The final order claims B followed A; the read version proves otherwise."
+        }
+      ],
+      "expect": {
+        "history_version": 10,
+        "a_read": 8,
+        "b_read": 8,
+        "a_written": 9,
+        "b_written": 10,
+        "mismatch": true,
+        "fix": "queue whole turns by session_id"
+      },
+      "limit": "The browser models ordered history versions, not the Agents SDK, a model, network retries, Redis/SQLite transactions, RunState recovery, idempotency, or distributed locks. The Python replay is synthetic and local.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "history_version": 8,
+            "a_read": 8,
+            "b_read": 8
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "history_version": 9,
+            "a_read": 8,
+            "b_read": 8,
+            "a_written": 9
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "history_version": 10,
+            "a_read": 8,
+            "b_read": 8,
+            "a_written": 9,
+            "b_written": 10
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "history_version": 10,
+            "a_read": 8,
+            "b_read": 8,
+            "a_written": 9,
+            "b_written": 10,
+            "mismatch": true,
+            "fix": "queue whole turns by session_id"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI Agents SDK: Sessions",
+        "https://openai.github.io/openai-agents-python/sessions/",
+        "Living official documentation; checked October 29, 2026"
+      ],
+      [
+        "OpenAI Agents SDK: memory reference",
+        "https://openai.github.io/openai-agents-python/ref/memory/",
+        "Official reference: same-instance operations serialized; separate writers need coordination; checked October 29, 2026"
+      ]
+    ],
+    "visual_explanation": "The ledger separates final append order from the version each turn actually read. The serialization switch changes B's input version, which is the mechanism a generic two-agent diagram would hide.",
+    "written_questions": [
+      "Which endpoints or workers can start concurrent turns for the same session ID?",
+      "Where should request idempotency and per-session ordering live in your harness?"
+    ],
+    "source_checked_on": "2026-10-29"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Short waves merge until the whole material oscillates together",
+    "goal": "Understand the reported wave-coarsening path from local vibrations to a globally synchronized time-crystalline state.",
+    "tag": "New research · Nature · October 14, 2026",
+    "concept": "<p>Small ripples on a sheet can merge into fewer, longer ripples. In this active material, the vibration's wavelength, period, and amplitude grew together over time.</p><p>Researchers observed this wave coarsening in one- and two-dimensional mechatronic metamaterials with non-reciprocal interactions. The process ended in a system-spanning synchronized oscillation described as a time crystal. Adding friction arrested coarsening and exposed persistent edge-localized waves.</p>",
+    "example": "<p>A teaching trace starts with eight short wave domains. Successive merge steps leave four, then two, then one system-spanning mode. Turning on friction arrests the toy trace at two domains. This illustrates the paper's reported direction, not its equations or measured scaling.</p>",
+    "use_case": {
+      "when": "Use this research to reason about controllable collective vibration in active materials, acoustics, optomechanics, living matter, or soft-robotics research.",
+      "example": "A research team wants mechanical units to synchronize into a large-scale oscillation without a central clock.",
+      "decision": "Treat it as foundational laboratory research. It suggests an organizing principle, not a production-ready soft-robotics control system; device lifetime, energy, stability, scale, and control remain open engineering questions."
+    },
+    "practice": "Move the coarsening step and toggle friction. Watch domain count and wavelength change together, or arrest before one global mode forms.",
+    "boundary": "This discrete animation is an original teaching analogy. It does not solve the paper's nonlinear equations, reproduce dynamical scaling, model non-reciprocal forces, energy, noise, topology, friction, geometry, or validate a time crystal. Claims are limited to the reported experiments and simulations.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Coarsening step <input id=\"waveStep\" type=\"range\" min=\"0\" max=\"3\" value=\"2\"></label><label><input id=\"friction\" type=\"checkbox\"> Friction arrests after step 2</label><div id=\"waveWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintWave(){const requested=+waveStep.value,step=friction.checked?Math.min(2,requested):requested,domains=[8,4,2,1][step],period=[1,2,4,8][step],cells=Array.from({length:domains},(_,i)=>'<div class=\"node '+(domains===1?'ok':'wait')+'\">wave '+(i+1)+'<br>period '+period+'</div>').join('');waveWorld.innerHTML='<p><strong>Question:</strong> Do local waves become one global rhythm?</p><div class=step-flow>'+cells+'</div><p><strong>'+domains+' domain'+(domains===1?'':'s')+'</strong>; wavelength and period grew '+period+'×.'+(friction.checked&&requested>2?' Friction arrested further coarsening.':'')+'</p>';};waveStep.oninput=paintWave;friction.onchange=paintWave;paintWave();",
+    "questions": [
+      [
+        "The toy trace moves from eight domains to one. What changed?",
+        [
+          "Wavelength and period grew as waves merged into a global mode",
+          "The material reached thermal equilibrium",
+          "Every actuator turned off"
+        ],
+        0,
+        "Coarsening reduces wave count while increasing scale."
+      ],
+      [
+        "What did friction do in the reported study?",
+        [
+          "It arrested coarsening and revealed persistent edge behavior",
+          "It guaranteed zero energy use",
+          "It made the material passive"
+        ],
+        0,
+        "Breaking momentum conservation changed the late state."
+      ],
+      [
+        "Why is this not a production soft-robotics recipe?",
+        [
+          "Control, energy, lifetime, scale and stability evidence remain bounded research questions",
+          "The paper contains figures",
+          "The lattice has sensors"
+        ],
+        0,
+        "A demonstrated mechanism is not an engineered product."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "domains = [8, 4, 2, 1]",
+          "note": "Represent progressively longer-wave states with fewer domains."
+        },
+        {
+          "code": "period_scale = [1, 2, 4, 8]",
+          "note": "Let the teaching period grow with wavelength."
+        },
+        {
+          "code": "requested_step = 3; friction_arrest_step = 2",
+          "note": "Ask for the global state but introduce a bounded arrest point."
+        },
+        {
+          "code": "actual_step = min(requested_step, friction_arrest_step); outcome = {'domains': domains[actual_step], 'period_scale': period_scale[actual_step]}",
+          "note": "The frictional toy stops at two domains instead of one."
+        }
+      ],
+      "expect": {
+        "domains": [
+          8,
+          4,
+          2,
+          1
+        ],
+        "period_scale": [
+          1,
+          2,
+          4,
+          8
+        ],
+        "requested_step": 3,
+        "friction_arrest_step": 2,
+        "actual_step": 2,
+        "outcome": {
+          "domains": 2,
+          "period_scale": 4
+        }
+      },
+      "limit": "This discrete animation is an original teaching analogy. It does not solve the paper's nonlinear equations, reproduce dynamical scaling, model non-reciprocal forces, energy, noise, topology, friction, geometry, or validate a time crystal. Claims are limited to the reported experiments and simulations.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "domains": [
+              8,
+              4,
+              2,
+              1
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "domains": [
+              8,
+              4,
+              2,
+              1
+            ],
+            "period_scale": [
+              1,
+              2,
+              4,
+              8
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "domains": [
+              8,
+              4,
+              2,
+              1
+            ],
+            "period_scale": [
+              1,
+              2,
+              4,
+              8
+            ],
+            "requested_step": 3,
+            "friction_arrest_step": 2
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "domains": [
+              8,
+              4,
+              2,
+              1
+            ],
+            "period_scale": [
+              1,
+              2,
+              4,
+              8
+            ],
+            "requested_step": 3,
+            "friction_arrest_step": 2,
+            "actual_step": 2,
+            "outcome": {
+              "domains": 2,
+              "period_scale": 4
+            }
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Veenstra et al., Wave coarsening drives time crystallization in mechatronic metamaterials",
+        "https://www.nature.com/articles/s41586-026-11163-6",
+        "Nature; published October 14, 2026"
+      ],
+      [
+        "Primary data and code replication package",
+        "https://doi.org/10.5281/zenodo.17398589",
+        "Zenodo repository linked by the paper; checked October 29, 2026"
+      ]
+    ],
+    "visual_explanation": "The number of visible wave domains is the quantity that changes. The slider shows short waves merging into longer ones; friction caps the state before global synchronization instead of decorating the same template.",
+    "written_questions": [
+      "Which measured quantities would distinguish genuine scaling from a pleasing animation?",
+      "What stability and energy evidence would a soft-robotics prototype require?"
+    ],
+    "source_checked_on": "2026-10-29"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A low-trust workflow may read the cache; do not let it rewrite the cache",
+    "goal": "Use GitHub Actions cache-mode so untrusted events cannot poison cache contents later restored by privileged jobs.",
+    "tag": "GitHub Actions · cache security",
+    "concept": "<p>A visitor may borrow a shared toolbox. That does not mean the visitor should replace the tools before the owner uses it.</p><p>GitHub caches are restored as-is and are not signed. Low-trust triggers that resolve to the default branch receive read-only cache access by default. Explicit <code>cache-mode: write</code> overrides that protection and can let untrusted code plant files that a later privileged workflow executes.</p>",
+    "example": "<p>A <code>pull_request_target</code> job restores the default branch's dependency cache. With effective mode <code>read</code>, a save is skipped and the job continues. If the workflow forces <code>write</code> after checking out fork code, the fork can replace cached build tooling for the next trusted deployment.</p>",
+    "use_case": {
+      "when": "Set cache access explicitly when workflows run from fork-controlled or otherwise low-trust events, especially reusable workflows and jobs that later handle secrets.",
+      "example": "A fork PR runs tests using a default-branch Maven cache while only a push-to-main workflow refreshes that cache.",
+      "decision": "Prefer read-only restore for low-trust jobs and trusted push jobs for writes. Never put secrets in caches. If correctness depends on the cache, the build is already broken—cache miss must remain safe."
+    },
+    "practice": "Switch event trust and explicit mode. Watch restore/save permissions and the cache-poisoning path.",
+    "boundary": "The model simplifies GitHub's event classification and cache scopes. It does not run Actions, inspect a repository, prove an action is safe, model merge-ref scope, reusable-workflow ceilings, cache eviction, signed artifacts, secrets, or every trigger.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Trigger <select id=\"cacheTrigger\"><option value=\"low\">low trust</option><option value=\"trusted\">trusted push</option></select></label><label>Declared mode <select id=\"cacheMode\"><option value=\"default\">default</option><option value=\"read\">read</option><option value=\"write\">write</option><option value=\"none\">none</option></select></label><div id=\"cacheWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintCache(){const low=cacheTrigger.value==='low',declared=cacheMode.value,effective=declared==='default'?(low?'read':'write'):declared,read=effective==='read'||effective==='write',write=effective==='write',risk=low&&write;cacheWorld.innerHTML='<div class=step-flow><div class=\"node '+(low?'wait':'ok')+'\">'+(low?'untrusted event':'trusted push')+'</div><div class=\"node '+(risk?'fail':'ok')+'\">mode '+effective+'</div><div class=\"node '+(read?'ok':'wait')+'\">restore '+(read?'allowed':'skipped')+'</div><div class=\"node '+(risk?'fail':write?'ok':'wait')+'\">save '+(write?'allowed':'skipped')+'</div></div><p>'+(risk?'Risk: untrusted code can poison a later cache consumer.':'No low-trust write path in this model.')+'</p>';};cacheTrigger.onchange=paintCache;cacheMode.onchange=paintCache;paintCache();",
+    "questions": [
+      [
+        "A low-trust run uses default cache access. Can it save to default-branch scope?",
+        [
+          "No; effective access is read-only",
+          "Yes; every cache hit is writable",
+          "Only if the key has a hash"
+        ],
+        0,
+        "The secure default permits restore, not save."
+      ],
+      [
+        "Why is explicit write mode dangerous on low-trust triggers?",
+        [
+          "It can reintroduce cache poisoning for later privileged runs",
+          "It disables all caches",
+          "It signs attacker files"
+        ],
+        0,
+        "A later workflow may execute restored attacker-controlled files."
+      ],
+      [
+        "What must happen on a cache miss?",
+        [
+          "The build reconstructs dependencies safely and correctly",
+          "Deployment skips tests",
+          "The job obtains secrets from the cache"
+        ],
+        0,
+        "A cache is an optimization, never the correctness source."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "trigger = 'low-trust'; declared_mode = None",
+          "note": "Start with an untrusted event and no override."
+        },
+        {
+          "code": "effective_mode = 'read' if trigger == 'low-trust' and declared_mode is None else declared_mode",
+          "note": "GitHub's secure default is read-only for the simplified case."
+        },
+        {
+          "code": "restore_allowed = effective_mode in {'read', 'write'}; save_allowed = effective_mode in {'write', 'write-only'}",
+          "note": "Read mode restores but cannot save."
+        },
+        {
+          "code": "poisoning_path = trigger == 'low-trust' and save_allowed",
+          "note": "No untrusted write path exists unless configuration expands access."
+        }
+      ],
+      "expect": {
+        "trigger": "low-trust",
+        "declared_mode": null,
+        "effective_mode": "read",
+        "restore_allowed": true,
+        "save_allowed": false,
+        "poisoning_path": false
+      },
+      "limit": "The model simplifies GitHub's event classification and cache scopes. It does not run Actions, inspect a repository, prove an action is safe, model merge-ref scope, reusable-workflow ceilings, cache eviction, signed artifacts, secrets, or every trigger.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "trigger": "low-trust",
+            "declared_mode": null
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "trigger": "low-trust",
+            "declared_mode": null,
+            "effective_mode": "read"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "trigger": "low-trust",
+            "declared_mode": null,
+            "effective_mode": "read",
+            "restore_allowed": true,
+            "save_allowed": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "trigger": "low-trust",
+            "declared_mode": null,
+            "effective_mode": "read",
+            "restore_allowed": true,
+            "save_allowed": false,
+            "poisoning_path": false
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions dependency caching reference",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching",
+        "Official documentation; checked October 29, 2026"
+      ],
+      [
+        "GitHub Actions workflow syntax: cache-mode",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#cache-mode",
+        "Official documentation; checked October 29, 2026"
+      ]
+    ],
+    "visual_explanation": "The trust-to-capability path shows exactly when restore and save are granted. Selecting write on a low-trust event turns the save node red and exposes the poisoning path.",
+    "written_questions": [
+      "Which workflows can write caches that deployment jobs later restore?",
+      "Can every cached path be safely treated as attacker-controlled input?"
+    ],
+    "source_checked_on": "2026-10-29"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Binary Protobuf preserves unknown fields; a JSON hop can erase them",
+    "goal": "Evolve messages without silently deleting new fields when an older intermediary forwards them.",
+    "tag": "APIs & Microservices · Protobuf evolution",
+    "concept": "<p>An old postal sorter may not understand a new sticker, but it can leave the sticker on the package. If it rewrites the address onto a fresh plain box, the unknown sticker disappears.</p><p>An older proto3 parser keeps well-formed unknown binary fields and includes them when serializing again. Converting the message to ProtoJSON, or copying fields one by one into a new message, can lose unknown fields.</p>",
+    "example": "<p>New producer sends <code>order_id=42</code> as field 1 and <code>priority=EXPRESS</code> as new field 7. An old binary proxy understands field 1 but preserves field 7 during binary parse and reserialize. A binary → JSON → binary proxy drops field 7 because ProtoJSON generally does not propagate unknown fields.</p>",
+    "use_case": {
+      "when": "Protect unknown fields when old services, queues, gateways, or storage layers must forward newer Protobuf messages during a rolling upgrade.",
+      "example": "A v1 Kafka enrichment service reads a v2 order event and republishes it before every consumer has upgraded.",
+      "decision": "Keep opaque binary forwarding or use message CopyFrom/MergeFrom when preservation matters. Use JSON at human-facing boundaries only after accepting its different evolution behavior, and reserve deleted field numbers and names."
+    },
+    "practice": "Choose binary forwarding or a JSON hop. Watch field 7 survive or disappear while field 1 remains.",
+    "boundary": "The local dictionary model is not a Protobuf encoder. It omits wire types, generated APIs, editions, enum behavior, maps, oneofs, extensions, deterministic serialization, malformed data, language differences, and schema registries.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Old intermediary forwards as <select id=\"protoPath\"><option value=\"binary\">binary Protobuf</option><option value=\"json\">ProtoJSON hop</option></select></label><div id=\"protoWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintProto(){const binary=protoPath.value==='binary';protoWorld.innerHTML='<p><strong>Question:</strong> Does unknown field 7 reach the new consumer?</p><div class=step-flow><div class=\"node ok\">new producer<br>1=42, 7=EXPRESS</div><div class=\"node wait\">old parser<br>knows 1; unknown 7</div><div class=\"node '+(binary?'ok':'fail')+'\">'+(binary?'binary reserialize preserves 7':'JSON emits known field 1 only')+'</div><div class=\"node '+(binary?'ok':'fail')+'\">new consumer<br>'+(binary?'priority=EXPRESS':'priority missing')+'</div></div>';};protoPath.onchange=paintProto;paintProto();",
+    "questions": [
+      [
+        "An old proto3 binary parser receives unknown field 7 and reserializes binary. Expected result?",
+        [
+          "Field 7 is preserved",
+          "Field 7 becomes field 1",
+          "Parsing must always fail"
+        ],
+        0,
+        "Unknown binary fields survive parse/reserialize."
+      ],
+      [
+        "Why can a JSON hop lose field 7?",
+        [
+          "ProtoJSON generally does not propagate unknown fields",
+          "JSON reserves every number",
+          "Binary fields are encrypted"
+        ],
+        0,
+        "The JSON representation is not an opaque binary envelope."
+      ],
+      [
+        "What should happen after deleting field 7 from the schema?",
+        [
+          "Reserve its number, and usually its name for JSON/TextFormat safety",
+          "Reuse 7 for an unrelated type immediately",
+          "Renumber every field"
+        ],
+        0,
+        "Reservation prevents dangerous future reuse."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "wire_message = {1: 42, 7: 'EXPRESS'}; old_known_numbers = {1}",
+          "note": "Represent one known and one future field."
+        },
+        {
+          "code": "old_known = {k: v for k, v in wire_message.items() if k in old_known_numbers}",
+          "note": "The old service can interpret only field 1."
+        },
+        {
+          "code": "binary_forward = dict(wire_message)",
+          "note": "Opaque binary forwarding keeps the unknown field."
+        },
+        {
+          "code": "json_round_trip = dict(old_known); preserved_by_binary = 7 in binary_forward; preserved_by_json = 7 in json_round_trip",
+          "note": "The JSON-style known-field copy loses field 7."
+        }
+      ],
+      "expect": {
+        "wire_message": {
+          "1": 42,
+          "7": "EXPRESS"
+        },
+        "old_known": {
+          "1": 42
+        },
+        "binary_forward": {
+          "1": 42,
+          "7": "EXPRESS"
+        },
+        "json_round_trip": {
+          "1": 42
+        },
+        "preserved_by_binary": true,
+        "preserved_by_json": false
+      },
+      "limit": "The local dictionary model is not a Protobuf encoder. It omits wire types, generated APIs, editions, enum behavior, maps, oneofs, extensions, deterministic serialization, malformed data, language differences, and schema registries.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "wire_message": {
+              "1": 42,
+              "7": "EXPRESS"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "wire_message": {
+              "1": 42,
+              "7": "EXPRESS"
+            },
+            "old_known": {
+              "1": 42
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "wire_message": {
+              "1": 42,
+              "7": "EXPRESS"
+            },
+            "old_known": {
+              "1": 42
+            },
+            "binary_forward": {
+              "1": 42,
+              "7": "EXPRESS"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "wire_message": {
+              "1": 42,
+              "7": "EXPRESS"
+            },
+            "old_known": {
+              "1": 42
+            },
+            "binary_forward": {
+              "1": 42,
+              "7": "EXPRESS"
+            },
+            "json_round_trip": {
+              "1": 42
+            },
+            "preserved_by_binary": true,
+            "preserved_by_json": false
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "Protocol Buffers proto3 language guide: unknown fields",
+        "https://protobuf.dev/programming-guides/proto3/#unknowns",
+        "Official documentation; checked October 29, 2026"
+      ],
+      [
+        "Protocol Buffers ProtoJSON format",
+        "https://protobuf.dev/programming-guides/json/",
+        "Official documentation; checked October 29, 2026"
+      ]
+    ],
+    "visual_explanation": "The same field-numbered package travels through two paths. Binary forwarding keeps the unknown sticker; the JSON path visibly emits only fields the old schema knows.",
+    "written_questions": [
+      "Which services deserialize and reconstruct Protobuf messages field by field today?",
+      "Where is a JSON conversion acceptable, and where must unknown binary fields survive?"
+    ],
+    "source_checked_on": "2026-10-29"
+  }
+]
