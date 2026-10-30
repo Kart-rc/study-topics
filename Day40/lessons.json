@@ -1,0 +1,1284 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Replace a live table without an empty-name gap",
+    "goal": "Publish a complete replacement atomically while preserving the product-specific identity, history, and access behavior you actually need.",
+    "tag": "Focused certification lesson · table deployment and recovery · cycle 4, position 3",
+    "concept": "<p>A grocery shelf should switch from yesterday's price list to today's complete list in one move. Taking the old list down and building the new one line by line leaves shoppers with an empty or half-built list.</p><p>An <strong>atomic replacement</strong> makes one catalog decision: readers see the old complete table or the new complete table, never the gap between <code>DROP</code> and <code>CREATE</code>. Databricks replaces the contents while keeping the table identity and Delta history. Snowflake can swap the names of two prepared table objects in one transaction. Those are related outcomes, not the same mechanism.</p>",
+    "example": "<p><code>prod.orders</code> has 3 validated rows. A rebuild creates 4 corrected rows. With drop-then-create, a reader between statements sees “table missing.” With Databricks <code>CREATE OR REPLACE TABLE</code>, the named table moves from version 7 to version 8. With Snowflake <code>ALTER TABLE prod.orders SWAP WITH prod.orders_next</code>, the two table names exchange objects atomically.</p>",
+    "use_case": {
+      "when": "Use atomic replacement when a full snapshot or corrected rebuild must become visible to concurrent readers as one publication event.",
+      "example": "A nightly customer dimension rebuild must publish 40 million validated rows without exposing an empty table to dashboards.",
+      "decision": "Use incremental MERGE when only a small known delta changes. Use replacement when the entire result is authoritative, validation happens before publication, rollback is planned, and product-specific grants, policies, streams, dependencies, and history have been checked."
+    },
+    "practice": "Choose drop/create or atomic publication. Step through a reader arriving before, during, and after the switch; then inspect the distinct Databricks and Snowflake identity paths.",
+    "boundary": "The local model has two snapshots and three reader moments. It does not execute either product, model concurrent writers, streaming checkpoints, streams, dynamic tables, foreign dependencies, grants, policies, retention, storage costs, or every DDL restriction. Vendor SQL was not run.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Publish method <select id=\"publishMode\"><option value=\"atomic\">atomic replacement</option><option value=\"gap\">drop then create</option></select></label><label>Reader moment <input id=\"readerMoment\" type=\"range\" min=\"0\" max=\"2\" value=\"1\"></label><div id=\"publishWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintPublish(){const m=+readerMoment.value,atomic=publishMode.value==='atomic',labels=['before','during','after'],rows=atomic?(m<2?3:4):(m===0?3:m===1?0:4),state=rows===0?'name missing':rows+' complete rows';publishWorld.innerHTML='<p><strong>Question:</strong> What does the reader see '+labels[m]+' publication?</p><div class=step-flow><div class=\"node ok\">old snapshot<br>3 rows</div><div class=\"node '+(rows===0?'fail':'wait')+'\">'+(atomic?'one catalog switch':'DROP then CREATE')+'<br>'+state+'</div><div class=\"node ok\">new snapshot<br>4 rows</div></div><p><strong>'+state+'.</strong> '+(atomic?'The switch has no empty-name interval.':'The two statements expose a gap.')+'</p>';};publishMode.onchange=paintPublish;readerMoment.oninput=paintPublish;paintPublish();",
+    "questions": [
+      [
+        "A reader starts while DROP finished but CREATE has not. What can it observe?",
+        [
+          "The table name is missing",
+          "A guaranteed old snapshot",
+          "A guaranteed new snapshot"
+        ],
+        0,
+        "Two DDL statements expose an intermediate catalog state."
+      ],
+      [
+        "Why validate a replacement before the atomic switch?",
+        [
+          "Atomic visibility does not prove the new rows are correct",
+          "Validation makes DDL free",
+          "It changes every grant automatically"
+        ],
+        0,
+        "Atomicity protects the publication boundary, not data quality."
+      ],
+      [
+        "When is MERGE usually simpler than full replacement?",
+        [
+          "A small identified set of rows changes",
+          "Every row is rebuilt authoritatively",
+          "Readers require a new snapshot"
+        ],
+        0,
+        "A targeted delta does not require rebuilding and publishing the whole table."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "old_rows = ['o1', 'o2', 'o3']; new_rows = ['o1', 'o2-fixed', 'o3', 'o4']",
+          "note": "Prepare complete old and new snapshots."
+        },
+        {
+          "code": "drop_create_views = {'before': len(old_rows), 'during': 0, 'after': len(new_rows)}",
+          "note": "Two statements create an observable missing-name interval."
+        },
+        {
+          "code": "atomic_views = {'before': len(old_rows), 'during': len(old_rows), 'after': len(new_rows)}",
+          "note": "One publication decision keeps a complete snapshot visible."
+        },
+        {
+          "code": "gap_seen = drop_create_views['during'] == 0; gap_avoided = atomic_views['during'] > 0",
+          "note": "The same reader moment distinguishes the mechanisms."
+        }
+      ],
+      "expect": {
+        "old_rows": [
+          "o1",
+          "o2",
+          "o3"
+        ],
+        "new_rows": [
+          "o1",
+          "o2-fixed",
+          "o3",
+          "o4"
+        ],
+        "drop_create_views": {
+          "before": 3,
+          "during": 0,
+          "after": 4
+        },
+        "atomic_views": {
+          "before": 3,
+          "during": 3,
+          "after": 4
+        },
+        "gap_seen": true,
+        "gap_avoided": true
+      },
+      "limit": "The local model has two snapshots and three reader moments. It does not execute either product, model concurrent writers, streaming checkpoints, streams, dynamic tables, foreign dependencies, grants, policies, retention, storage costs, or every DDL restriction. Vendor SQL was not run.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "old_rows": [
+              "o1",
+              "o2",
+              "o3"
+            ],
+            "new_rows": [
+              "o1",
+              "o2-fixed",
+              "o3",
+              "o4"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "old_rows": [
+              "o1",
+              "o2",
+              "o3"
+            ],
+            "new_rows": [
+              "o1",
+              "o2-fixed",
+              "o3",
+              "o4"
+            ],
+            "drop_create_views": {
+              "before": 3,
+              "during": 0,
+              "after": 4
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "old_rows": [
+              "o1",
+              "o2",
+              "o3"
+            ],
+            "new_rows": [
+              "o1",
+              "o2-fixed",
+              "o3",
+              "o4"
+            ],
+            "drop_create_views": {
+              "before": 3,
+              "during": 0,
+              "after": 4
+            },
+            "atomic_views": {
+              "before": 3,
+              "during": 3,
+              "after": 4
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "old_rows": [
+              "o1",
+              "o2",
+              "o3"
+            ],
+            "new_rows": [
+              "o1",
+              "o2-fixed",
+              "o3",
+              "o4"
+            ],
+            "drop_create_views": {
+              "before": 3,
+              "during": 0,
+              "after": 4
+            },
+            "atomic_views": {
+              "before": 3,
+              "during": 3,
+              "after": 4
+            },
+            "gap_seen": true,
+            "gap_avoided": true
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks: Drop or replace a table",
+        "https://docs.databricks.com/aws/en/tables/operations/drop-table",
+        "Official documentation; checked October 30, 2026"
+      ],
+      [
+        "Databricks SQL: CREATE TABLE using a data source",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-create-table-using",
+        "Official documentation; checked October 30, 2026"
+      ],
+      [
+        "Snowflake ALTER TABLE: SWAP WITH",
+        "https://docs.snowflake.com/en/sql-reference/sql/alter-table",
+        "Official documentation; checked October 30, 2026"
+      ],
+      [
+        "Snowflake CREATE TABLE",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-table",
+        "Official documentation; checked October 30, 2026"
+      ]
+    ],
+    "visual_explanation": "The shared timeline answers whether a reader can observe an empty catalog name. The product visuals then separate Databricks version replacement from Snowflake name swapping instead of suggesting false equivalence.",
+    "written_questions": [
+      "Which full-rebuild tables are currently published with multiple DDL statements?",
+      "For one candidate, list the grants, policies, downstream objects, and rollback evidence that must survive publication."
+    ],
+    "source_checked_on": "2026-10-30",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: replace contents, keep the table identity",
+        "minutes": 9,
+        "html": "<p><strong>The same shelf gets a new complete edition.</strong> For Delta tables, <code>CREATE OR REPLACE TABLE</code> is one transaction. Databricks documents that the table identity and history remain, concurrent readers can continue, granted privileges are preserved, and matching column masks remain. A drop followed by create does not have those semantics.</p><pre><code><span>-- sourced SQL sketch; not executed</span><span>CREATE OR REPLACE TABLE prod.orders AS</span><span>SELECT * FROM stage.orders_validated;</span><span>-- rollback evidence: DESCRIBE HISTORY prod.orders;</span></code></pre><label>Replacement outcome <select id=\"dbReplace\"><option value=\"replace\">REPLACE</option><option value=\"drop\">DROP + CREATE</option></select></label><div id=\"dbReplaceWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> Drop/recreate breaks the active name-to-history link and can surprise concurrent work. Prefer replace for a supported Delta replacement, but verify schema, masks, row filters, dependencies, protocol/runtime constraints, and concurrent-write behavior.</p><p><strong>Execution label.</strong> SQL is an unexecuted vendor sketch. The identity/version diagram is local JavaScript.</p>",
+        "markdown": "Databricks CREATE OR REPLACE publishes new Delta contents as one transaction while retaining table identity and history. It avoids a missing-name gap; verify schema, policies, dependencies, runtime support, and writer conflicts. SQL was not run.",
+        "javascript": "const dbReplace=$('dbReplace'),dbReplaceWorld=$('dbReplaceWorld');function paintDbReplace(){const ok=dbReplace.value==='replace';dbReplaceWorld.innerHTML='<div class=step-flow><div class=\"node ok\">table ID T42<br>version 7</div><div class=\"node '+(ok?'ok':'fail')+'\">'+(ok?'atomic REPLACE':'DROP breaks link')+'</div><div class=\"node '+(ok?'ok':'wait')+'\">'+(ok?'ID T42, version 8<br>history retained':'new ID T99<br>old history separate')+'</div></div>';};dbReplace.onchange=paintDbReplace;paintDbReplace();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: prepare blue and green objects, then swap their names",
+        "minutes": 9,
+        "html": "<p><strong>Two carts exchange shelf labels.</strong> Build and validate <code>ORDERS_NEXT</code>. <code>ALTER TABLE ORDERS SWAP WITH ORDERS_NEXT</code> renames the two table objects in one transaction. Afterward, the production name points to the prepared object and the previous production object remains under the other name for inspection or rollback.</p><pre><code><span>-- sourced SQL sketch; not executed</span><span>CREATE TABLE PROD.ORDERS_NEXT CLONE PROD.ORDERS;</span><span>-- rebuild and validate ORDERS_NEXT</span><span>ALTER TABLE PROD.ORDERS SWAP WITH PROD.ORDERS_NEXT;</span></code></pre><label>Swap state <input id=\"sfSwap\" type=\"range\" min=\"0\" max=\"1\" value=\"0\"></label><div id=\"sfSwapWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> A swap needs ownership on both tables plus the documented schema privilege, and temporary/permanent combinations have restrictions. Names move between objects; inspect grants, policies, streams, dependencies, retention, and rollback behavior rather than assuming Databricks-style identity preservation.</p><p><strong>Execution label.</strong> No Snowflake SQL ran. The blue/green name map is local JavaScript.</p>",
+        "markdown": "Snowflake SWAP WITH exchanges two table names in one transaction. Prepare and validate a green object, then atomically put it behind the production name while keeping the former live object under the other name. Verify privileges and dependencies. SQL was not run.",
+        "javascript": "const sfSwap=$('sfSwap'),sfSwapWorld=$('sfSwapWorld');function paintSfSwap(){const done=+sfSwap.value===1;sfSwapWorld.innerHTML='<div class=step-flow><div class=\"node '+(done?'wait':'ok')+'\">object BLUE<br>name '+(done?'ORDERS_NEXT':'ORDERS')+'<br>3 rows</div><div class=\"node wait\">one name swap</div><div class=\"node '+(done?'ok':'wait')+'\">object GREEN<br>name '+(done?'ORDERS':'ORDERS_NEXT')+'<br>4 rows</div></div>';};sfSwap.oninput=paintSfSwap;paintSfSwap();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Publication primitive</td><td>CREATE OR REPLACE TABLE</td><td>ALTER TABLE … SWAP WITH</td></tr><tr><td>What stays stable?</td><td>table identity; Delta history retained</td><td>two objects remain; their names exchange</td></tr><tr><td>Rollback evidence</td><td>table history / RESTORE where supported</td><td>former live object under the other name; Time Travel rules also matter</td></tr><tr><td>Key review</td><td>policies, dependencies, concurrent writers</td><td>ownership, grants, streams, dependencies, object types</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Primitive | CREATE OR REPLACE | SWAP WITH |\n| Stable concept | table identity/history | objects remain; names exchange |\n| Review | policies and writers | ownership, grants and dependencies |"
+    },
+    "product_questions": [
+      [
+        "A Databricks pipeline must fully republish a Delta table used by concurrent readers. Preferred primitive?",
+        [
+          "CREATE OR REPLACE TABLE",
+          "DROP, wait, then CREATE",
+          "Rename every column"
+        ],
+        0,
+        "Replace is one transaction and keeps the table identity/history semantics documented for this use."
+      ],
+      [
+        "After Snowflake ORDERS SWAP WITH ORDERS_NEXT, where is the old live object?",
+        [
+          "Under the ORDERS_NEXT name",
+          "Permanently deleted",
+          "Merged into the new object"
+        ],
+        0,
+        "The two objects exchange names in one transaction."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks: Drop or replace a table",
+        "https://docs.databricks.com/aws/en/tables/operations/drop-table",
+        "Official documentation; checked October 30, 2026"
+      ],
+      [
+        "Databricks SQL: CREATE TABLE using a data source",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-create-table-using",
+        "Official documentation; checked October 30, 2026"
+      ],
+      [
+        "Snowflake ALTER TABLE: SWAP WITH",
+        "https://docs.snowflake.com/en/sql-reference/sql/alter-table",
+        "Official documentation; checked October 30, 2026"
+      ],
+      [
+        "Snowflake CREATE TABLE",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-table",
+        "Official documentation; checked October 30, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-05/databricks-certified-data-engineer-associate-exam-guide-may-2026-000.pdf",
+        "Guide dated May 4, 2026"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official overview last verified October 26, 2026; full IDs/weights unverified"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-30",
+      "session_type": "focused",
+      "cycle_position": 3,
+      "cycle_origin": "Day38",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "transformation_modeling",
+          "ci_cd",
+          "governance_security",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Focused atomic Delta replacement, identity/history preservation, concurrent readers, policies, validation, and rollback boundaries. Delivered coverage is not mastery."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "blueprint_status": "Official current overview last verified 2026-10-26; full objective IDs and weights remain unverified",
+        "planning_groups": [
+          "loading_unloading_transformation",
+          "collaboration_protection",
+          "account_warehouse_access"
+        ],
+        "scope": "Focused blue/green table publication with SWAP WITH, privileges, name/object identity, validation, and rollback boundaries. Complete COF-C03 coverage is not claimed."
+      },
+      "product_lab_execution": "not_run"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Cancelled scheduled tasks can stay in the queue for hours",
+    "goal": "Remove cancelled delayed tasks promptly when retaining them would turn churn into a memory problem.",
+    "tag": "Java concurrency · ScheduledThreadPoolExecutor",
+    "concept": "<p>Canceling a hotel reservation should free the room card from the front desk's future-arrivals tray. A crossed-out card left there for six months still occupies space.</p><p>By default, a cancelled task in <code>ScheduledThreadPoolExecutor</code> can remain in its work queue until its delay elapses. The task will not run, but its queue node—and objects reachable from it—can remain retained. <code>setRemoveOnCancelPolicy(true)</code> removes a task from the queue when cancellation succeeds.</p>",
+    "example": "<p>A service schedules three one-hour retry timers, then cancels all three when the request completes. Default policy: queue size remains 3. Remove-on-cancel policy: queue size becomes 0 immediately.</p>",
+    "use_case": {
+      "when": "Enable prompt removal when a long-lived scheduler creates and cancels many long-delay tasks, and retention is more costly than post-cancel inspection.",
+      "example": "Each API request schedules a 24-hour expiry task but usually cancels it after a two-second successful response.",
+      "decision": "Measure cancellation churn and retained heap first. If delayed tasks are few or inspection matters, the default may be acceptable. Also bound captured task state; policy does not make an unbounded live schedule safe."
+    },
+    "practice": "Change the number of one-hour timers and cancel them. Compare the queue under the default and remove-on-cancel policies.",
+    "boundary": "The Java replay uses three tasks with one-hour delays and inspects queue size immediately. It does not measure retained bytes, GC roots, race timing, executor shutdown policies, periodic tasks, production throughput, or every JDK implementation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Cancelled long-delay tasks <input id=\"cancelCount\" type=\"range\" min=\"1\" max=\"12\" value=\"6\"></label><label><input id=\"removePolicy\" type=\"checkbox\"> remove on cancel</label><div id=\"cancelWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintCancel(){const n=+cancelCount.value,remove=removePolicy.checked,left=remove?0:n;cancelWorld.innerHTML='<p><strong>Question:</strong> How many cancelled nodes remain queued?</p><div class=step-flow><div class=\"node ok\">schedule '+n+' timers</div><div class=\"node wait\">cancel all</div><div class=\"node '+(left?'fail':'ok')+'\">queue retains '+left+'</div><div class=\"node '+(left?'wait':'ok')+'\">'+(left?'wait until delays elapse':'references released promptly')+'</div></div>';};cancelCount.oninput=paintCancel;removePolicy.onchange=paintCancel;paintCancel();",
+    "questions": [
+      [
+        "A one-day task is cancelled under the default policy. Can its queue node remain?",
+        [
+          "Yes, until the delay elapses",
+          "No, cancellation always removes it immediately",
+          "Only if it already ran"
+        ],
+        0,
+        "Default cancellation prevents execution but does not guarantee prompt queue removal."
+      ],
+      [
+        "Why enable remove-on-cancel?",
+        [
+          "To reduce retention from cancelled delayed tasks",
+          "To make tasks execute twice",
+          "To increase maximumPoolSize"
+        ],
+        0,
+        "Prompt removal releases queue nodes and reachable state sooner."
+      ],
+      [
+        "What limit remains after enabling it?",
+        [
+          "Live scheduled tasks can still grow without bound",
+          "All periodic tasks overlap",
+          "Cancellation becomes transactional"
+        ],
+        0,
+        "The policy only changes cancelled-task removal."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var kept = new java.util.concurrent.ScheduledThreadPoolExecutor(1); var a = new java.util.ArrayList<java.util.concurrent.ScheduledFuture<?>>();",
+          "note": "Create the default scheduler and a place to keep handles."
+        },
+        {
+          "code": "for (int i=0;i<3;i++) a.add(kept.schedule(() -> {}, 1, java.util.concurrent.TimeUnit.HOURS)); for (var f:a) f.cancel(false); int defaultQueue = kept.getQueue().size();",
+          "note": "Cancel three long-delay tasks; their queue nodes remain by default."
+        },
+        {
+          "code": "var removed = new java.util.concurrent.ScheduledThreadPoolExecutor(1); removed.setRemoveOnCancelPolicy(true); var b = new java.util.ArrayList<java.util.concurrent.ScheduledFuture<?>>();",
+          "note": "Create a scheduler that removes successfully cancelled tasks."
+        },
+        {
+          "code": "for (int i=0;i<3;i++) b.add(removed.schedule(() -> {}, 1, java.util.concurrent.TimeUnit.HOURS)); for (var f:b) f.cancel(false); int removeQueue = removed.getQueue().size(); kept.shutdownNow(); removed.shutdownNow();",
+          "note": "The second queue becomes empty immediately."
+        }
+      ],
+      "expect": {
+        "defaultQueue": "3",
+        "removeQueue": "0"
+      },
+      "limit": "The Java replay uses three tasks with one-hour delays and inspects queue size immediately. It does not measure retained bytes, GC roots, race timing, executor shutdown policies, periodic tasks, production throughput, or every JDK implementation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "kept": "java.util.concurrent.ScheduledThreadPoolExecutor@795cd85e[Running, pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0]",
+            "a": "[]"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "kept": "java.util.concurrent.ScheduledThreadPoolExecutor@795cd85e[Running, pool size = 1, active threads = 0, queued tasks = 3, completed tasks = 0]",
+            "a": "[java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@32eff876[Cancelled], java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@8dbdac1[Cancelled], java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@6e20b53a[Cancelled]]",
+            "defaultQueue": "3"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "kept": "java.util.concurrent.ScheduledThreadPoolExecutor@795cd85e[Running, pool size = 1, active threads = 0, queued tasks = 3, completed tasks = 0]",
+            "a": "[java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@32eff876[Cancelled], java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@8dbdac1[Cancelled], java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@6e20b53a[Cancelled]]",
+            "defaultQueue": "3",
+            "removed": "java.util.concurrent.ScheduledThreadPoolExecutor@71809907[Running, pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0]",
+            "b": "[]"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "kept": "java.util.concurrent.ScheduledThreadPoolExecutor@795cd85e[Shutting down, pool size = 1, active threads = 0, queued tasks = 0, completed tasks = 0]",
+            "a": "[java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@32eff876[Cancelled], java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@8dbdac1[Cancelled], java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@6e20b53a[Cancelled]]",
+            "defaultQueue": "3",
+            "removed": "java.util.concurrent.ScheduledThreadPoolExecutor@71809907[Terminated, pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0]",
+            "b": "[java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@158da8e[Cancelled], java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@74e52303[Cancelled], java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask@47af7f3d[Cancelled]]",
+            "removeQueue": "0"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java 26 ScheduledThreadPoolExecutor",
+        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/concurrent/ScheduledThreadPoolExecutor.html",
+        "Official Java API; checked October 30, 2026"
+      ],
+      [
+        "Java 17 ScheduledThreadPoolExecutor",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/ScheduledThreadPoolExecutor.html",
+        "Official Java API; checked October 30, 2026"
+      ]
+    ],
+    "visual_explanation": "The queue is the mechanism: cancellation crosses out tasks, while the policy decides whether their nodes remain. The count changes directly rather than showing a generic thread diagram.",
+    "written_questions": [
+      "Which services create the most long-delay timers and how often are they cancelled?",
+      "What heap or queue metric would prove retention is operationally meaningful?"
+    ],
+    "source_checked_on": "2026-10-30"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "When overloaded, finish valuable work before starting expendable work",
+    "goal": "Use explicit admission priority and cheap rejection to preserve useful completions instead of letting every request time out.",
+    "tag": "Distinguished Engineer judgment · overload control",
+    "concept": "<p>A crowded emergency room does not start every case and leave all patients half-treated. It admits work it can finish and gives scarce capacity to the outcomes that matter most.</p><p>Under overload, accepting everything creates queues, timeouts, retries, and more load. <strong>Load shedding</strong> rejects excess work early. Priority makes the rejection policy explicit: health checks and completion calls can outrank new optional work. Measure successful-request latency and useful completions—<em>goodput</em>—separately from fast rejections.</p>",
+    "example": "<p>A service can finish 100 cost units per second. It receives 80 checkout-completion units and 50 crawler units. FIFO after crawler traffic arrived first admits 50 crawler and only 50 checkout. Priority admission finishes all 80 checkout and admits 20 crawler; 30 crawler units are rejected early.</p>",
+    "use_case": {
+      "when": "Use load shedding after defining measured capacity, bounded queues, client retry behavior, and business-visible priorities.",
+      "example": "During an Availability Zone impairment, preserve payment completion and health checks while shedding recommendation refreshes and crawlers.",
+      "decision": "Add capacity and fix bottlenecks for sustained legitimate load. Shed only excess work during brownout, make rejection cheap, communicate retry semantics, test beyond the goodput plateau, and ensure shedding does not hide the autoscaling signal."
+    },
+    "practice": "Change capacity and workload mix. Compare FIFO admission with priority admission and watch completed checkout work, rejected work, and wasted queue pressure.",
+    "boundary": "This arithmetic model treats every unit as equal cost within a class and has one server interval. It does not model latency distributions, fairness, retries, dependency priorities, queue age, health checks, autoscaling, AZ loss, or real customer value.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Capacity units <input id=\"shedCap\" type=\"range\" min=\"60\" max=\"140\" value=\"100\"></label><label>Checkout demand <input id=\"goldDemand\" type=\"range\" min=\"20\" max=\"120\" value=\"80\"></label><div id=\"shedWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintShed(){const c=+shedCap.value,g=+goldDemand.value,b=50,fifoBronze=Math.min(b,c),fifoGold=Math.min(g,Math.max(0,c-fifoBronze)),prioGold=Math.min(g,c),prioBronze=Math.min(b,Math.max(0,c-prioGold));shedWorld.innerHTML='<p><strong>Question:</strong> Which policy finishes more checkout work?</p><table><tr><th>Policy</th><th>checkout done</th><th>crawler done</th><th>rejected</th></tr><tr><td>crawler-first FIFO</td><td>'+fifoGold+'</td><td>'+fifoBronze+'</td><td>'+Math.max(0,g+b-c)+'</td></tr><tr><td>priority admission</td><td><strong>'+prioGold+'</strong></td><td>'+prioBronze+'</td><td>'+Math.max(0,g+b-c)+'</td></tr></table><div class=step-flow><div class=\"node ok\">capacity '+c+'</div><div class=\"node '+(g+b>c?'wait':'ok')+'\">demand '+(g+b)+'</div><div class=\"node '+(prioGold<g?'fail':'ok')+'\">checkout '+prioGold+'/'+g+'</div></div>';};shedCap.oninput=paintShed;goldDemand.oninput=paintShed;paintShed();",
+    "questions": [
+      [
+        "Capacity is 100; checkout demand is 80 and crawler demand is 50. Priority admission completes what?",
+        [
+          "80 checkout and 20 crawler units",
+          "50 checkout and 50 crawler units",
+          "All 130 units"
+        ],
+        0,
+        "Finish the higher-priority 80, then use the remaining 20."
+      ],
+      [
+        "Why exclude fast rejections from successful-request latency?",
+        [
+          "They can make latency look healthy while accepted work is slow",
+          "Rejections use no CPU ever",
+          "It increases availability automatically"
+        ],
+        0,
+        "Mixing rejected and successful latency hides the experience of admitted work."
+      ],
+      [
+        "When is shedding the wrong primary response?",
+        [
+          "Legitimate load is sustained and capacity is routinely insufficient",
+          "A rare surge exceeds tested headroom",
+          "A low-priority crawler can retry later"
+        ],
+        0,
+        "Chronic overload needs capacity or efficiency work, not permanent brownout."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "capacity = 100; checkout = 80; crawler = 50",
+          "note": "Define one interval of capacity and two demand classes."
+        },
+        {
+          "code": "fifo = {'checkout': min(checkout, max(0, capacity - crawler)), 'crawler': min(crawler, capacity)}",
+          "note": "If crawler work arrives first, checkout gets only leftover capacity."
+        },
+        {
+          "code": "priority = {'checkout': min(checkout, capacity), 'crawler': min(crawler, max(0, capacity - checkout))}",
+          "note": "Priority admits checkout first and uses remaining capacity for crawler work."
+        },
+        {
+          "code": "rejected = checkout + crawler - capacity; checkout_gain = priority['checkout'] - fifo['checkout']",
+          "note": "The same total rejection produces 30 more valuable completions."
+        }
+      ],
+      "expect": {
+        "capacity": 100,
+        "checkout": 80,
+        "crawler": 50,
+        "fifo": {
+          "checkout": 50,
+          "crawler": 50
+        },
+        "priority": {
+          "checkout": 80,
+          "crawler": 20
+        },
+        "rejected": 30,
+        "checkout_gain": 30
+      },
+      "limit": "This arithmetic model treats every unit as equal cost within a class and has one server interval. It does not model latency distributions, fairness, retries, dependency priorities, queue age, health checks, autoscaling, AZ loss, or real customer value.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "capacity": 100,
+            "checkout": 80,
+            "crawler": 50
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "capacity": 100,
+            "checkout": 80,
+            "crawler": 50,
+            "fifo": {
+              "checkout": 50,
+              "crawler": 50
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "capacity": 100,
+            "checkout": 80,
+            "crawler": 50,
+            "fifo": {
+              "checkout": 50,
+              "crawler": 50
+            },
+            "priority": {
+              "checkout": 80,
+              "crawler": 20
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "capacity": 100,
+            "checkout": 80,
+            "crawler": 50,
+            "fifo": {
+              "checkout": 50,
+              "crawler": 50
+            },
+            "priority": {
+              "checkout": 80,
+              "crawler": 20
+            },
+            "rejected": 30,
+            "checkout_gain": 30
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Builder Center: Using load shedding to avoid overload",
+        "https://builder.aws.com/content/3Eun1EEyX6p2e3VYNyRLSJzLuMV/using-load-shedding-to-avoid-overload",
+        "AWS Builders Library foundation; checked October 30, 2026"
+      ],
+      [
+        "AWS Well-Architected: REL05-BP03 Control and limit retry calls",
+        "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_mitigate_interaction_failure_limit_retries.html",
+        "Official AWS guidance; checked October 30, 2026"
+      ]
+    ],
+    "visual_explanation": "The admission table keeps the capacity denominator fixed and shows where each unit goes. It makes the business effect of priority visible: identical total rejection, different useful completions.",
+    "written_questions": [
+      "Name three operations in one critical service and rank which should finish first during overload.",
+      "Which metric would reveal that shedding is hiding an autoscaling or headroom problem?"
+    ],
+    "source_checked_on": "2026-10-30"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Use an agent as a tool when one manager must keep the conversation",
+    "goal": "Choose manager-style delegation or handoff based on who must own the next turn and the shared conversation state.",
+    "tag": "GenAI harness engineering · multi-agent control",
+    "concept": "<p>A restaurant host can ask the chef a question and return with the answer, or escort the guest to the chef and leave them together. Both involve a specialist; only one changes who owns the conversation.</p><p>With <strong>agents as tools</strong>, a manager invokes specialists and stays responsible for synthesis and user interaction. With a <strong>handoff</strong>, the selected specialist becomes the active agent and receives the conversation history. In the OpenAI Agents SDK, a nested tool-agent run does not automatically inherit the parent's conversation state; share an explicit session or continuation strategy only when that is intended.</p>",
+    "example": "<p>An incident manager asks a Kafka specialist for lag diagnosis and a Snowflake specialist for warehouse evidence, then returns one combined plan. That is manager style. A support triage agent that transfers a refund conversation to a refund specialist uses a handoff.</p>",
+    "use_case": {
+      "when": "Use manager style when one agent must enforce policy, combine several specialist results, or preserve a single user-facing voice. Use a handoff when one specialist should own subsequent turns.",
+      "example": "A platform-incident agent calls Spark and Kafka agents as tools, redacts their outputs, then makes one rollback recommendation.",
+      "decision": "Start with one agent and ordinary tools. Add specialists only when instructions or evaluation evidence justify separation. Decide explicitly whether history, application context, approvals, sessions, and tracing cross the boundary."
+    },
+    "practice": "Switch between manager and handoff. Add a second specialist request and watch whether one manager can synthesize both or control moves to one peer.",
+    "boundary": "The browser model only tracks control ownership and visible messages. It does not run the SDK, a model, tools, sessions, tracing, approvals, retries, token budgets, or security policy. The Python trace is an executed teaching model, not an agent run.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Pattern <select id=\"agentPattern\"><option value=\"manager\">manager: agents as tools</option><option value=\"handoff\">handoff</option></select></label><label><input id=\"twoExperts\" type=\"checkbox\" checked> need two specialists</label><div id=\"agentWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintAgent(){const manager=agentPattern.value==='manager',two=twoExperts.checked;agentWorld.innerHTML='<p><strong>Question:</strong> Who owns the next user turn?</p><div class=step-flow><div class=\"node ok\">user request</div><div class=\"node '+(manager?'ok':'wait')+'\">'+(manager?'manager stays active':'triage hands off')+'</div><div class=\"node wait\">specialist A'+(two?' + B':'')+'</div><div class=\"node '+(manager||!two?'ok':'fail')+'\">'+(manager?(two?'manager combines A+B':'manager returns A'):(two?'one peer owns turn; no built-in synthesis':'specialist owns next turn'))+'</div></div>';};agentPattern.onchange=paintAgent;twoExperts.onchange=paintAgent;paintAgent();",
+    "questions": [
+      [
+        "Two specialists must contribute to one policy-checked answer. Best default pattern?",
+        [
+          "A manager calls both as tools and synthesizes",
+          "Handoff to both simultaneously",
+          "Give every agent the user channel"
+        ],
+        0,
+        "The manager retains control and can combine results."
+      ],
+      [
+        "What changes in a handoff?",
+        [
+          "The selected specialist becomes active and receives conversation history",
+          "Only a Python function runs",
+          "The previous agent's secrets become public"
+        ],
+        0,
+        "Handoffs transfer conversational control."
+      ],
+      [
+        "What must not be assumed for an agent used as a tool?",
+        [
+          "Its nested run automatically inherits the parent's session history",
+          "It can return a result",
+          "It can have a turn limit"
+        ],
+        0,
+        "Nested tool-agent state is configured explicitly."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "request = ['diagnose Kafka lag', 'check warehouse pressure']",
+          "note": "The user needs evidence from two specialties."
+        },
+        {
+          "code": "tool_results = {'kafka': 'rebalance in progress', 'warehouse': 'queue depth 8'}",
+          "note": "Specialists return bounded results to a manager."
+        },
+        {
+          "code": "manager_output = f\"Kafka: {tool_results['kafka']}; Snowflake: {tool_results['warehouse']}\"",
+          "note": "The manager preserves one conversational owner and synthesizes."
+        },
+        {
+          "code": "handoff_owner = 'kafka-specialist'; can_builtin_synthesize_both = False",
+          "note": "A handoff selects one new active peer; extra orchestration is a separate design."
+        }
+      ],
+      "expect": {
+        "request": [
+          "diagnose Kafka lag",
+          "check warehouse pressure"
+        ],
+        "tool_results": {
+          "kafka": "rebalance in progress",
+          "warehouse": "queue depth 8"
+        },
+        "manager_output": "Kafka: rebalance in progress; Snowflake: queue depth 8",
+        "handoff_owner": "kafka-specialist",
+        "can_builtin_synthesize_both": false
+      },
+      "limit": "The browser model only tracks control ownership and visible messages. It does not run the SDK, a model, tools, sessions, tracing, approvals, retries, token budgets, or security policy. The Python trace is an executed teaching model, not an agent run.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "request": [
+              "diagnose Kafka lag",
+              "check warehouse pressure"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "request": [
+              "diagnose Kafka lag",
+              "check warehouse pressure"
+            ],
+            "tool_results": {
+              "kafka": "rebalance in progress",
+              "warehouse": "queue depth 8"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "request": [
+              "diagnose Kafka lag",
+              "check warehouse pressure"
+            ],
+            "tool_results": {
+              "kafka": "rebalance in progress",
+              "warehouse": "queue depth 8"
+            },
+            "manager_output": "Kafka: rebalance in progress; Snowflake: queue depth 8"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "request": [
+              "diagnose Kafka lag",
+              "check warehouse pressure"
+            ],
+            "tool_results": {
+              "kafka": "rebalance in progress",
+              "warehouse": "queue depth 8"
+            },
+            "manager_output": "Kafka: rebalance in progress; Snowflake: queue depth 8",
+            "handoff_owner": "kafka-specialist",
+            "can_builtin_synthesize_both": false
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI Agents SDK: Agents and multi-agent patterns",
+        "https://openai.github.io/openai-agents-python/agents/",
+        "Official documentation; checked October 30, 2026"
+      ],
+      [
+        "OpenAI Agents SDK: Agents as tools",
+        "https://openai.github.io/openai-agents-python/tools/#agents-as-tools",
+        "Official documentation; checked October 30, 2026"
+      ],
+      [
+        "OpenAI Agents SDK: Handoffs",
+        "https://openai.github.io/openai-agents-python/handoffs/",
+        "Official documentation; checked October 30, 2026"
+      ]
+    ],
+    "visual_explanation": "The control owner is the object that moves. Manager style fans out bounded calls and reconverges; handoff moves the next-turn marker to one specialist.",
+    "written_questions": [
+      "Which current agent must remain accountable for final policy and user communication?",
+      "For each specialist boundary, should session history, application context, approvals, and trace data cross it?"
+    ],
+    "source_checked_on": "2026-10-30"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "A tailored molecule can connect one long-lived spin to one photon",
+    "goal": "Understand what the reported single-molecule spin–photon interface demonstrated and what quantum-network engineering still requires.",
+    "tag": "New research · Nature · October 28, 2026",
+    "concept": "<p>A network needs a stable memory that can also speak through light. The spin stores quantum information; a photon can carry it to another node.</p><p>Researchers embedded a triplet ground-state carbene molecule in a structurally matched host crystal and addressed individual molecules. They report narrow zero-phonon optical lines, spectral stability beyond an hour, spin-selective optical transitions, single-molecule optical magnetic-resonance readout, millisecond-scale dynamical-decoupling coherence, and tens-of-milliseconds spin relaxation at 4.5 K.</p>",
+    "example": "<p>The interactive teaching model gives a candidate link four gates: single-molecule optical addressability, stable narrow emission, spin-selective transitions, and useful spin coherence. Removing any gate breaks that toy link. The paper supplies evidence for these properties in its system; the model does not calculate network fidelity.</p>",
+    "use_case": {
+      "when": "Use this result when evaluating molecular platforms for quantum networking, distributed quantum information, or chemically tunable single-emitter research.",
+      "example": "A research group wants bottom-up chemical control of a node that combines optical access with a longer-lived spin state.",
+      "decision": "Treat it as a platform demonstration, not a deployable quantum repeater. Compare collection efficiency, indistinguishability, entanglement fidelity/rate, cryogenic requirements, fabrication yield, integration, and lifetime before selecting an architecture."
+    },
+    "practice": "Toggle the four interface gates. Predict whether the toy node can store, address, and optically connect before revealing the link status.",
+    "boundary": "The Boolean teaching model does not reproduce the experiment, spectra, Hamiltonian, ODMR, coherence fits, photon indistinguishability, entanglement, collection efficiency, fabrication yield, or network rate. Claims are limited to the primary paper, and practical quantum networking remains research.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"opticalGate\" type=\"checkbox\" checked> single-molecule optical address</label><label><input id=\"stableGate\" type=\"checkbox\" checked> stable narrow line</label><label><input id=\"selectiveGate\" type=\"checkbox\" checked> spin-selective transition</label><label><input id=\"memoryGate\" type=\"checkbox\" checked> millisecond-scale coherence</label><div id=\"spinWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintSpin(){const gates=[opticalGate.checked,stableGate.checked,selectiveGate.checked,memoryGate.checked],names=['address','stable photon','spin selectivity','spin memory'],ok=gates.every(Boolean);spinWorld.innerHTML='<p><strong>Question:</strong> Does this toy node keep every interface gate?</p><div class=step-flow>'+gates.map((v,i)=>'<div class=\"node '+(v?'ok':'fail')+'\">'+names[i]+'<br>'+(v?'present':'missing')+'</div>').join('')+'</div><p><strong>'+(ok?'Candidate spin–photon interface path complete.':'Interface path broken in this toy.')+'</strong></p>';};[opticalGate,stableGate,selectiveGate,memoryGate].forEach(x=>x.onchange=paintSpin);paintSpin();",
+    "questions": [
+      [
+        "Why combine spin memory with optical access?",
+        [
+          "The spin can store information while photons connect nodes",
+          "Photons eliminate cryogenics automatically",
+          "Every molecule becomes entangled"
+        ],
+        0,
+        "A network node needs both memory and a flying optical carrier."
+      ],
+      [
+        "What did the structural host help support?",
+        [
+          "Stable single-molecule optical and spin behavior in the reported platform",
+          "Room-temperature networking",
+          "A classical database"
+        ],
+        0,
+        "The matched crystal environment is part of the demonstrated interface."
+      ],
+      [
+        "What evidence is still needed for a useful network node?",
+        [
+          "Entanglement fidelity/rate, photon collection and integration at system scale",
+          "Only a molecule name",
+          "A larger HTML model"
+        ],
+        0,
+        "Interface properties alone do not establish a repeater or network."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "gates = {'single_molecule_address': True, 'stable_line': True, 'spin_selective': True, 'coherence_ms_scale': True}",
+          "note": "Represent four qualitative properties reported by the paper."
+        },
+        {
+          "code": "interface_path = all(gates.values())",
+          "note": "The teaching link requires every gate."
+        },
+        {
+          "code": "network_proven = False",
+          "note": "A spin–photon interface demonstration is not a network demonstration."
+        },
+        {
+          "code": "missing_system_evidence = ['entanglement fidelity/rate', 'collection efficiency', 'integration and yield']",
+          "note": "Name the engineering evidence the toy cannot supply."
+        }
+      ],
+      "expect": {
+        "gates": {
+          "single_molecule_address": true,
+          "stable_line": true,
+          "spin_selective": true,
+          "coherence_ms_scale": true
+        },
+        "interface_path": true,
+        "network_proven": false,
+        "missing_system_evidence": [
+          "entanglement fidelity/rate",
+          "collection efficiency",
+          "integration and yield"
+        ]
+      },
+      "limit": "The Boolean teaching model does not reproduce the experiment, spectra, Hamiltonian, ODMR, coherence fits, photon indistinguishability, entanglement, collection efficiency, fabrication yield, or network rate. Claims are limited to the primary paper, and practical quantum networking remains research.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "gates": {
+              "single_molecule_address": true,
+              "stable_line": true,
+              "spin_selective": true,
+              "coherence_ms_scale": true
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "gates": {
+              "single_molecule_address": true,
+              "stable_line": true,
+              "spin_selective": true,
+              "coherence_ms_scale": true
+            },
+            "interface_path": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "gates": {
+              "single_molecule_address": true,
+              "stable_line": true,
+              "spin_selective": true,
+              "coherence_ms_scale": true
+            },
+            "interface_path": true,
+            "network_proven": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "gates": {
+              "single_molecule_address": true,
+              "stable_line": true,
+              "spin_selective": true,
+              "coherence_ms_scale": true
+            },
+            "interface_path": true,
+            "network_proven": false,
+            "missing_system_evidence": [
+              "entanglement fidelity/rate",
+              "collection efficiency",
+              "integration and yield"
+            ]
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Roggors et al., A single-molecule spin–photon interface",
+        "https://www.nature.com/articles/s41586-026-11147-6",
+        "Primary Nature article; published October 28, 2026"
+      ]
+    ],
+    "visual_explanation": "Four experimentally motivated gates form the interface path. Removing a gate breaks the exact store/address/connect relationship instead of animating a generic quantum network.",
+    "written_questions": [
+      "Which reported measurements support each of the four gates?",
+      "What minimum entanglement and integration evidence would change this from a component result to a network candidate?"
+    ],
+    "source_checked_on": "2026-10-30"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A workflow_run privilege jump must treat build artifacts as hostile input",
+    "goal": "Separate untrusted tests from privileged publication without turning the artifact bridge into code execution.",
+    "tag": "GitHub Actions · workflow_run security boundary",
+    "concept": "<p>A loading dock may accept a sealed package from outside. The badge that opens the vault must not execute instructions found inside that package.</p><p>A workflow triggered by <code>workflow_run</code> can have secrets and write tokens even when the earlier workflow did not. That makes it useful for privilege separation—and dangerous if it checks out untrusted code or executes an artifact from the untrusted run. The privileged workflow must verify the originating run and treat downloaded files as data.</p>",
+    "example": "<p>A fork pull request runs tests with read-only permissions and uploads <code>result.json</code>. The privileged follow-up checks the triggering workflow name, successful conclusion, head repository and SHA, downloads the expected artifact, validates its digest/schema, and posts a comment. It never runs a script from the archive.</p>",
+    "use_case": {
+      "when": "Use workflow_run when an unprivileged build must be followed by a narrowly privileged action such as commenting, labeling, or publication.",
+      "example": "Fork PR tests produce a JSON coverage summary; a later workflow with pull-request write permission posts the number.",
+      "decision": "Keep the privileged follow-up tiny. Prefer passing identifiers or strict data. If the second workflow must execute build output, redesign the boundary or rebuild trusted code from a verified commit; do not rely on an artifact filename alone."
+    },
+    "practice": "Toggle origin verification, artifact validation, and artifact execution. Watch the privilege bridge remain data-only or become a repository compromise path.",
+    "boundary": "The model simplifies GitHub events, permissions, artifact APIs, attestations, branch filters, forks, caches, reusable workflows, and token scopes. It does not execute Actions or prove a workflow secure.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"originCheck\" type=\"checkbox\" checked> verify workflow, repo, SHA, conclusion</label><label><input id=\"artifactCheck\" type=\"checkbox\" checked> verify digest and JSON schema</label><label><input id=\"artifactExec\" type=\"checkbox\"> execute file from artifact</label><div id=\"runWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintRun(){const origin=originCheck.checked,valid=artifactCheck.checked,exec=artifactExec.checked,safe=origin&&valid&&!exec;runWorld.innerHTML='<p><strong>Question:</strong> Can untrusted bytes reach a privileged interpreter?</p><div class=step-flow><div class=\"node wait\">unprivileged PR tests</div><div class=\"node '+(origin?'ok':'fail')+'\">origin '+(origin?'verified':'unchecked')+'</div><div class=\"node '+(valid?'ok':'fail')+'\">artifact '+(valid?'validated as data':'unchecked')+'</div><div class=\"node '+(!exec?'ok':'fail')+'\">privileged job '+(exec?'executes bytes':'parses JSON only')+'</div></div><p><strong>'+(safe?'No execution path in this model.':'Unsafe privilege bridge.')+'</strong></p>';};[originCheck,artifactCheck,artifactExec].forEach(x=>x.onchange=paintRun);paintRun();",
+    "questions": [
+      [
+        "Why can workflow_run be more privileged than the triggering workflow?",
+        [
+          "It may access secrets and write tokens unavailable to the earlier run",
+          "Artifacts automatically grant admin",
+          "Fork code becomes trusted"
+        ],
+        0,
+        "The event intentionally supports privilege separation."
+      ],
+      [
+        "What is the safest artifact shape for posting a test result?",
+        [
+          "Strictly validated data such as a small JSON document",
+          "An executable shell script",
+          "A whole untrusted workspace"
+        ],
+        0,
+        "A narrow data contract reduces the privileged interpreter surface."
+      ],
+      [
+        "When is digest checking alone insufficient?",
+        [
+          "The privileged job then executes attacker-controlled bytes with secrets",
+          "The file is JSON and schema-validated",
+          "The origin workflow succeeded"
+        ],
+        0,
+        "A matching digest proves identity, not trustworthiness."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "trigger = {'workflow':'PR tests','conclusion':'success','head_repo':'fork','head_sha':'abc123'}",
+          "note": "Receive metadata from an unprivileged completed run."
+        },
+        {
+          "code": "origin_ok = trigger['workflow'] == 'PR tests' and trigger['conclusion'] == 'success' and len(trigger['head_sha']) == 6",
+          "note": "Apply an explicit origin policy before touching privileged capabilities."
+        },
+        {
+          "code": "artifact = {'coverage': 87}; schema_ok = set(artifact) == {'coverage'} and 0 <= artifact['coverage'] <= 100",
+          "note": "Parse one bounded data field instead of executing a file."
+        },
+        {
+          "code": "execute_artifact = False; privileged_action_allowed = origin_ok and schema_ok and not execute_artifact",
+          "note": "The bridge permits a comment, not artifact code execution."
+        }
+      ],
+      "expect": {
+        "trigger": {
+          "workflow": "PR tests",
+          "conclusion": "success",
+          "head_repo": "fork",
+          "head_sha": "abc123"
+        },
+        "origin_ok": true,
+        "artifact": {
+          "coverage": 87
+        },
+        "schema_ok": true,
+        "execute_artifact": false,
+        "privileged_action_allowed": true
+      },
+      "limit": "The model simplifies GitHub events, permissions, artifact APIs, attestations, branch filters, forks, caches, reusable workflows, and token scopes. It does not execute Actions or prove a workflow secure.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "trigger": {
+              "workflow": "PR tests",
+              "conclusion": "success",
+              "head_repo": "fork",
+              "head_sha": "abc123"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "trigger": {
+              "workflow": "PR tests",
+              "conclusion": "success",
+              "head_repo": "fork",
+              "head_sha": "abc123"
+            },
+            "origin_ok": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "trigger": {
+              "workflow": "PR tests",
+              "conclusion": "success",
+              "head_repo": "fork",
+              "head_sha": "abc123"
+            },
+            "origin_ok": true,
+            "artifact": {
+              "coverage": 87
+            },
+            "schema_ok": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "trigger": {
+              "workflow": "PR tests",
+              "conclusion": "success",
+              "head_repo": "fork",
+              "head_sha": "abc123"
+            },
+            "origin_ok": true,
+            "artifact": {
+              "coverage": 87
+            },
+            "schema_ok": true,
+            "execute_artifact": false,
+            "privileged_action_allowed": true
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions: Events that trigger workflows — workflow_run",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run",
+        "Official documentation; checked October 30, 2026"
+      ],
+      [
+        "GitHub Actions secure use reference",
+        "https://docs.github.com/en/actions/reference/security/secure-use",
+        "Official security guidance; checked October 30, 2026"
+      ],
+      [
+        "GitHub Actions artifact REST API",
+        "https://docs.github.com/en/rest/actions/artifacts",
+        "Official API documentation; checked October 30, 2026"
+      ]
+    ],
+    "visual_explanation": "The diagram follows bytes across the trust boundary. Each control closes a specific path; the final red node appears only when privileged execution consumes untrusted content.",
+    "written_questions": [
+      "Which workflows gain secrets or write permissions after consuming another run's output?",
+      "Can every artifact crossing that boundary be reduced to a strict data schema?"
+    ],
+    "source_checked_on": "2026-10-30"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "A gRPC status code says the class; typed details say what the client may do",
+    "goal": "Return machine-readable error details without turning human message text into retry or remediation logic.",
+    "tag": "APIs & Microservices · gRPC error contracts",
+    "concept": "<p>A road sign says “closed.” A second sign says “reopens in 30 minutes” and a third names the blocked lane. The first classifies the problem; the details guide a safe response.</p><p>Every gRPC client can read a standard status code and message. With Protocol Buffers, the richer error model can attach typed detail messages in trailing metadata—for example <code>RetryInfo</code>, <code>BadRequest</code>, or <code>QuotaFailure</code>. Clients branch on code and known detail types, not on unstable English text.</p>",
+    "example": "<p>A warehouse API returns <code>RESOURCE_EXHAUSTED</code>, message “tenant burst quota exceeded,” <code>RetryInfo{retry_delay:30s}</code>, and <code>QuotaFailure{subject:tenant/42}</code>. A client that owns an idempotent request may schedule one retry after 30 seconds. A client that does not understand the details still sees the standard code.</p>",
+    "use_case": {
+      "when": "Use typed details when clients need structured remediation such as field violations, retry delay, resource identity, quota subject, or support links.",
+      "example": "A cross-language ingestion client needs to distinguish malformed rows from a temporary tenant quota and show the exact invalid fields.",
+      "decision": "Keep the canonical code stable and details small. Add rich details only when target language libraries and intermediaries preserve them. Do not expose stack traces or sensitive resource data, and do not tell clients to retry non-idempotent operations blindly."
+    },
+    "practice": "Change the status code, retry detail, and request idempotency. Watch the client choose retry, fix-input, or stop without parsing the message string.",
+    "boundary": "The local model is a dictionary decision table, not gRPC or protobuf encoding. It omits HTTP/2 trailers, library differences, proxies, header limits, backoff/jitter, deadlines, authentication, localization, and sensitive-data review.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Status <select id=\"grpcCode\"><option value=\"exhausted\">RESOURCE_EXHAUSTED</option><option value=\"invalid\">INVALID_ARGUMENT</option></select></label><label><input id=\"retryDetail\" type=\"checkbox\" checked> RetryInfo(30s)</label><label><input id=\"idemRequest\" type=\"checkbox\" checked> request is idempotent</label><div id=\"grpcWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintGrpc(){const exhausted=grpcCode.value==='exhausted',detail=retryDetail.checked,idem=idemRequest.checked,action=exhausted&&detail&&idem?'retry after 30s':exhausted?'stop or apply client policy':'fix invalid fields';grpcWorld.innerHTML='<p><strong>Question:</strong> What may the client do without reading English text?</p><div class=step-flow><div class=\"node '+(exhausted?'wait':'fail')+'\">'+(exhausted?'RESOURCE_EXHAUSTED':'INVALID_ARGUMENT')+'</div><div class=\"node '+(detail?'ok':'wait')+'\">'+(detail?'typed RetryInfo: 30s':'no retry detail')+'</div><div class=\"node '+(idem?'ok':'fail')+'\">'+(idem?'idempotent request':'effect may repeat')+'</div><div class=\"node '+(action.startsWith('retry')?'ok':'wait')+'\">'+action+'</div></div>';};grpcCode.onchange=paintGrpc;retryDetail.onchange=paintGrpc;idemRequest.onchange=paintGrpc;paintGrpc();",
+    "questions": [
+      [
+        "What should client logic inspect first?",
+        [
+          "The canonical status code and recognized typed details",
+          "Words inside the English message",
+          "Server stack-trace lines"
+        ],
+        0,
+        "Codes and types form the machine contract."
+      ],
+      [
+        "RetryInfo says 30 seconds, but the request is not idempotent. Safest default?",
+        [
+          "Do not retry automatically without an effect-safety design",
+          "Retry immediately twice",
+          "Ignore the status code"
+        ],
+        0,
+        "A delay does not make duplicate effects safe."
+      ],
+      [
+        "What is a boundary of rich gRPC errors?",
+        [
+          "Language and proxy support varies, and large trailers can hit limits",
+          "Every client must use protobuf",
+          "They replace observability"
+        ],
+        0,
+        "The richer model is not uniformly supported or free."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "status = {'code':'RESOURCE_EXHAUSTED','message':'tenant burst quota exceeded','details':{'retry_seconds':30,'quota_subject':'tenant/42'}}",
+          "note": "Keep classification, human text, and typed remediation separate."
+        },
+        {
+          "code": "request_idempotent = True; known_retry = status['details'].get('retry_seconds')",
+          "note": "The client checks its own effect safety and a recognized detail."
+        },
+        {
+          "code": "action = f\"retry-after-{known_retry}s\" if status['code'] == 'RESOURCE_EXHAUSTED' and known_retry and request_idempotent else 'do-not-auto-retry'",
+          "note": "No English string parsing controls the branch."
+        },
+        {
+          "code": "fallback_for_old_client = status['code']",
+          "note": "A client without rich-detail support still receives the standard code."
+        }
+      ],
+      "expect": {
+        "status": {
+          "code": "RESOURCE_EXHAUSTED",
+          "message": "tenant burst quota exceeded",
+          "details": {
+            "retry_seconds": 30,
+            "quota_subject": "tenant/42"
+          }
+        },
+        "request_idempotent": true,
+        "known_retry": 30,
+        "action": "retry-after-30s",
+        "fallback_for_old_client": "RESOURCE_EXHAUSTED"
+      },
+      "limit": "The local model is a dictionary decision table, not gRPC or protobuf encoding. It omits HTTP/2 trailers, library differences, proxies, header limits, backoff/jitter, deadlines, authentication, localization, and sensitive-data review.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "status": {
+              "code": "RESOURCE_EXHAUSTED",
+              "message": "tenant burst quota exceeded",
+              "details": {
+                "retry_seconds": 30,
+                "quota_subject": "tenant/42"
+              }
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "status": {
+              "code": "RESOURCE_EXHAUSTED",
+              "message": "tenant burst quota exceeded",
+              "details": {
+                "retry_seconds": 30,
+                "quota_subject": "tenant/42"
+              }
+            },
+            "request_idempotent": true,
+            "known_retry": 30
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "status": {
+              "code": "RESOURCE_EXHAUSTED",
+              "message": "tenant burst quota exceeded",
+              "details": {
+                "retry_seconds": 30,
+                "quota_subject": "tenant/42"
+              }
+            },
+            "request_idempotent": true,
+            "known_retry": 30,
+            "action": "retry-after-30s"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "status": {
+              "code": "RESOURCE_EXHAUSTED",
+              "message": "tenant burst quota exceeded",
+              "details": {
+                "retry_seconds": 30,
+                "quota_subject": "tenant/42"
+              }
+            },
+            "request_idempotent": true,
+            "known_retry": 30,
+            "action": "retry-after-30s",
+            "fallback_for_old_client": "RESOURCE_EXHAUSTED"
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "gRPC error handling guide",
+        "https://grpc.io/docs/guides/error/",
+        "Official gRPC documentation; checked October 30, 2026"
+      ],
+      [
+        "Google RPC error details reference",
+        "https://cloud.google.com/apis/design/errors#error_payloads",
+        "Official Google API design guidance; checked October 30, 2026"
+      ],
+      [
+        "google.rpc package reference",
+        "https://cloud.google.com/storage/docs/reference/rpc/google.rpc",
+        "Official protobuf type reference; checked October 30, 2026"
+      ]
+    ],
+    "visual_explanation": "The decision path separates four facts: error class, typed delay, effect safety, and action. Changing one fact changes the remediation without touching human message text.",
+    "written_questions": [
+      "Which existing APIs force clients to parse error-message strings today?",
+      "For one retryable error, specify the canonical code, detail types, idempotency rule, and sensitive fields to exclude."
+    ],
+    "source_checked_on": "2026-10-30"
+  }
+]
