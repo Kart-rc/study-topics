@@ -1,0 +1,1467 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "A quality rule needs a measurement and an explicit consequence",
+    "goal": "Separate detecting bad rows from deciding whether to keep, drop, block, or notify so the product mechanism matches the publication risk.",
+    "tag": "Focused certification lesson · data quality and governance · cycle 4, position 4",
+    "concept": "<p>A scale can report that a package is overweight. It does not decide whether to label the package, remove one item, or stop the truck.</p><p>A data-quality rule has three parts: the condition, the measured result, and the consequence. Databricks Lakeflow expectations evaluate rows inside a pipeline and can warn, drop rows, or fail an update. Snowflake data metric functions run on a schedule and return measurements; expectations and notifications interpret those measurements. Monitoring alone does not rewrite or stop an unrelated load.</p>",
+    "example": "<p>A 100-row orders batch contains four rows with a missing <code>order_id</code>. Warn keeps 100 and records four failures. Drop publishes 96. Fail-update publishes no new version. A scheduled Snowflake <code>NULL_COUNT</code> can report 4; a separate expectation such as “value = 0” marks a quality issue and can notify.</p>",
+    "use_case": {
+      "when": "Use governed quality checks when a measurable defect has a named owner and a deliberate publication consequence.",
+      "example": "A bronze orders feed may retain and count malformed rows, while the finance-ready table must fail publication when any order ID is missing.",
+      "decision": "Warn while learning a baseline, drop only when losing invalid rows is acceptable and auditable, fail when partial publication is unsafe, and notify when asynchronous monitoring is the right control. Do not turn every anomaly into a pipeline outage."
+    },
+    "practice": "Move the invalid-row count and choose warn, drop, or fail. Predict published rows and recorded violations, then compare the product implementations.",
+    "boundary": "The local model counts one null rule over one batch. It does not execute either platform, model streaming retries, pipeline graphs, event-log retention, DMF schedules, alerts, editions, permissions, costs, or downstream publication orchestration. Vendor SQL/Python was not run.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Invalid rows <input id=\"badRows\" type=\"range\" min=\"0\" max=\"12\" value=\"4\"></label><label>Consequence <select id=\"qualityAction\"><option value=\"warn\">warn and keep</option><option value=\"drop\">drop invalid</option><option value=\"fail\">fail publication</option></select></label><div id=\"qualityWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintQuality(){const bad=+badRows.value,a=qualityAction.value,published=a==='warn'?100:a==='drop'?100-bad:(bad?0:100),status=a==='fail'&&bad?'old version remains':published+' rows published';qualityWorld.innerHTML='<p><strong>Question:</strong> What survives the quality decision?</p><div class=step-flow><div class=\"node ok\">100 input rows</div><div class=\"node '+(bad?'wait':'ok')+'\">measure '+bad+' invalid</div><div class=\"node '+(a==='fail'&&bad?'fail':'ok')+'\">'+a+'</div><div class=\"node '+(published?'ok':'fail')+'\">'+status+'</div></div><p>Violations recorded: <strong>'+bad+'</strong>. '+status+'.</p>';};badRows.oninput=paintQuality;qualityAction.onchange=paintQuality;paintQuality();",
+    "questions": [
+      [
+        "100 rows include four invalid IDs. DROP publishes how many?",
+        [
+          "96",
+          "100",
+          "0"
+        ],
+        0,
+        "The four violating rows are removed."
+      ],
+      [
+        "Why is a DMF result not automatically a pipeline gate?",
+        [
+          "Measurement and enforcement are separate decisions",
+          "DMFs cannot return numbers",
+          "Schedules delete rows"
+        ],
+        0,
+        "A metric measures; an expectation/notification or orchestration control supplies consequence."
+      ],
+      [
+        "When is warn preferable to fail?",
+        [
+          "You are establishing a baseline and the defect is not publication-critical",
+          "Any bad row creates an illegal ledger",
+          "The table has no owner"
+        ],
+        0,
+        "Warn preserves flow while producing evidence for a deliberate threshold."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "total=100; invalid=4",
+          "note": "Measure one batch and one rule."
+        },
+        {
+          "code": "warn={'published':total,'violations':invalid}",
+          "note": "Warn keeps rows and records failures."
+        },
+        {
+          "code": "drop={'published':total-invalid,'violations':invalid}",
+          "note": "Drop removes only invalid rows."
+        },
+        {
+          "code": "fail={'published':0 if invalid else total,'old_version_remains':invalid>0}",
+          "note": "Fail prevents the new update from becoming visible."
+        }
+      ],
+      "expect": {
+        "total": 100,
+        "invalid": 4,
+        "warn": {
+          "published": 100,
+          "violations": 4
+        },
+        "drop": {
+          "published": 96,
+          "violations": 4
+        },
+        "fail": {
+          "published": 0,
+          "old_version_remains": true
+        }
+      },
+      "limit": "The local model counts one null rule over one batch. It does not execute either platform, model streaming retries, pipeline graphs, event-log retention, DMF schedules, alerts, editions, permissions, costs, or downstream publication orchestration. Vendor SQL/Python was not run.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "total": 100,
+            "invalid": 4
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "total": 100,
+            "invalid": 4,
+            "warn": {
+              "published": 100,
+              "violations": 4
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "total": 100,
+            "invalid": 4,
+            "warn": {
+              "published": 100,
+              "violations": 4
+            },
+            "drop": {
+              "published": 96,
+              "violations": 4
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "total": 100,
+            "invalid": 4,
+            "warn": {
+              "published": 100,
+              "violations": 4
+            },
+            "drop": {
+              "published": 96,
+              "violations": 4
+            },
+            "fail": {
+              "published": 0,
+              "old_version_remains": true
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks: Manage data quality with pipeline expectations",
+        "https://docs.databricks.com/aws/en/ldp/expectations",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "Snowflake: System data metric functions",
+        "https://docs.snowflake.com/en/user-guide/data-quality-system-dmfs",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "Snowflake: Use SQL to set up data metric functions",
+        "https://docs.snowflake.com/en/user-guide/data-quality-working",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "Snowflake: Use SQL to work with expectations",
+        "https://docs.snowflake.com/en/user-guide/data-quality-expectations",
+        "Official documentation; checked October 31, 2026"
+      ]
+    ],
+    "visual_explanation": "The same 100 rows flow through one measured defect and three consequences. The output count and retained version change directly, making measurement-versus-enforcement visible.",
+    "written_questions": [
+      "Which three data rules should warn, drop, and fail respectively in your platform?",
+      "Who owns each threshold, notification, exception, and recovery action?"
+    ],
+    "source_checked_on": "2026-10-31",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: expectations sit inside the pipeline update",
+        "minutes": 9,
+        "html": "<p><strong>The rule travels with the transformation.</strong> Lakeflow expectations use SQL Boolean expressions on streaming tables, materialized views, or views. Default <code>EXPECT</code> retains invalid rows and records metrics. <code>ON VIOLATION DROP ROW</code> removes them. <code>ON VIOLATION FAIL UPDATE</code> fails the flow and atomically rolls back a table update.</p><pre><code><span>-- sourced SQL sketch; not executed</span><span>CONSTRAINT valid_order_id EXPECT (order_id IS NOT NULL)</span><span>  ON VIOLATION FAIL UPDATE</span></code></pre><label>Lakeflow mode <select id=\"dbQuality\"><option value=\"warn\">warn</option><option value=\"drop\">drop</option><option value=\"fail\">fail update</option></select></label><div id=\"dbQualityWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> In a triggered pipeline, one failed flow does not automatically fail independent parallel flows. Design the dependency/publication boundary explicitly. Metrics also have documented object/operator limits.</p><p><strong>Execution label.</strong> SQL is an unexecuted vendor sketch. The row-flow view is local JavaScript.</p>",
+        "markdown": "Lakeflow expectations can retain and measure, drop violating rows, or fail and roll back a table update. A failed triggered flow does not automatically stop independent parallel flows; design the publication boundary. SQL was not run.",
+        "javascript": "const dbQuality=$('dbQuality'),dbQualityWorld=$('dbQualityWorld');function paintDbQuality(){const a=dbQuality.value,out=a==='warn'?100:a==='drop'?96:0;dbQualityWorld.innerHTML='<div class=step-flow><div class=\"node ok\">100 pipeline rows</div><div class=\"node wait\">4 violate EXPECT</div><div class=\"node '+(a==='fail'?'fail':'ok')+'\">'+a+'</div><div class=\"node '+(out?'ok':'fail')+'\">'+(a==='fail'?'update rolled back':out+' rows')+'</div></div>';};dbQuality.onchange=paintDbQuality;paintDbQuality();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: DMFs measure on a schedule; expectations interpret results",
+        "minutes": 9,
+        "html": "<p><strong>The monitor revisits the table.</strong> Associate a system or custom DMF with a table or view and set <code>DATA_METRIC_SCHEDULE</code>. The DMF returns a measurement such as null count, freshness, duplicates, or schema changes. An expectation defines which result is a problem; notifications can report violations. Data Quality Monitoring is documented as an Enterprise Edition feature.</p><pre><code><span>-- sourced SQL sketch; not executed</span><span>ALTER TABLE PROD.ORDERS</span><span>  ADD DATA METRIC FUNCTION SNOWFLAKE.CORE.NULL_COUNT</span><span>  ON (ORDER_ID);</span></code></pre><label>Scheduled null count <input id=\"sfNulls\" type=\"range\" min=\"0\" max=\"12\" value=\"4\"></label><div id=\"sfQualityWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> A DMF result of four does not itself remove rows or undo the load. Bind an expectation, notification, and owner; add an orchestration gate separately when publication must stop.</p><p><strong>Execution label.</strong> No Snowflake SQL ran. The scheduled measurement view is local JavaScript.</p>",
+        "markdown": "Snowflake DMFs run on a schedule and return measurements. Expectations classify results and notifications can report violations; stopping publication requires a separate control. Data Quality Monitoring has edition requirements. SQL was not run.",
+        "javascript": "const sfNulls=$('sfNulls'),sfQualityWorld=$('sfQualityWorld');function paintSfQuality(){const n=+sfNulls.value,issue=n>0;sfQualityWorld.innerHTML='<div class=step-flow><div class=\"node ok\">scheduled DMF</div><div class=\"node '+(issue?'wait':'ok')+'\">NULL_COUNT = '+n+'</div><div class=\"node '+(issue?'fail':'ok')+'\">expectation '+(issue?'violated':'passes')+'</div><div class=\"node wait\">notify owner<br>table unchanged</div></div>';};sfNulls.oninput=paintSfQuality;paintSfQuality();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Where rule runs</td><td>inside Lakeflow dataset update</td><td>scheduled against table/view</td></tr><tr><td>Native result</td><td>warn, drop row, or fail update</td><td>measurement plus expectation status</td></tr><tr><td>Evidence</td><td>pipeline UI/event log</td><td>monitoring results/event table</td></tr><tr><td>Key boundary</td><td>parallel-flow and operator support</td><td>monitoring does not rewrite or stop arbitrary loads</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Location | pipeline update | scheduled table/view monitor |\n| Result | warn/drop/fail | measurement/expectation |\n| Boundary | flow graph | separate enforcement |"
+    },
+    "product_questions": [
+      [
+        "A Lakeflow update must publish all valid rows or nothing. Which action?",
+        [
+          "FAIL UPDATE",
+          "warn",
+          "DROP ROW"
+        ],
+        0,
+        "Fail-update rolls back the table update on violation."
+      ],
+      [
+        "Snowflake NULL_COUNT returns 4. What is guaranteed?",
+        [
+          "A measurement of four nulls for that evaluation",
+          "The source load rolled back",
+          "Four rows were deleted"
+        ],
+        0,
+        "DMFs measure; consequence is separately configured."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks: Manage data quality with pipeline expectations",
+        "https://docs.databricks.com/aws/en/ldp/expectations",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "Snowflake: System data metric functions",
+        "https://docs.snowflake.com/en/user-guide/data-quality-system-dmfs",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "Snowflake: Use SQL to set up data metric functions",
+        "https://docs.snowflake.com/en/user-guide/data-quality-working",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "Snowflake: Use SQL to work with expectations",
+        "https://docs.snowflake.com/en/user-guide/data-quality-expectations",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-05/databricks-certified-data-engineer-associate-exam-guide-may-2026-000.pdf",
+        "Guide dated May 4, 2026"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official overview last verified October 26, 2026; full IDs/weights unverified"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-10-31",
+      "session_type": "focused",
+      "cycle_position": 4,
+      "cycle_origin": "Day38",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "transformation_modeling",
+          "lakeflow_jobs",
+          "governance_security",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Focused Lakeflow expectation syntax, warn/drop/fail semantics, rollback, metrics, flow boundaries, and troubleshooting. Delivered coverage is not mastery."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "blueprint_status": "Official current overview last verified 2026-10-26; full objective IDs and weights remain unverified",
+        "planning_groups": [
+          "collaboration_protection",
+          "loading_unloading_transformation",
+          "account_warehouse_access"
+        ],
+        "scope": "Focused system DMFs, schedules, expectations, results, notifications, edition and enforcement boundaries. Complete COF-C03 coverage is not claimed."
+      },
+      "product_lab_execution": "not_run"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Take completed results in finish order, not submission order",
+    "goal": "Use ExecutorCompletionService when early completed work should be consumed without waiting behind an earlier slow task.",
+    "tag": "Java concurrency · ExecutorCompletionService",
+    "concept": "<p>Three restaurant orders were placed A, B, C. B is ready first. Waiting at the counter for A before collecting B lets hot food go cold.</p><p>Keeping a list of <code>Future</code>s and calling <code>get()</code> in submission order can block behind slow A even when B and C are done. <code>ExecutorCompletionService</code> places each completed future onto a completion queue. <code>take()</code> returns the next finished task.</p>",
+    "example": "<p>A takes 120 ms, B takes 20 ms, and C takes 60 ms. Submission-order reads produce A, B, C after A finishes. Completion-order reads produce B, C, A and let downstream processing start earlier.</p>",
+    "use_case": {
+      "when": "Use completion order for independent fan-out calls whose results can be processed as each finishes.",
+      "example": "Query three independent shard summaries and stream each ready result into an aggregation buffer.",
+      "decision": "Keep submission order when output order is contractual. Use invokeAny for the first acceptable result, or structured-concurrency primitives when cancellation and task lifetime need a stronger scope."
+    },
+    "practice": "Change task durations and compare submission-order blocking with the completion queue's visible order.",
+    "boundary": "The Java replay uses three sleeping tasks and a fixed pool. It does not measure scheduler precision, exceptions, timeouts, cancellation, bounded completion queues, structured concurrency, downstream ordering, or production latency.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>A duration <input id=\"taskA\" type=\"range\" min=\"20\" max=\"160\" value=\"120\"></label><div id=\"completionWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintCompletion(){const tasks=[['A',+taskA.value],['B',20],['C',60]],finish=[...tasks].sort((x,y)=>x[1]-y[1]);completionWorld.innerHTML='<p><strong>Question:</strong> Which result can be consumed first?</p><div class=step-flow>'+finish.map((x,i)=>'<div class=\"node '+(i?'wait':'ok')+'\">'+x[0]+' completes<br>'+x[1]+' ms<br>#'+(i+1)+'</div>').join('')+'</div><p>Submission-order <code>get(A)</code> waits '+tasks[0][1]+' ms. Completion queue yields <strong>'+finish[0][0]+'</strong> first.</p>';};taskA.oninput=paintCompletion;paintCompletion();",
+    "questions": [
+      [
+        "A is slow while B is complete. What can completionService.take() return?",
+        [
+          "B's future",
+          "Only A because it was submitted first",
+          "null in all cases"
+        ],
+        0,
+        "Completed futures enter a separate completion queue."
+      ],
+      [
+        "Why not always consume completion order?",
+        [
+          "Some contracts require original ordering",
+          "It uses no executor",
+          "It hides exceptions automatically"
+        ],
+        0,
+        "Finish order is wrong when consumer-visible ordering matters."
+      ],
+      [
+        "What still needs explicit handling?",
+        [
+          "Exceptions, timeout and cancellation policy",
+          "How to create threads at all",
+          "Whether Future has get"
+        ],
+        0,
+        "Completion order does not define failure or lifetime policy."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var pool=java.util.concurrent.Executors.newFixedThreadPool(3); var cs=new java.util.concurrent.ExecutorCompletionService<String>(pool);",
+          "note": "Wrap an executor with a completion queue."
+        },
+        {
+          "code": "cs.submit(() -> {Thread.sleep(120); return \"A\";}); cs.submit(() -> {Thread.sleep(20); return \"B\";}); cs.submit(() -> {Thread.sleep(60); return \"C\";});",
+          "note": "Submit three independent tasks in A, B, C order."
+        },
+        {
+          "code": "String first=cs.take().get(); String second=cs.take().get(); String third=cs.take().get();",
+          "note": "Take futures in actual completion order."
+        },
+        {
+          "code": "String order=first+second+third; pool.shutdownNow();",
+          "note": "The observed order is B, C, A."
+        }
+      ],
+      "expect": {
+        "first": "B",
+        "second": "C",
+        "third": "A",
+        "order": "BCA"
+      },
+      "limit": "The Java replay uses three sleeping tasks and a fixed pool. It does not measure scheduler precision, exceptions, timeouts, cancellation, bounded completion queues, structured concurrency, downstream ordering, or production latency.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "pool": "java.util.concurrent.ThreadPoolExecutor@6ef888f6[Running, pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0]",
+            "cs": "java.util.concurrent.ExecutorCompletionService@10e92f8f"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "pool": "java.util.concurrent.ThreadPoolExecutor@6ef888f6[Running, pool size = 3, active threads = 3, queued tasks = 0, completed tasks = 0]",
+            "cs": "java.util.concurrent.ExecutorCompletionService@10e92f8f"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "pool": "java.util.concurrent.ThreadPoolExecutor@6ef888f6[Running, pool size = 3, active threads = 0, queued tasks = 0, completed tasks = 3]",
+            "cs": "java.util.concurrent.ExecutorCompletionService@10e92f8f",
+            "first": "B",
+            "second": "C",
+            "third": "A"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "pool": "java.util.concurrent.ThreadPoolExecutor@6ef888f6[Shutting down, pool size = 3, active threads = 0, queued tasks = 0, completed tasks = 3]",
+            "cs": "java.util.concurrent.ExecutorCompletionService@10e92f8f",
+            "first": "B",
+            "second": "C",
+            "third": "A",
+            "order": "BCA"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java 26 ExecutorCompletionService",
+        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/concurrent/ExecutorCompletionService.html",
+        "Official Java API; checked October 31, 2026"
+      ],
+      [
+        "Java 17 CompletionService",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/CompletionService.html",
+        "Official Java API; checked October 31, 2026"
+      ]
+    ],
+    "visual_explanation": "The timeline sorts the same named tasks by finish time, then contrasts that order with the blocked submission-order reader.",
+    "written_questions": [
+      "Which fan-out paths wait on futures in creation order today?",
+      "Where must output ordering remain stable even if work completes out of order?"
+    ],
+    "source_checked_on": "2026-10-31"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Failover buys continuity; failback must reconcile the writes made while away",
+    "goal": "Treat return-to-primary as a separate migration with reverse replication, consistency evidence, and another traffic decision.",
+    "tag": "Distinguished Engineer judgment · disaster recovery",
+    "concept": "<p>Moving into a hotel during a home repair is not the same as moving home. The belongings acquired at the hotel must come back too.</p><p>After failover, the recovery region becomes the live source of truth. Failback requires rebuilding or validating the original region, replicating new writes back, proving the lag is within the RPO, then redirecting traffic. A tested failover button without a failback plan leaves the organization operating indefinitely in recovery mode.</p>",
+    "example": "<p>Primary had 1,000 orders at failover. Recovery accepts 27 new orders. Redirecting traffic back before reverse synchronization exposes only 1,000. Replicate and validate first; then primary has 1,027 before the controlled cutback.</p>",
+    "use_case": {
+      "when": "Design failback whenever regional recovery changes the authoritative write location or buffers regional messages.",
+      "example": "An order API fails from us-east-1 to us-west-2, where Kafka and the database accept new writes for six hours.",
+      "decision": "Remain in the recovery region until the primary is healthy, reverse replication is complete, in-flight messages are reconciled, dependencies are ready, and the business approves the second risk event. Do not rush back merely because the original region is reachable."
+    },
+    "practice": "Add recovery-region writes and toggle reverse synchronization. Watch the cutback expose a gap or a reconciled total.",
+    "boundary": "The arithmetic model has one append-only count. It does not model conflicts, dual writes, message ordering, DNS caches, replication topology, RPO/RTO, data sovereignty, dependent services, or AWS DRS operations.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Writes accepted in recovery <input id=\"recoveryWrites\" type=\"range\" min=\"0\" max=\"60\" value=\"27\"></label><label><input id=\"reverseSync\" type=\"checkbox\"> reverse-sync before cutback</label><div id=\"failbackWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintFailback(){const w=+recoveryWrites.value,s=reverseSync.checked,visible=1000+(s?w:0),lost=s?0:w;failbackWorld.innerHTML='<p><strong>Question:</strong> What does primary know at cutback?</p><div class=step-flow><div class=\"node ok\">primary at failover<br>1,000</div><div class=\"node wait\">recovery live<br>+'+w+'</div><div class=\"node '+(s?'ok':'fail')+'\">reverse sync '+(s?'complete':'skipped')+'</div><div class=\"node '+(lost?'fail':'ok')+'\">primary visible '+visible+'<br>gap '+lost+'</div></div>';};recoveryWrites.oninput=paintFailback;reverseSync.onchange=paintFailback;paintFailback();",
+    "questions": [
+      [
+        "Recovery accepted 27 writes. Primary has not reverse-synced. Immediate cutback exposes what?",
+        [
+          "A 27-write gap",
+          "All 1,027 automatically",
+          "A guaranteed duplicate only"
+        ],
+        0,
+        "The original primary lacks recovery-period writes."
+      ],
+      [
+        "Why is failback a separate change event?",
+        [
+          "It changes authority and traffic again after data reconciliation",
+          "DNS never changes",
+          "Recovery data is read-only"
+        ],
+        0,
+        "Return requires its own readiness, evidence and rollback."
+      ],
+      [
+        "When should you delay failback?",
+        [
+          "Primary is reachable but reverse replication and dependency checks are incomplete",
+          "All checks pass and lag is within policy",
+          "A drill has a named owner"
+        ],
+        0,
+        "Reachability alone is not consistency or service readiness."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "primary_at_failover=1000; recovery_writes=27",
+          "note": "Record the old primary checkpoint and recovery-period writes."
+        },
+        {
+          "code": "unsafe_cutback_visible=primary_at_failover",
+          "note": "Without reverse sync, cutback exposes only the old checkpoint."
+        },
+        {
+          "code": "reconciled_primary=primary_at_failover+recovery_writes",
+          "note": "Reverse replication restores the full append-only count."
+        },
+        {
+          "code": "unsafe_gap=reconciled_primary-unsafe_cutback_visible; safe_gap=reconciled_primary-reconciled_primary",
+          "note": "Evidence distinguishes an unsafe 27-write gap from zero in the toy."
+        }
+      ],
+      "expect": {
+        "primary_at_failover": 1000,
+        "recovery_writes": 27,
+        "unsafe_cutback_visible": 1000,
+        "reconciled_primary": 1027,
+        "unsafe_gap": 27,
+        "safe_gap": 0
+      },
+      "limit": "The arithmetic model has one append-only count. It does not model conflicts, dual writes, message ordering, DNS caches, replication topology, RPO/RTO, data sovereignty, dependent services, or AWS DRS operations.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "primary_at_failover": 1000,
+            "recovery_writes": 27
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "primary_at_failover": 1000,
+            "recovery_writes": 27,
+            "unsafe_cutback_visible": 1000
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "primary_at_failover": 1000,
+            "recovery_writes": 27,
+            "unsafe_cutback_visible": 1000,
+            "reconciled_primary": 1027
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "primary_at_failover": 1000,
+            "recovery_writes": 27,
+            "unsafe_cutback_visible": 1000,
+            "reconciled_primary": 1027,
+            "unsafe_gap": 27,
+            "safe_gap": 0
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Elastic Disaster Recovery: recovery and failback",
+        "https://docs.aws.amazon.com/drs/latest/userguide/failback.html",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "AWS Prescriptive Guidance: Multi-Region fundamental 2 — understanding data",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/aws-multi-region-fundamentals/fundamental-2.html",
+        "Official guidance; checked October 31, 2026"
+      ]
+    ],
+    "visual_explanation": "The authoritative write location moves to recovery, accumulates visible writes, and returns only after a reverse-sync gate. The gap is a labeled quantity, not a generic region arrow.",
+    "written_questions": [
+      "Which service becomes authoritative during each regional failover?",
+      "What exact data and dependency evidence authorizes failback?"
+    ],
+    "source_checked_on": "2026-10-31"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Use run hooks for the whole journey and agent hooks for one specialist",
+    "goal": "Place lifecycle instrumentation at the scope that matches the question without mistaking observation for policy enforcement.",
+    "tag": "GenAI harness engineering · lifecycle hooks",
+    "concept": "<p>A trip recorder follows the whole journey across drivers. A coach's notebook follows only one driver.</p><p>OpenAI Agents SDK <code>RunHooks</code> observe an entire <code>Runner.run</code>, including agent changes and handoffs. <code>AgentHooks</code> attach to one agent. Both expose lifecycle callbacks around agents, model calls, tools, and handoffs. Hooks are good for metrics, logging, and prefetching; they are not automatically an authorization boundary or a durable transaction log.</p>",
+    "example": "<p>A triage agent calls a tool, hands off to a refund agent, and the refund agent calls another tool. One run hook records both agents and both tools. Hooks attached only to refund record the refund start, its tool, and its end—not the triage events.</p>",
+    "use_case": {
+      "when": "Use run hooks for end-to-end latency, usage and trace correlation; use agent hooks for specialist-specific metrics or setup.",
+      "example": "Measure total support-run latency while separately tracking refund-agent tool failures and output quality.",
+      "decision": "Prefer built-in tracing where it already answers the question. Add hooks for application-specific events, minimize sensitive payload capture, keep callbacks fast, and use guardrails/tool authorization for enforcement rather than relying on logging callbacks."
+    },
+    "practice": "Switch observer scope and step through triage, tool, handoff, refund, and tool events. Watch which events remain visible.",
+    "boundary": "The local timeline does not run the SDK, callbacks, tracing, models, tools, sessions, concurrency, approvals, errors, or sensitive-data controls. It simplifies callback names and ordering for one successful path.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Observer <select id=\"hookScope\"><option value=\"run\">RunHooks</option><option value=\"refund\">refund AgentHooks</option></select></label><div id=\"hookWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintHooks(){const run=hookScope.value==='run',events=[['triage start','triage'],['lookup tool','triage'],['handoff','both'],['refund start','refund'],['refund tool','refund'],['refund end','refund']],seen=events.filter(e=>run||e[1]==='refund'||e[1]==='both');hookWorld.innerHTML='<p><strong>Question:</strong> Which lifecycle events reach this observer?</p><div class=step-flow>'+events.map(e=>'<div class=\"node '+(seen.includes(e)?'ok':'wait')+'\">'+e[0]+'<br>'+(seen.includes(e)?'observed':'outside scope')+'</div>').join('')+'</div><p><strong>'+seen.length+' of '+events.length+' events visible.</strong></p>';};hookScope.onchange=paintHooks;paintHooks();",
+    "questions": [
+      [
+        "Which hook scope sees events across a handoff?",
+        [
+          "RunHooks",
+          "Only the first agent's AgentHooks",
+          "Neither"
+        ],
+        0,
+        "Run hooks observe the whole Runner.run lifecycle."
+      ],
+      [
+        "Why attach AgentHooks to a refund specialist?",
+        [
+          "To isolate callbacks and metrics for that agent",
+          "To authorize every refund automatically",
+          "To share secrets with all agents"
+        ],
+        0,
+        "Agent hooks provide specialist-scoped observation."
+      ],
+      [
+        "What must hooks not replace?",
+        [
+          "Authorization, guardrails and durable audit design",
+          "All logging",
+          "Lifecycle callbacks"
+        ],
+        0,
+        "Observation callbacks alone are not an enforcement or persistence guarantee."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "events=[('triage','start'),('triage','tool'),('run','handoff'),('refund','start'),('refund','tool'),('refund','end')]",
+          "note": "Record one simplified multi-agent lifecycle."
+        },
+        {
+          "code": "run_hook=[event for event in events]",
+          "note": "A run-wide observer sees the full journey."
+        },
+        {
+          "code": "refund_hook=[event for event in events if event[0]=='refund']",
+          "note": "Agent-scoped hooks see only refund events in the toy."
+        },
+        {
+          "code": "counts={'run':len(run_hook),'refund':len(refund_hook)}",
+          "note": "The scope difference is explicit and testable."
+        }
+      ],
+      "expect": {
+        "events": [
+          [
+            "triage",
+            "start"
+          ],
+          [
+            "triage",
+            "tool"
+          ],
+          [
+            "run",
+            "handoff"
+          ],
+          [
+            "refund",
+            "start"
+          ],
+          [
+            "refund",
+            "tool"
+          ],
+          [
+            "refund",
+            "end"
+          ]
+        ],
+        "run_hook": [
+          [
+            "triage",
+            "start"
+          ],
+          [
+            "triage",
+            "tool"
+          ],
+          [
+            "run",
+            "handoff"
+          ],
+          [
+            "refund",
+            "start"
+          ],
+          [
+            "refund",
+            "tool"
+          ],
+          [
+            "refund",
+            "end"
+          ]
+        ],
+        "refund_hook": [
+          [
+            "refund",
+            "start"
+          ],
+          [
+            "refund",
+            "tool"
+          ],
+          [
+            "refund",
+            "end"
+          ]
+        ],
+        "counts": {
+          "run": 6,
+          "refund": 3
+        }
+      },
+      "limit": "The local timeline does not run the SDK, callbacks, tracing, models, tools, sessions, concurrency, approvals, errors, or sensitive-data controls. It simplifies callback names and ordering for one successful path.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "events": [
+              [
+                "triage",
+                "start"
+              ],
+              [
+                "triage",
+                "tool"
+              ],
+              [
+                "run",
+                "handoff"
+              ],
+              [
+                "refund",
+                "start"
+              ],
+              [
+                "refund",
+                "tool"
+              ],
+              [
+                "refund",
+                "end"
+              ]
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "events": [
+              [
+                "triage",
+                "start"
+              ],
+              [
+                "triage",
+                "tool"
+              ],
+              [
+                "run",
+                "handoff"
+              ],
+              [
+                "refund",
+                "start"
+              ],
+              [
+                "refund",
+                "tool"
+              ],
+              [
+                "refund",
+                "end"
+              ]
+            ],
+            "run_hook": [
+              [
+                "triage",
+                "start"
+              ],
+              [
+                "triage",
+                "tool"
+              ],
+              [
+                "run",
+                "handoff"
+              ],
+              [
+                "refund",
+                "start"
+              ],
+              [
+                "refund",
+                "tool"
+              ],
+              [
+                "refund",
+                "end"
+              ]
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "events": [
+              [
+                "triage",
+                "start"
+              ],
+              [
+                "triage",
+                "tool"
+              ],
+              [
+                "run",
+                "handoff"
+              ],
+              [
+                "refund",
+                "start"
+              ],
+              [
+                "refund",
+                "tool"
+              ],
+              [
+                "refund",
+                "end"
+              ]
+            ],
+            "run_hook": [
+              [
+                "triage",
+                "start"
+              ],
+              [
+                "triage",
+                "tool"
+              ],
+              [
+                "run",
+                "handoff"
+              ],
+              [
+                "refund",
+                "start"
+              ],
+              [
+                "refund",
+                "tool"
+              ],
+              [
+                "refund",
+                "end"
+              ]
+            ],
+            "refund_hook": [
+              [
+                "refund",
+                "start"
+              ],
+              [
+                "refund",
+                "tool"
+              ],
+              [
+                "refund",
+                "end"
+              ]
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "events": [
+              [
+                "triage",
+                "start"
+              ],
+              [
+                "triage",
+                "tool"
+              ],
+              [
+                "run",
+                "handoff"
+              ],
+              [
+                "refund",
+                "start"
+              ],
+              [
+                "refund",
+                "tool"
+              ],
+              [
+                "refund",
+                "end"
+              ]
+            ],
+            "run_hook": [
+              [
+                "triage",
+                "start"
+              ],
+              [
+                "triage",
+                "tool"
+              ],
+              [
+                "run",
+                "handoff"
+              ],
+              [
+                "refund",
+                "start"
+              ],
+              [
+                "refund",
+                "tool"
+              ],
+              [
+                "refund",
+                "end"
+              ]
+            ],
+            "refund_hook": [
+              [
+                "refund",
+                "start"
+              ],
+              [
+                "refund",
+                "tool"
+              ],
+              [
+                "refund",
+                "end"
+              ]
+            ],
+            "counts": {
+              "run": 6,
+              "refund": 3
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI Agents SDK: Agents — lifecycle events",
+        "https://openai.github.io/openai-agents-python/agents/#lifecycle-events-hooks",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "OpenAI Agents SDK: Lifecycle API",
+        "https://openai.github.io/openai-agents-python/ref/lifecycle/",
+        "Official reference; checked October 31, 2026"
+      ]
+    ],
+    "visual_explanation": "One event rail remains fixed while the observer scope changes. Events dim when outside the selected hook, exposing the coverage boundary directly.",
+    "written_questions": [
+      "Which metrics need one run-wide observer across handoffs?",
+      "Which hook payload fields must be redacted or excluded before logging?"
+    ],
+    "source_checked_on": "2026-10-31"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "A nearby indirect state can slow recombination without giving up strong absorption",
+    "goal": "Understand the reported pseudo-direct band structure in bismuth sulfide and why it is promising rather than a finished solar-cell result.",
+    "tag": "New research · Nature · October 28, 2026",
+    "concept": "<p>A busy station has a bright entrance and a quieter waiting room one level below. Light brings carriers in efficiently through the bright direct transition; many carriers spend time in the nearby indirect reservoir before recombining.</p><p>The study reports that bismuth sulfide has a lower-energy indirect transition and a strong direct transition only tens of meV above it. At room temperature, thermal exchange between the states preserves strong absorption while delaying bimolecular electron–hole recombination. For a reported splitting near 40 meV, modelling and measurements support about 75% suppression relative to the direct-only expectation.</p>",
+    "example": "<p>The teaching model starts with 100 carrier pairs. A reservoir-share control moves carriers into a slower indirect state. At 75% modeled suppression, a toy interval shows 25 recombination opportunities instead of 100. This is a proportional intuition, not the paper's kinetics.</p>",
+    "use_case": {
+      "when": "Use the result to guide research on solar absorbers, photocatalysis, and screening for materials with closely spaced direct and indirect transitions.",
+      "example": "A materials team screens candidates for strong absorption plus longer carrier lifetime for multi-electron solar-fuel reactions.",
+      "decision": "Treat Bi₂S₃ as a demonstrated pseudo-direct candidate, not a certified high-efficiency device. Device transport, traps, interfaces, stability, scalable films, extraction, toxicity and full-cell efficiency still need evidence."
+    },
+    "practice": "Move the suppression control and watch strong absorption remain while the toy recombination count falls. Compare that with an indirect material that sacrifices absorption.",
+    "boundary": "The proportional model does not implement van Roosbroeck–Shockley theory, temperature dependence, band populations, traps, diffusion, extraction, spectra, device efficiency, or the paper's fitted kinetics. The 75% claim is scoped to the reported room-temperature analysis near ΔE≈40 meV.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Modeled recombination suppression <input id=\"suppression\" type=\"range\" min=\"0\" max=\"90\" value=\"75\"></label><div id=\"carrierWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintCarrier(){const s=+suppression.value,left=100-s;carrierWorld.innerHTML='<p><strong>Question:</strong> Can absorption stay high while recombination slows?</p><div class=step-flow><div class=\"node ok\">direct transition<br>strong absorption</div><div class=\"node wait\">indirect reservoir<br>nearby state</div><div class=\"node '+(s?'ok':'wait')+'\">toy recombination<br>'+left+' of 100</div></div><div style=\"height:18px;background:linear-gradient(90deg,#34d399 0 '+s+'%,#fb7185 '+s+'% 100%);border-radius:9px\"></div><p>'+s+'% delayed in the proportional teaching view.</p>';};suppression.oninput=paintCarrier;paintCarrier();",
+    "questions": [
+      [
+        "What makes the material pseudo-direct in the paper?",
+        [
+          "A lower indirect transition sits close to a strong direct transition",
+          "It has no bandgap",
+          "Every transition is forbidden"
+        ],
+        0,
+        "Closely spaced indirect and direct states split absorption and recombination roles."
+      ],
+      [
+        "What was reported near 40 meV at room temperature?",
+        [
+          "About 75% suppression of bimolecular recombination relative to the direct expectation",
+          "75% device efficiency",
+          "No absorption"
+        ],
+        0,
+        "The percentage concerns modeled/measured recombination behavior, not cell efficiency."
+      ],
+      [
+        "Why is this not a finished photovoltaic claim?",
+        [
+          "Transport, interfaces, traps, stability and full-device efficiency remain",
+          "The article lacks a title",
+          "Bismuth sulfide cannot absorb light"
+        ],
+        0,
+        "A material mechanism is not a qualified device."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "pairs=100; suppression_fraction=0.75",
+          "note": "Start a proportional teaching comparison."
+        },
+        {
+          "code": "direct_only_opportunities=pairs",
+          "note": "Use 100 as the direct-only reference."
+        },
+        {
+          "code": "pseudo_direct_opportunities=round(pairs*(1-suppression_fraction))",
+          "note": "Apply the reported-scale suppression only as a toy proportion."
+        },
+        {
+          "code": "delayed=direct_only_opportunities-pseudo_direct_opportunities",
+          "note": "The model displays 75 fewer immediate opportunities."
+        }
+      ],
+      "expect": {
+        "pairs": 100,
+        "suppression_fraction": 0.75,
+        "direct_only_opportunities": 100,
+        "pseudo_direct_opportunities": 25,
+        "delayed": 75
+      },
+      "limit": "The proportional model does not implement van Roosbroeck–Shockley theory, temperature dependence, band populations, traps, diffusion, extraction, spectra, device efficiency, or the paper's fitted kinetics. The 75% claim is scoped to the reported room-temperature analysis near ΔE≈40 meV.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "pairs": 100,
+            "suppression_fraction": 0.75
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "pairs": 100,
+            "suppression_fraction": 0.75,
+            "direct_only_opportunities": 100
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "pairs": 100,
+            "suppression_fraction": 0.75,
+            "direct_only_opportunities": 100,
+            "pseudo_direct_opportunities": 25
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "pairs": 100,
+            "suppression_fraction": 0.75,
+            "direct_only_opportunities": 100,
+            "pseudo_direct_opportunities": 25,
+            "delayed": 75
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Righetto et al., Delayed electron–hole recombination in a pseudo-direct semiconductor",
+        "https://www.nature.com/articles/s41586-026-11223-x",
+        "Primary Nature article; published October 28, 2026"
+      ]
+    ],
+    "visual_explanation": "The direct entrance, indirect reservoir and proportional recombination bar answer the mechanism question without pretending to reproduce the paper's band calculations.",
+    "written_questions": [
+      "Which experiment separates intrinsic bimolecular recombination from trap-mediated loss?",
+      "What device-level evidence would show that delayed recombination improves extracted solar energy?"
+    ],
+    "source_checked_on": "2026-10-31"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "Job outputs are small control messages, not an artifact transport",
+    "goal": "Keep GitHub Actions job outputs bounded and non-secret; move large files through artifacts instead of the needs context.",
+    "tag": "GitHub Actions · job outputs",
+    "concept": "<p>A baggage tag tells the next worker which suitcase to fetch. It is not the suitcase.</p><p>GitHub job outputs pass small strings to dependent jobs through <code>needs</code>. GitHub documents a 1 MB maximum per job and 50 MB total per workflow run, approximated with UTF-16 encoding. Outputs that may contain secrets can be redacted and not sent. Large reports, binaries, and datasets belong in workflow artifacts.</p>",
+    "example": "<p>A build job emits <code>image_digest=sha256:…</code> and <code>artifact_name=service-linux</code> as outputs. The 18-MB binary is uploaded as an artifact. The deploy job reads the two identifiers, downloads the artifact, and verifies the digest.</p>",
+    "use_case": {
+      "when": "Use job outputs for small routing decisions, IDs, digests, versions, booleans, and artifact names needed by dependent jobs.",
+      "example": "A matrix build returns one image digest per platform while artifacts carry SBOMs and test bundles.",
+      "decision": "If downstream logic needs file contents, upload an artifact. If the value is sensitive, use the appropriate secret mechanism and minimize propagation. Treat output size limits as ceilings, not targets."
+    },
+    "practice": "Change payload size and secret-likeness. Watch the model select output, artifact, or blocked propagation.",
+    "boundary": "The model approximates UTF-16 as two bytes per character and one job. GitHub's real approximation, masking heuristics, matrix-output behavior, artifact retention, permissions, compression, and billing are not executed.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Payload characters <input id=\"outputChars\" type=\"range\" min=\"20\" max=\"800000\" step=\"20000\" value=\"200\"></label><label><input id=\"secretLike\" type=\"checkbox\"> may contain a secret</label><div id=\"outputWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintOutput(){const chars=+outputChars.value,bytes=chars*2,secret=secretLike.checked,large=bytes>1048576,route=secret?'do not publish output':large?'upload artifact':'job output';outputWorld.innerHTML='<p><strong>Question:</strong> Which channel should carry this value?</p><div class=step-flow><div class=\"node ok\">'+chars.toLocaleString()+' chars</div><div class=\"node '+(large?'fail':'ok')+'\">≈ '+Math.round(bytes/1024)+' KiB UTF-16</div><div class=\"node '+(secret?'fail':large?'wait':'ok')+'\">'+route+'</div><div class=\"node ok\">downstream gets identifier</div></div>';};outputChars.oninput=paintOutput;secretLike.onchange=paintOutput;paintOutput();",
+    "questions": [
+      [
+        "An 18-MB report must reach the next job. Use what?",
+        [
+          "A workflow artifact",
+          "One job output",
+          "A secret-looking output"
+        ],
+        0,
+        "Outputs are for small strings; artifacts carry files."
+      ],
+      [
+        "Why can a secret-like output disappear?",
+        [
+          "GitHub may redact it on the runner and not send it",
+          "needs decrypts it later",
+          "Artifacts require YAML"
+        ],
+        0,
+        "Potential secret outputs are skipped rather than propagated."
+      ],
+      [
+        "What belongs in a job output?",
+        [
+          "A digest or artifact name",
+          "A compiled binary",
+          "A database export"
+        ],
+        0,
+        "Small control metadata is the intended shape."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "image_digest='sha256:abc123'; artifact_name='service-linux'",
+          "note": "Create two small control values."
+        },
+        {
+          "code": "binary_size_mb=18; output_limit_mb=1",
+          "note": "Compare a real file-sized payload with the per-job ceiling."
+        },
+        {
+          "code": "binary_channel='artifact' if binary_size_mb>output_limit_mb else 'job-output'",
+          "note": "Move the binary through the file channel."
+        },
+        {
+          "code": "downstream={'digest':image_digest,'download':artifact_name,'binary_channel':binary_channel}",
+          "note": "The next job receives identifiers, then verifies downloaded content."
+        }
+      ],
+      "expect": {
+        "image_digest": "sha256:abc123",
+        "artifact_name": "service-linux",
+        "binary_size_mb": 18,
+        "output_limit_mb": 1,
+        "binary_channel": "artifact",
+        "downstream": {
+          "digest": "sha256:abc123",
+          "download": "service-linux",
+          "binary_channel": "artifact"
+        }
+      },
+      "limit": "The model approximates UTF-16 as two bytes per character and one job. GitHub's real approximation, masking heuristics, matrix-output behavior, artifact retention, permissions, compression, and billing are not executed.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "image_digest": "sha256:abc123",
+            "artifact_name": "service-linux"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "image_digest": "sha256:abc123",
+            "artifact_name": "service-linux",
+            "binary_size_mb": 18,
+            "output_limit_mb": 1
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "image_digest": "sha256:abc123",
+            "artifact_name": "service-linux",
+            "binary_size_mb": 18,
+            "output_limit_mb": 1,
+            "binary_channel": "artifact"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "image_digest": "sha256:abc123",
+            "artifact_name": "service-linux",
+            "binary_size_mb": 18,
+            "output_limit_mb": 1,
+            "binary_channel": "artifact",
+            "downstream": {
+              "digest": "sha256:abc123",
+              "download": "service-linux",
+              "binary_channel": "artifact"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions workflow syntax: job outputs",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idoutputs",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "GitHub Actions: Passing information between jobs",
+        "https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/pass-job-outputs",
+        "Official documentation; checked October 31, 2026"
+      ],
+      [
+        "GitHub Actions: Workflow artifacts",
+        "https://docs.github.com/en/actions/concepts/workflows-and-actions/workflow-artifacts",
+        "Official documentation; checked October 31, 2026"
+      ]
+    ],
+    "visual_explanation": "The diagram measures the payload on the documented UTF-16 scale and routes it to control-message, artifact, or blocked-secret handling.",
+    "written_questions": [
+      "Which workflows pass files or large JSON blobs through job outputs today?",
+      "What minimal digest, ID, or artifact name can replace each large output?"
+    ],
+    "source_checked_on": "2026-10-31"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Missing and null are different—and OpenAPI 3.1 spells null differently",
+    "goal": "Model field presence separately from nullability and migrate schemas without silently rejecting or accepting the wrong payloads.",
+    "tag": "APIs & Microservices · OpenAPI evolution",
+    "concept": "<p>An empty delivery box is different from no box arriving. JSON <code>null</code> is a present field with no value; a missing property is absent.</p><p>In OpenAPI 3.0, a string that also accepts null uses <code>type: string</code> plus <code>nullable: true</code>. OpenAPI 3.1 aligns with JSON Schema and can use <code>type: [string, 'null']</code>. Separately, listing the property in the parent's <code>required</code> array controls whether it must be present.</p>",
+    "example": "<p><code>middle_name</code> may be absent when not collected, null when explicitly unknown, or a string when known. If it is required and nullable, absence fails but null passes. If optional and non-null, absence passes but null fails.</p>",
+    "use_case": {
+      "when": "Make the distinction explicit during API schema design, SDK generation, database mapping, PATCH semantics, and OpenAPI 3.0-to-3.1 migration.",
+      "example": "A customer profile distinguishes “producer did not send tax residency” from “customer explicitly has no secondary residency.”",
+      "decision": "Allow null only when it has domain meaning. Prefer optional absence for fields not collected. Test generators and validators during version migration; do not mechanically leave 3.0-only nullable keywords in a 3.1 contract."
+    },
+    "practice": "Toggle required, nullable, and payload state. Predict validation before the result appears, then switch the displayed 3.0/3.1 schema form.",
+    "boundary": "The validator models one property only. It does not execute an OpenAPI validator or generator, model PATCH merge semantics, defaults, oneOf, read/write direction, serialization, language option types, or every JSON Schema dialect.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"requiredField\" type=\"checkbox\"> required</label><label><input id=\"nullableField\" type=\"checkbox\" checked> accepts null</label><label>Payload <select id=\"payloadState\"><option value=\"missing\">missing</option><option value=\"null\">present: null</option><option value=\"string\">present: \"Lee\"</option></select></label><div id=\"nullWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintNull(){const req=requiredField.checked,nul=nullableField.checked,s=payloadState.value,valid=s==='missing'?!req:s==='null'?nul:true,reason=s==='missing'?(req?'required property absent':'optional property absent'):s==='null'?(nul?'null is an allowed type':'null is not allowed'):'string matches';nullWorld.innerHTML='<p><strong>Question:</strong> Does this payload validate?</p><div class=step-flow><div class=\"node '+(req?'wait':'ok')+'\">presence: '+(req?'required':'optional')+'</div><div class=\"node '+(nul?'ok':'wait')+'\">value: '+(nul?'string or null':'string only')+'</div><div class=\"node wait\">payload '+s+'</div><div class=\"node '+(valid?'ok':'fail')+'\">'+(valid?'valid':'invalid')+'<br>'+reason+'</div></div>';};requiredField.onchange=paintNull;nullableField.onchange=paintNull;payloadState.onchange=paintNull;paintNull();",
+    "questions": [
+      [
+        "Field is required and nullable; payload contains null. Result?",
+        [
+          "Valid",
+          "Invalid because required forbids null",
+          "Field becomes missing"
+        ],
+        0,
+        "Required controls presence; nullable permits the present null value."
+      ],
+      [
+        "Field is optional and non-null; payload omits it. Result?",
+        [
+          "Valid",
+          "Invalid because every field needs a value",
+          "It becomes null"
+        ],
+        0,
+        "Optional absence is not the same as a null value."
+      ],
+      [
+        "How does OAS 3.1 normally express a nullable string?",
+        [
+          "type: [string, null]",
+          "nullable: true without a type",
+          "required: null"
+        ],
+        0,
+        "3.1 uses JSON Schema type unions."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "cases=[{'required':True,'nullable':True,'state':'null'},{'required':False,'nullable':False,'state':'missing'},{'required':True,'nullable':False,'state':'null'}]",
+          "note": "Define three presence/value combinations."
+        },
+        {
+          "code": "def valid(c): return (c['state']!='missing' or not c['required']) and (c['state']!='null' or c['nullable'])",
+          "note": "Evaluate presence and null permission independently."
+        },
+        {
+          "code": "results=[valid(c) for c in cases]",
+          "note": "Required-nullable passes; optional-missing passes; required-non-null null fails."
+        },
+        {
+          "code": "oas30={'type':'string','nullable':True}; oas31={'type':['string','null']}",
+          "note": "Show equivalent nullable intent in the two specification generations."
+        }
+      ],
+      "expect": {
+        "cases": [
+          {
+            "required": true,
+            "nullable": true,
+            "state": "null"
+          },
+          {
+            "required": false,
+            "nullable": false,
+            "state": "missing"
+          },
+          {
+            "required": true,
+            "nullable": false,
+            "state": "null"
+          }
+        ],
+        "results": [
+          true,
+          true,
+          false
+        ],
+        "oas30": {
+          "type": "string",
+          "nullable": true
+        },
+        "oas31": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "limit": "The validator models one property only. It does not execute an OpenAPI validator or generator, model PATCH merge semantics, defaults, oneOf, read/write direction, serialization, language option types, or every JSON Schema dialect.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "cases": [
+              {
+                "required": true,
+                "nullable": true,
+                "state": "null"
+              },
+              {
+                "required": false,
+                "nullable": false,
+                "state": "missing"
+              },
+              {
+                "required": true,
+                "nullable": false,
+                "state": "null"
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "cases": [
+              {
+                "required": true,
+                "nullable": true,
+                "state": "null"
+              },
+              {
+                "required": false,
+                "nullable": false,
+                "state": "missing"
+              },
+              {
+                "required": true,
+                "nullable": false,
+                "state": "null"
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "cases": [
+              {
+                "required": true,
+                "nullable": true,
+                "state": "null"
+              },
+              {
+                "required": false,
+                "nullable": false,
+                "state": "missing"
+              },
+              {
+                "required": true,
+                "nullable": false,
+                "state": "null"
+              }
+            ],
+            "results": [
+              true,
+              true,
+              false
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "cases": [
+              {
+                "required": true,
+                "nullable": true,
+                "state": "null"
+              },
+              {
+                "required": false,
+                "nullable": false,
+                "state": "missing"
+              },
+              {
+                "required": true,
+                "nullable": false,
+                "state": "null"
+              }
+            ],
+            "results": [
+              true,
+              true,
+              false
+            ],
+            "oas30": {
+              "type": "string",
+              "nullable": true
+            },
+            "oas31": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "OpenAPI Specification 3.0.3 — Schema Object nullable",
+        "https://spec.openapis.org/oas/v3.0.3#schema-object",
+        "Official specification; checked October 31, 2026"
+      ],
+      [
+        "OpenAPI Specification 3.1.0 — Schema Object and JSON Schema dialect",
+        "https://spec.openapis.org/oas/v3.1.0#schema-object",
+        "Official specification; checked October 31, 2026"
+      ],
+      [
+        "JSON Schema 2020-12 validation",
+        "https://json-schema.org/draft/2020-12/json-schema-validation",
+        "Official specification; checked October 31, 2026"
+      ]
+    ],
+    "visual_explanation": "Two independent switches—presence and allowed value types—feed the payload state. The result makes missing-versus-null impossible to collapse accidentally.",
+    "written_questions": [
+      "Which API fields currently use null to mean something different from absent?",
+      "Which generators and validators must be compatibility-tested before adopting OpenAPI 3.1?"
+    ],
+    "source_checked_on": "2026-10-31"
+  }
+]
