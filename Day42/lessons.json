@@ -1,0 +1,1278 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Add clusters for waiting queries; add size for a hungry query",
+    "goal": "Distinguish concurrency scaling from per-query sizing so a busy SQL service does not spend more while fixing the wrong bottleneck.",
+    "tag": "Focused certification lesson · compute and concurrency · cycle 4, position 5",
+    "concept": "<p>A grocery store has two different problems. A long checkout line needs more open lanes. One oversized cart needs a lane with more room and staff.</p><p>SQL warehouses have the same split. <strong>Scale out</strong> adds clusters so more independent queries run at once. <strong>Scale up</strong> gives each cluster more compute and memory, which can help a single query that spills or scans heavily. More clusters do not automatically make one slow query fast.</p>",
+    "example": "<p>Thirty queries arrive together. One cluster can actively serve ten in the teaching model, so twenty wait. Three same-sized clusters can serve all thirty concurrently. But one query that needs 18 GB while a cluster offers 12 GB still spills; it needs a larger size or a better plan, not another identical cluster.</p>",
+    "use_case": {
+      "when": "Use this distinction when dashboard or BI users report queues, when a query profile reports spill, or when cost rises after indiscriminate warehouse resizing.",
+      "example": "A finance dashboard opens at 9 AM with 30 short queries while one month-end aggregation spills to disk.",
+      "decision": "Add concurrency capacity when many short queries wait. Increase size or optimize SQL when one query lacks memory or compute. Separate workloads when their SLOs and cost controls differ; measure queue and spill evidence before changing either knob."
+    },
+    "practice": "Change query count, clusters, and memory demand. Predict whether the queue or the large query remains the limiting problem.",
+    "boundary": "The local arithmetic uses ten query slots per cluster and one memory threshold. Real admission, scheduling, caching, I/O, serverless prediction, query shape, cluster warm-up, permissions, editions, and credits differ. No vendor warehouse or SQL ran.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Queries arriving <input id=\"queryCount\" type=\"range\" min=\"5\" max=\"50\" step=\"5\" value=\"30\"></label><label>Clusters <input id=\"clusterCount\" type=\"range\" min=\"1\" max=\"5\" value=\"1\"></label><label>Large-query memory need (GB) <input id=\"memoryNeed\" type=\"range\" min=\"6\" max=\"24\" value=\"18\"></label><div id=\"scaleWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintScale(){const q=+queryCount.value,c=+clusterCount.value,need=+memoryNeed.value,slots=c*10,run=Math.min(q,slots),wait=q-run,spill=Math.max(0,need-12);scaleWorld.innerHTML='<p><strong>Question:</strong> Is the problem waiting work or one hungry query?</p><div class=tiles><div class=tile><strong>arrival</strong><br>'+q+' queries</div><div class=tile><strong>concurrency lanes</strong><br>'+c+' × 10 = '+slots+' slots</div><div class=\"tile '+(wait?'active':'')+'\"><strong>queue</strong><br>'+wait+' waiting</div><div class=\"tile '+(spill?'active':'')+'\"><strong>large query</strong><br>'+need+' GB need<br>'+spill+' GB over toy capacity</div></div><p>'+ (wait?'Add clusters or isolate workload to reduce the queue.':'Concurrency fits.')+' '+(spill?'The large query still needs size or plan work.':'The large query fits the toy memory threshold.')+'</p>';};queryCount.oninput=paintScale;clusterCount.oninput=paintScale;memoryNeed.oninput=paintScale;paintScale();",
+    "questions": [
+      [
+        "30 queries, one ten-slot cluster, no spill. Which first change addresses the queue?",
+        [
+          "Increase maximum clusters",
+          "Double every table",
+          "Increase one query timeout"
+        ],
+        0,
+        "More same-sized clusters create concurrent lanes for independent queries."
+      ],
+      [
+        "Why can three clusters leave one spilling query slow?",
+        [
+          "Clusters improve concurrency; each query still runs on one cluster's resources",
+          "Spill is a network permission",
+          "Queues delete query plans"
+        ],
+        0,
+        "The bottleneck is per-query capacity or plan shape, not the number of parallel lanes."
+      ],
+      [
+        "What evidence should block blind scale-out?",
+        [
+          "No queue, but query profile shows spill",
+          "Peak queued queries stay above zero",
+          "Thirty short queries arrive together"
+        ],
+        0,
+        "With no queue and visible spill, more clusters target the wrong problem."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "queries=30; slots_per_cluster=10; clusters=1",
+          "note": "Start with one concurrency lane group."
+        },
+        {
+          "code": "running=min(queries, slots_per_cluster*clusters); queued=queries-running",
+          "note": "Ten run and twenty wait."
+        },
+        {
+          "code": "clusters=3; running=min(queries, slots_per_cluster*clusters); queued=queries-running",
+          "note": "Three clusters admit all thirty in the toy."
+        },
+        {
+          "code": "memory_need_gb=18; cluster_memory_gb=12; spill_gb=max(0,memory_need_gb-cluster_memory_gb)",
+          "note": "The same large query still exceeds per-cluster capacity."
+        }
+      ],
+      "expect": {
+        "queries": 30,
+        "slots_per_cluster": 10,
+        "clusters": 3,
+        "running": 30,
+        "queued": 0,
+        "memory_need_gb": 18,
+        "cluster_memory_gb": 12,
+        "spill_gb": 6
+      },
+      "limit": "The local arithmetic uses ten query slots per cluster and one memory threshold. Real admission, scheduling, caching, I/O, serverless prediction, query shape, cluster warm-up, permissions, editions, and credits differ. No vendor warehouse or SQL ran.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "queries": 30,
+            "slots_per_cluster": 10,
+            "clusters": 1
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "queries": 30,
+            "slots_per_cluster": 10,
+            "clusters": 1,
+            "running": 10,
+            "queued": 20
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "queries": 30,
+            "slots_per_cluster": 10,
+            "clusters": 3,
+            "running": 30,
+            "queued": 0
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "queries": 30,
+            "slots_per_cluster": 10,
+            "clusters": 3,
+            "running": 30,
+            "queued": 0,
+            "memory_need_gb": 18,
+            "cluster_memory_gb": 12,
+            "spill_gb": 6
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks SQL warehouse sizing, scaling, and queuing behavior",
+        "https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior",
+        "Official documentation; updated October 8, 2026; checked November 1, 2026"
+      ],
+      [
+        "Databricks: Create a SQL warehouse",
+        "https://docs.databricks.com/aws/en/compute/sql-warehouse/create",
+        "Official documentation; checked November 1, 2026"
+      ],
+      [
+        "Snowflake: Multi-cluster warehouses",
+        "https://docs.snowflake.com/en/user-guide/warehouses-multicluster",
+        "Official documentation; checked November 1, 2026"
+      ],
+      [
+        "Snowflake CREATE WAREHOUSE",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-warehouse",
+        "Official SQL reference; checked November 1, 2026"
+      ]
+    ],
+    "visual_explanation": "The visual keeps queue capacity and per-query memory on separate readouts. Moving the cluster control can empty the queue while leaving the same spill unchanged.",
+    "written_questions": [
+      "Which warehouse currently shows queue evidence, and which shows spill or plan evidence?",
+      "What cost and latency SLO will tell you whether the change worked?"
+    ],
+    "source_checked_on": "2026-11-01",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: use queue and spill evidence to choose the knob",
+        "minutes": 9,
+        "html": "<p><strong>Serverless manages admission and clusters for you.</strong> Intelligent Workload Management predicts requirements, queues work when capacity is unavailable, and scales clusters as waits grow. Cluster size remains the per-cluster resource choice. For classic and pro warehouses, you configure minimum and maximum clusters.</p><pre><code><span>// sourced REST payload sketch; not executed</span><span>{&quot;name&quot;:&quot;finance-bi&quot;, &quot;cluster_size&quot;:&quot;Medium&quot;,</span><span> &quot;min_num_clusters&quot;:1, &quot;max_num_clusters&quot;:3}</span></code></pre><p>There is no SQL <code>CREATE WAREHOUSE</code> equivalent here; use the UI, SQL Warehouses API, or Terraform with the required workspace privileges.</p><label>Databricks max clusters <input id=\"dbClusters\" type=\"range\" min=\"1\" max=\"4\" value=\"1\"></label><div id=\"dbScaleWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> A persistent Peak Queued Queries value above zero can justify more clusters; bytes spilled in Query Profile points toward size or query work. Warm-up and serverless behavior are not represented locally.</p><p><strong>Execution label.</strong> The API payload is an unexecuted vendor sketch. The queue view is local JavaScript.</p>",
+        "markdown": "Databricks serverless IWM manages queuing and autoscaling. For classic/pro, configure cluster bounds. Use Peak Queued Queries for concurrency and Query Profile spill for per-query sizing. Warehouse creation uses UI/API/Terraform, not SQL; the sketch was not run.",
+        "javascript": "const dbClusters=$('dbClusters'),dbScaleWorld=$('dbScaleWorld');function paintDbScale(){const c=+dbClusters.value,q=30,run=Math.min(q,c*10),wait=q-run;dbScaleWorld.innerHTML='<div class=tiles><div class=tile>30 BI queries</div><div class=tile>'+c+' cluster'+(c>1?'s':'')+'<br>'+c*10+' toy slots</div><div class=\"tile '+(wait?'active':'')+'\">Peak queued<br>'+wait+'</div><div class=tile>18 GB query<br>spill unchanged</div></div>';};dbClusters.oninput=paintDbScale;paintDbScale();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: multi-cluster is a concurrency control, not a slow-query cure",
+        "minutes": 9,
+        "html": "<p><strong>A multi-cluster warehouse adds same-sized compute clusters as queries queue.</strong> Auto-scale mode uses different minimum and maximum counts. <code>STANDARD</code> favors responsiveness; <code>ECONOMY</code> waits for enough load to keep another cluster busy. Multi-cluster warehouses require Enterprise Edition or higher.</p><pre><code><span>-- sourced SQL sketch; not executed</span><span>CREATE WAREHOUSE finance_bi WAREHOUSE_SIZE='MEDIUM'</span><span> MIN_CLUSTER_COUNT=1 MAX_CLUSTER_COUNT=3</span><span> SCALING_POLICY='STANDARD' AUTO_SUSPEND=300;</span></code></pre><label>Snowflake running clusters <input id=\"sfClusters\" type=\"range\" min=\"1\" max=\"3\" value=\"1\"></label><div id=\"sfScaleWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> Snowflake explicitly says multi-cluster is best for concurrency. Resize the warehouse for a slow query or load when per-query resources are the constraint. More running clusters also consume more credits.</p><p><strong>Execution label.</strong> No Snowflake SQL ran. The cluster/queue view is local JavaScript.</p>",
+        "markdown": "Snowflake auto-scale mode has MIN less than MAX; STANDARD favors less queuing and ECONOMY favors fuller clusters. Multi-cluster is an Enterprise Edition feature and targets concurrency, not one slow query. SQL was not run.",
+        "javascript": "const sfClusters=$('sfClusters'),sfScaleWorld=$('sfScaleWorld');function paintSfScale(){const c=+sfClusters.value,q=30,run=Math.min(q,c*10),wait=q-run;sfScaleWorld.innerHTML='<div class=tiles><div class=tile>30 dashboard queries</div><div class=tile>'+c+' MEDIUM cluster'+(c>1?'s':'')+'</div><div class=\"tile '+(wait?'active':'')+'\">queued '+wait+'</div><div class=tile>credit rate rises<br>with active clusters</div></div>';};sfClusters.oninput=paintSfScale;paintSfScale();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Decision</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Concurrency signal</td><td>Peak Queued Queries</td><td>queued load / warehouse load</td></tr><tr><td>Scale-out</td><td>serverless IWM or max clusters</td><td>multi-cluster min/max</td></tr><tr><td>Single-query signal</td><td>spill in Query Profile</td><td>slow query/profile evidence</td></tr><tr><td>Key boundary</td><td>SKU and permissions</td><td>Enterprise Edition and credits</td></tr></tbody></table>",
+      "markdown": "| Decision | Databricks | Snowflake |\n|---|---|---|\n| Concurrency | queued queries / clusters | multi-cluster min/max |\n| Single query | size or plan | resize or plan |\n| Boundary | SKU/permissions | edition/credits |"
+    },
+    "product_questions": [
+      [
+        "Databricks shows zero queued queries but a query spills. First move?",
+        [
+          "Inspect plan and size",
+          "Increase max clusters",
+          "Add a second dashboard"
+        ],
+        0,
+        "Scale-out does not add memory to the cluster running that query."
+      ],
+      [
+        "Snowflake has many short queued queries. Which feature targets this?",
+        [
+          "Multi-cluster auto-scale",
+          "A larger result cache key",
+          "A longer statement timeout"
+        ],
+        0,
+        "Multi-cluster adds concurrent same-sized compute lanes."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks SQL warehouse sizing, scaling, and queuing behavior",
+        "https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior",
+        "Official documentation; updated October 8, 2026; checked November 1, 2026"
+      ],
+      [
+        "Databricks: Create a SQL warehouse",
+        "https://docs.databricks.com/aws/en/compute/sql-warehouse/create",
+        "Official documentation; checked November 1, 2026"
+      ],
+      [
+        "Snowflake: Multi-cluster warehouses",
+        "https://docs.snowflake.com/en/user-guide/warehouses-multicluster",
+        "Official documentation; checked November 1, 2026"
+      ],
+      [
+        "Snowflake CREATE WAREHOUSE",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-warehouse",
+        "Official SQL reference; checked November 1, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-03/databricks-certified-data-engineer-associate-exam-guide-may-4-2026.pdf",
+        "Official guide for exams on or after May 4, 2026; rechecked November 1, 2026"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official overview rechecked November 1, 2026; full IDs/weights still unverified"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-01",
+      "session_type": "focused",
+      "cycle_position": 5,
+      "cycle_origin": "Day38",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "platform",
+          "troubleshooting_optimization"
+        ],
+        "scope": "Focused SQL warehouse sizing, queuing, concurrency scaling, monitoring evidence, permissions, and cost boundaries. Delivered coverage is not mastery."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "blueprint_status": "Official current overview verified 2026-11-01; full objective IDs and weights remain unverified",
+        "planning_groups": [
+          "architecture_connectivity",
+          "account_warehouse_access",
+          "performance"
+        ],
+        "scope": "Focused virtual warehouse size, multi-cluster auto-scale, scaling policy, edition, concurrency, and credit boundaries. Complete COF-C03 coverage is not claimed."
+      },
+      "product_lab_execution": "not_run"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "A worker that leaves must deregister from the next phase",
+    "goal": "Use Phaser for changing participation without leaving future phases waiting for a worker that has already finished.",
+    "tag": "Java concurrency · Phaser",
+    "concept": "<p>Three hikers agree to regroup after every trail section. One hiker is only joining the first section. If the group still counts three people at the second checkpoint, the remaining two wait forever.</p><p>A Java <code>Phaser</code> is a reusable checkpoint whose registered party count may change. <code>arriveAndAwaitAdvance()</code> arrives and waits. <code>arriveAndDeregister()</code> arrives and removes that party from future phases.</p>",
+    "example": "<p>Reader, validator, and publisher synchronize after phase 0. Reader has no work in phase 1, so it arrives and deregisters. Registered parties fall from three to two. Validator and publisher can then finish phase 1 together.</p>",
+    "use_case": {
+      "when": "Use a Phaser when iterative or staged work has participants that may join or leave between phases.",
+      "example": "A batch pipeline has reader partitions that finish early while validation and aggregation continue through later rounds.",
+      "decision": "Use CountDownLatch for one fixed countdown and CyclicBarrier for a fixed reusable party count. Choose Phaser when changing registration is the important behavior, and define timeout/termination recovery explicitly."
+    },
+    "practice": "Toggle whether the reader deregisters. Step through phase 0 and inspect the registered and unarrived counts for phase 1.",
+    "boundary": "The Java replay is single-threaded bookkeeping that calls Phaser methods in a safe order; it does not create real worker races, timeouts, interruption, forceTermination, tiered phasers, ForkJoinPool blocking, or task failure recovery.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"readerLeaves\" type=\"checkbox\" checked> reader deregisters after phase 0</label><div id=\"phaserWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintPhaser(){const leaves=readerLeaves.checked,registered=leaves?2:3,arrived=2,unarrived=Math.max(0,registered-arrived),advance=unarrived===0;phaserWorld.innerHTML='<p><strong>Question:</strong> Can validator and publisher advance phase 1?</p><div class=tiles><div class=tile>phase 0<br>reader + validator + publisher</div><div class=\"tile '+(leaves?'':'active')+'\">reader '+(leaves?'arrives + deregisters':'leaves silently')+'</div><div class=tile>phase 1 registered<br>'+registered+'</div><div class=\"tile '+(advance?'':'active')+'\">two arrivals<br>'+unarrived+' still expected<br>'+(advance?'advance':'stalled')+'</div></div>';};readerLeaves.onchange=paintPhaser;paintPhaser();",
+    "questions": [
+      [
+        "Reader is finished but remains registered. Two remaining workers arrive. What happens?",
+        [
+          "Phase waits for the missing third arrival",
+          "Phaser guesses reader left",
+          "Party count becomes two automatically"
+        ],
+        0,
+        "Registration is explicit; abandoning work does not deregister a party."
+      ],
+      [
+        "Why use arriveAndDeregister rather than arrive alone?",
+        [
+          "It removes the party from future phase counts",
+          "It cancels every worker",
+          "It increases the party count"
+        ],
+        0,
+        "The current arrival is recorded and later phases no longer expect that worker."
+      ],
+      [
+        "When is CountDownLatch simpler?",
+        [
+          "One fixed, one-time countdown",
+          "Participants change every phase",
+          "The barrier repeats indefinitely"
+        ],
+        0,
+        "A latch is clearer when no reusable or dynamic phases are needed."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var phaser=new java.util.concurrent.Phaser(3); int phase0=phaser.getPhase();",
+          "note": "Register three parties for phase 0."
+        },
+        {
+          "code": "phaser.arrive(); phaser.arrive();",
+          "note": "Reader and validator arrive; publisher is still unarrived."
+        },
+        {
+          "code": "phaser.arriveAndAwaitAdvance(); int phase1=phaser.getPhase();",
+          "note": "Publisher's arrival advances phase 0."
+        },
+        {
+          "code": "phaser.arriveAndDeregister(); int registered=phaser.getRegisteredParties();",
+          "note": "Reader exits and future phases expect only two parties."
+        }
+      ],
+      "expect": {
+        "phase0": "0",
+        "phase1": "1",
+        "registered": "2"
+      },
+      "limit": "The Java replay is single-threaded bookkeeping that calls Phaser methods in a safe order; it does not create real worker races, timeouts, interruption, forceTermination, tiered phasers, ForkJoinPool blocking, or task failure recovery.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "phaser": "java.util.concurrent.Phaser@2b6856dd[phase = 0 parties = 3 arrived = 0]",
+            "phase0": "0"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "phaser": "java.util.concurrent.Phaser@2b6856dd[phase = 0 parties = 3 arrived = 2]",
+            "phase0": "0"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "phaser": "java.util.concurrent.Phaser@2b6856dd[phase = 1 parties = 3 arrived = 0]",
+            "phase0": "0",
+            "phase1": "1"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "phaser": "java.util.concurrent.Phaser@2b6856dd[phase = 1 parties = 2 arrived = 0]",
+            "phase0": "0",
+            "phase1": "1",
+            "registered": "2"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java 26 Phaser API",
+        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/concurrent/Phaser.html",
+        "Official Java API; checked November 1, 2026"
+      ],
+      [
+        "Java 17 Phaser API",
+        "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/Phaser.html",
+        "Official Java API; checked November 1, 2026"
+      ]
+    ],
+    "visual_explanation": "The phase ledger exposes registered and unarrived counts. Leaving silently preserves an impossible expectation; deregistration removes it.",
+    "written_questions": [
+      "Which staged workflow has workers that naturally leave before the final phase?",
+      "What timeout or termination policy prevents a failed worker from stalling the rest?"
+    ],
+    "source_checked_on": "2026-11-01"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A post-incident action should remove a condition, not repeat a warning",
+    "goal": "Turn incident learning into owned system changes that reduce recurrence instead of relying on people to remember one more rule.",
+    "tag": "Distinguished Engineer judgment · corrective actions",
+    "concept": "<p>A sign saying “remember to lock the door” depends on memory every night. A door that locks itself removes the repeated decision.</p><p>Post-incident actions vary in strength. Training and runbooks help response. Detection shortens impact. Automated checks and safer interfaces prevent the same condition from crossing the boundary. Strong actions are specific, owned, tracked, and verified with evidence.</p>",
+    "example": "<p>A deployment published a table without its required tenant filter. “Remind engineers to check filters” leaves the unsafe route open. A contract test that blocks publication when the filter is absent turns the lesson into an enforced condition. A safe publication API that always attaches the policy removes the footgun further.</p>",
+    "use_case": {
+      "when": "Use this action-strength review after incidents, near misses, audit findings, and repeated manual mistakes.",
+      "example": "A public data product was deployed without the row-access policy expected by its contract.",
+      "decision": "Choose the strongest feasible action near the failure boundary. Keep training for judgment-heavy cases, but do not use training as the only response to a deterministic condition a system can check. Assign an owner, due date, and verification signal."
+    },
+    "practice": "Choose a corrective action and watch the next deployment path retain or remove the unsafe branch.",
+    "boundary": "The action ladder is a teaching heuristic, not a probability model or compliance framework. Automation can encode the wrong rule, introduce outages, or move risk elsewhere. Human judgment, rollout, exception handling, and outcome measurement remain necessary.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Corrective action <select id=\"actionStrength\"><option value=\"remind\">send reminder</option><option value=\"runbook\">update runbook</option><option value=\"detect\">alert after publish</option><option value=\"gate\">block missing policy</option><option value=\"safe\">safe publish API</option></select></label><div id=\"actionWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintAction(){const a=actionStrength.value,map={remind:['unsafe path open','incident can repeat'],runbook:['unsafe path open','better recovery'],detect:['unsafe path open','faster detection'],gate:['CI gate checks policy','bad publish blocked'],safe:['policy attached by API','unsafe route removed']},v=map[a],prevent=['gate','safe'].includes(a);actionWorld.innerHTML='<p><strong>Question:</strong> Can the same unfiltered table cross publish?</p><div class=tiles><div class=tile>code change<br>policy missing</div><div class=\"tile '+(prevent?'active':'')+'\">'+v[0]+'</div><div class=\"tile '+(prevent?'':'active')+'\">'+v[1]+'</div><div class=tile>evidence<br>'+(prevent?'rejected test':'post-publish signal')+'</div></div>';};actionStrength.onchange=paintAction;paintAction();",
+    "questions": [
+      [
+        "A deterministic contract can detect a missing row policy. Strongest direct action?",
+        [
+          "Block publication when the policy is absent",
+          "Send another reminder",
+          "Rename the incident channel"
+        ],
+        0,
+        "The gate acts at the failure boundary before exposure."
+      ],
+      [
+        "Why keep an owner and verification signal after automation?",
+        [
+          "The control can be late, wrong, bypassed, or ineffective",
+          "Automation proves mastery",
+          "Owners make incidents impossible"
+        ],
+        0,
+        "A corrective action must be delivered and shown to change the intended outcome."
+      ],
+      [
+        "When can training remain the primary action?",
+        [
+          "The situation requires context-sensitive judgment that cannot be safely encoded",
+          "The same machine-checkable omission repeats weekly",
+          "No owner wants the engineering work"
+        ],
+        0,
+        "Training fits judgment; deterministic repeatable conditions deserve stronger controls."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "incident={'condition':'missing tenant policy','effect':'unfiltered publish'}",
+          "note": "Name the condition, not a person."
+        },
+        {
+          "code": "weak={'action':'remind','unsafe_path_open':True}",
+          "note": "A reminder leaves the path available."
+        },
+        {
+          "code": "gate={'action':'contract test','unsafe_path_open':False}",
+          "note": "An automated check blocks the known condition."
+        },
+        {
+          "code": "evidence={'test_rejects_missing_policy':True,'owner':'platform','due':'tracked'}",
+          "note": "Define proof, ownership, and follow-through."
+        }
+      ],
+      "expect": {
+        "incident": {
+          "condition": "missing tenant policy",
+          "effect": "unfiltered publish"
+        },
+        "weak": {
+          "action": "remind",
+          "unsafe_path_open": true
+        },
+        "gate": {
+          "action": "contract test",
+          "unsafe_path_open": false
+        },
+        "evidence": {
+          "test_rejects_missing_policy": true,
+          "owner": "platform",
+          "due": "tracked"
+        }
+      },
+      "limit": "The action ladder is a teaching heuristic, not a probability model or compliance framework. Automation can encode the wrong rule, introduce outages, or move risk elsewhere. Human judgment, rollout, exception handling, and outcome measurement remain necessary.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "incident": {
+              "condition": "missing tenant policy",
+              "effect": "unfiltered publish"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "incident": {
+              "condition": "missing tenant policy",
+              "effect": "unfiltered publish"
+            },
+            "weak": {
+              "action": "remind",
+              "unsafe_path_open": true
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "incident": {
+              "condition": "missing tenant policy",
+              "effect": "unfiltered publish"
+            },
+            "weak": {
+              "action": "remind",
+              "unsafe_path_open": true
+            },
+            "gate": {
+              "action": "contract test",
+              "unsafe_path_open": false
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "incident": {
+              "condition": "missing tenant policy",
+              "effect": "unfiltered publish"
+            },
+            "weak": {
+              "action": "remind",
+              "unsafe_path_open": true
+            },
+            "gate": {
+              "action": "contract test",
+              "unsafe_path_open": false
+            },
+            "evidence": {
+              "test_rejects_missing_policy": true,
+              "owner": "platform",
+              "due": "tracked"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Google SRE Workbook: Postmortem Culture — Learning from Failure",
+        "https://sre.google/workbook/postmortem-culture/",
+        "Foundational Google SRE guidance; checked November 1, 2026"
+      ],
+      [
+        "AWS Well-Architected OPS11-BP02: Perform post-incident analysis",
+        "https://docs.aws.amazon.com/wellarchitected/latest/framework/ops_evolve_ops_perform_rca_process.html",
+        "Official AWS guidance; checked November 1, 2026"
+      ]
+    ],
+    "visual_explanation": "The same missing-policy change travels through actions of increasing strength. Only the gate and safe API remove the unsafe branch before publication.",
+    "written_questions": [
+      "Which open incident action currently asks people to remember a deterministic rule?",
+      "What measurable evidence will prove its replacement control works and is not bypassed?"
+    ],
+    "source_checked_on": "2026-11-01"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Decide whether a tool result needs another model turn",
+    "goal": "Use tool-use behavior to stop on a trusted final tool result or deliberately send evidence back to the model for synthesis.",
+    "tag": "GenAI harness engineering · tool result control",
+    "concept": "<p>A cashier can hand you a printed receipt directly. A mechanic's diagnostic report usually needs someone to explain the next step.</p><p>The OpenAI Agents SDK defaults to <code>run_llm_again</code>: tools run, then their results return to the model for a final response. <code>stop_on_first_tool</code> treats the first function-tool output as the final result. <code>StopAtTools</code> can stop only for named tools. A custom function can decide from all tool results.</p>",
+    "example": "<p>An order-status tool returns a stable customer-ready object. Stopping avoids an extra model turn that might paraphrase the status. A search tool returns evidence fragments; those should go back to the model for synthesis and citations.</p>",
+    "use_case": {
+      "when": "Choose behavior when function-tool output may already be the exact final contract or still needs reasoning and presentation.",
+      "example": "Return a signed receipt object directly, but synthesize multiple policy-search results into a grounded explanation.",
+      "decision": "Stop only when the tool output is safe, complete, typed, and suitable as the final answer. Run the model again when results need combination, explanation, redaction, or uncertainty handling. Hosted tools are processed by the model rather than this FunctionTool control."
+    },
+    "practice": "Switch between a receipt and evidence tool, then choose direct stop or another model turn. Watch which component owns the final bytes.",
+    "boundary": "The local event rail does not run the Agents SDK, a model, tools, schemas, streaming, hosted tools, approvals, guardrails, or errors. The SDK sketch is unexecuted and only covers FunctionTool result routing.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Tool <select id=\"toolKind\"><option value=\"receipt\">signed receipt</option><option value=\"search\">policy search</option></select></label><label>Behavior <select id=\"toolBehavior\"><option value=\"again\">run_llm_again</option><option value=\"stop\">stop_on_first_tool</option></select></label><div id=\"toolWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintTool(){const kind=toolKind.value,stop=toolBehavior.value==='stop',ready=kind==='receipt',good=stop===ready;toolWorld.innerHTML='<p><strong>Question:</strong> Who owns the final answer bytes?</p><div class=tiles><div class=tile>model requests<br>'+kind+' tool</div><div class=tile>tool returns<br>'+(ready?'final typed receipt':'3 evidence fragments')+'</div><div class=\"tile '+(stop?'active':'')+'\">'+(stop?'runner stops':'result returns to model')+'</div><div class=\"tile '+(good?'':'active')+'\">'+(stop?(ready?'exact receipt':'raw fragments exposed'):(ready?'extra paraphrase risk':'synthesized answer'))+'</div></div>';};toolKind.onchange=paintTool;toolBehavior.onchange=paintTool;paintTool();",
+    "questions": [
+      [
+        "A function tool returns the exact signed receipt contract. Which behavior avoids another model rewrite?",
+        [
+          "stop_on_first_tool",
+          "run_llm_again",
+          "Remove the tool"
+        ],
+        0,
+        "The first tool output becomes the final result."
+      ],
+      [
+        "Why send three search fragments back to the model?",
+        [
+          "They need synthesis into a useful grounded response",
+          "The tool output is already a receipt",
+          "Stopping runs more models"
+        ],
+        0,
+        "Evidence fragments are intermediate material, not a complete answer."
+      ],
+      [
+        "What is a dangerous stop boundary?",
+        [
+          "A tool returns raw internal data not safe for the user",
+          "A typed final receipt is validated",
+          "A named tool has a documented final schema"
+        ],
+        0,
+        "Direct stop bypasses any later model-based presentation or redaction step."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "tool_result={'kind':'receipt','status':'shipped','signature':'sig-42'}",
+          "note": "Create a complete, typed final tool result."
+        },
+        {
+          "code": "behavior='stop_on_first_tool'",
+          "note": "Choose direct finalization for this function tool."
+        },
+        {
+          "code": "final_output=tool_result if behavior=='stop_on_first_tool' else 'model synthesis'",
+          "note": "The runner returns the tool output without another model turn."
+        },
+        {
+          "code": "model_turns=1 if behavior=='stop_on_first_tool' else 2",
+          "note": "Record the control-flow consequence."
+        }
+      ],
+      "expect": {
+        "tool_result": {
+          "kind": "receipt",
+          "status": "shipped",
+          "signature": "sig-42"
+        },
+        "behavior": "stop_on_first_tool",
+        "final_output": {
+          "kind": "receipt",
+          "status": "shipped",
+          "signature": "sig-42"
+        },
+        "model_turns": 1
+      },
+      "limit": "The local event rail does not run the Agents SDK, a model, tools, schemas, streaming, hosted tools, approvals, guardrails, or errors. The SDK sketch is unexecuted and only covers FunctionTool result routing.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "tool_result": {
+              "kind": "receipt",
+              "status": "shipped",
+              "signature": "sig-42"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "tool_result": {
+              "kind": "receipt",
+              "status": "shipped",
+              "signature": "sig-42"
+            },
+            "behavior": "stop_on_first_tool"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "tool_result": {
+              "kind": "receipt",
+              "status": "shipped",
+              "signature": "sig-42"
+            },
+            "behavior": "stop_on_first_tool",
+            "final_output": {
+              "kind": "receipt",
+              "status": "shipped",
+              "signature": "sig-42"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "tool_result": {
+              "kind": "receipt",
+              "status": "shipped",
+              "signature": "sig-42"
+            },
+            "behavior": "stop_on_first_tool",
+            "final_output": {
+              "kind": "receipt",
+              "status": "shipped",
+              "signature": "sig-42"
+            },
+            "model_turns": 1
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "OpenAI Agents SDK: Agents — tool use behavior",
+        "https://openai.github.io/openai-agents-python/agents/#tool-use-behavior",
+        "Official documentation; checked November 1, 2026"
+      ],
+      [
+        "OpenAI Agents SDK: Agent reference",
+        "https://openai.github.io/openai-agents-python/ref/agent/",
+        "Official API reference; checked November 1, 2026"
+      ]
+    ],
+    "visual_explanation": "The event rail branches after the function tool: either the runner returns exact tool bytes or the result takes a second model turn.",
+    "written_questions": [
+      "Which existing tool outputs are already safe and complete final contracts?",
+      "Which tool results require redaction or synthesis before a user may see them?"
+    ],
+    "source_checked_on": "2026-11-01"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Freeze electron motion one lightwave slice at a time",
+    "goal": "Understand how attosecond band-structure videography revealed driven carrier motion and tunnelling across graphene's momentum space.",
+    "tag": "New research · Nature · October 28, 2026",
+    "concept": "<p>A normal camera blurs a hummingbird's wing across the whole flap. A strobe freezes one tiny slice, then many slices reconstruct the motion.</p><p>The reported experiment used few-cycle mid-infrared fields and attosecond-precision timing to image electron distributions across graphene's first Brillouin zone. It observed displacement from intraband acceleration and distortion associated with Landau–Zener–Majorana tunnelling between bands near an avoided crossing.</p>",
+    "example": "<p>In the teaching view, the lightwave phase moves the distribution left and right. Near the crossing, the cloud stretches into an ellipse as population tunnels into the conduction band. Later scattering makes the distribution more circular again. This is a visual analogy, not the measured dataset.</p>",
+    "use_case": {
+      "when": "Use the method as research evidence for strong-field quantum materials, lightwave electronics, and separating coherent motion from scattering.",
+      "example": "A materials lab wants to see whether a driven carrier cloud crosses bands during one optical cycle rather than only measuring the cycle-averaged population.",
+      "decision": "Treat this as a measurement-platform advance and microscopic observation, not a production transistor or commercial logic claim. Device control, stability, integration, energy, repeatability, and useful computation remain separate evidence needs."
+    },
+    "practice": "Move the lightwave phase and watch displacement and distortion change. Predict when the carrier cloud approaches the band crossing.",
+    "boundary": "The SVG is an original qualitative teaching model. It does not reproduce the article's photoelectron momentum microscopy, fields, attosecond delays, distributions, Brillouin-zone geometry, scattering fits, or tunnelling probabilities.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Lightwave phase <input id=\"wavePhase\" type=\"range\" min=\"0\" max=\"360\" step=\"15\" value=\"90\"></label><div id=\"grapheneWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintGraphene(){const p=+wavePhase.value,r=p*Math.PI/180,x=50+26*Math.sin(r),stretch=18+18*Math.max(0,Math.sin(r)),current=Math.round(100*Math.sin(r));grapheneWorld.innerHTML='<p><strong>Question:</strong> Where is the carrier cloud during this lightwave slice?</p><svg viewBox=\"0 0 100 58\" role=img aria-label=\"Momentum-space carrier cloud moving with lightwave phase\" style=\"width:100%;max-width:620px\"><path d=\"M10 50 Q50 5 90 50\" fill=none stroke=\"#93c5fd\" stroke-width=2/><line x1=50 y1=6 x2=50 y2=53 stroke=\"#f59e0b\" stroke-dasharray=3 /><ellipse cx='+x+' cy=34 rx='+stretch+' ry=8 fill=\"#34d399\" opacity=.72/><text x=4 y=56 fill=\"currentColor\" font-size=5>−k</text><text x=88 y=56 fill=\"currentColor\" font-size=5>+k</text><text x=52 y=11 fill=\"currentColor\" font-size=4>crossing</text></svg><p>Phase '+p+'°. Toy current asymmetry '+current+'. Cloud center '+x.toFixed(1)+'; horizontal stretch '+stretch.toFixed(1)+'.</p>';};wavePhase.oninput=paintGraphene;paintGraphene();",
+    "questions": [
+      [
+        "What did subcycle timing add beyond a cycle-averaged image?",
+        [
+          "A time-resolved view of carrier motion within the lightwave",
+          "A finished graphene computer",
+          "A measurement with no momentum information"
+        ],
+        0,
+        "The method reconstructs how the distribution moves during the optical cycle."
+      ],
+      [
+        "What does the observed distortion help identify?",
+        [
+          "Interband Landau–Zener–Majorana tunnelling alongside acceleration",
+          "Warehouse query spill",
+          "A static crystal defect only"
+        ],
+        0,
+        "Displacement and shape change separate parts of the driven dynamics."
+      ],
+      [
+        "Why is this not yet a production logic claim?",
+        [
+          "Observation of microscopic motion does not establish integrated, stable, efficient devices",
+          "Graphene has no electrons",
+          "Attosecond timing is ordinary video"
+        ],
+        0,
+        "A measurement platform and mechanism demonstration precede device qualification."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "import math; phases=[0,90,180,270]",
+          "note": "Sample four slices of one toy lightwave."
+        },
+        {
+          "code": "centers=[round(50+26*math.sin(math.radians(p)),1) for p in phases]",
+          "note": "Move the carrier center with field phase."
+        },
+        {
+          "code": "stretch=[round(18+18*max(0,math.sin(math.radians(p))),1) for p in phases]",
+          "note": "Add distortion near the positive-field crossing in the analogy."
+        },
+        {
+          "code": "frames=list(zip(phases,centers,stretch))",
+          "note": "Build the recorded sequence of phase, position, and shape."
+        }
+      ],
+      "expect": {
+        "phases": [
+          0,
+          90,
+          180,
+          270
+        ],
+        "centers": [
+          50.0,
+          76.0,
+          50.0,
+          24.0
+        ],
+        "stretch": [
+          18.0,
+          36.0,
+          18.0,
+          18.0
+        ],
+        "frames": [
+          [
+            0,
+            50.0,
+            18.0
+          ],
+          [
+            90,
+            76.0,
+            36.0
+          ],
+          [
+            180,
+            50.0,
+            18.0
+          ],
+          [
+            270,
+            24.0,
+            18.0
+          ]
+        ]
+      },
+      "limit": "The SVG is an original qualitative teaching model. It does not reproduce the article's photoelectron momentum microscopy, fields, attosecond delays, distributions, Brillouin-zone geometry, scattering fits, or tunnelling probabilities.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "phases": [
+              0,
+              90,
+              180,
+              270
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "phases": [
+              0,
+              90,
+              180,
+              270
+            ],
+            "centers": [
+              50.0,
+              76.0,
+              50.0,
+              24.0
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "phases": [
+              0,
+              90,
+              180,
+              270
+            ],
+            "centers": [
+              50.0,
+              76.0,
+              50.0,
+              24.0
+            ],
+            "stretch": [
+              18,
+              36.0,
+              18.0,
+              18
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "phases": [
+              0,
+              90,
+              180,
+              270
+            ],
+            "centers": [
+              50.0,
+              76.0,
+              50.0,
+              24.0
+            ],
+            "stretch": [
+              18,
+              36.0,
+              18.0,
+              18
+            ],
+            "frames": [
+              [
+                0,
+                50.0,
+                18
+              ],
+              [
+                90,
+                76.0,
+                36.0
+              ],
+              [
+                180,
+                50.0,
+                18.0
+              ],
+              [
+                270,
+                24.0,
+                18
+              ]
+            ]
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Eggers et al., Subcycle videography of Landau–Zener–Majorana transitions in graphene",
+        "https://www.nature.com/articles/s41586-026-11214-y",
+        "Primary Nature article; published October 28, 2026; checked November 1, 2026"
+      ]
+    ],
+    "visual_explanation": "A momentum-space cloud moves and changes shape over one field cycle, separating simple displacement from the tunnelling-associated distortion the paper reports.",
+    "written_questions": [
+      "Which measured signature distinguishes band-to-band tunnelling from simple acceleration?",
+      "What device-level result would be needed before calling this useful lightwave logic?"
+    ],
+    "source_checked_on": "2026-11-01"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A required matrix failure may cancel siblings; an experimental failure need not",
+    "goal": "Use fail-fast and per-job continue-on-error deliberately so a test matrix stops waste without hiding required coverage.",
+    "tag": "GitHub Actions · matrix failure policy",
+    "concept": "<p>Four lab tests run in parallel. If a required safety test fails, you may stop the others to save time. If an optional experiment fails, you still want the required results.</p><p>In GitHub Actions, matrix <code>strategy.fail-fast</code> defaults to true. A failure in a non-tolerated matrix job cancels queued and in-progress siblings. Job-level <code>continue-on-error</code> can mark an experimental leg as tolerated so its failure does not trigger those cancellations.</p>",
+    "example": "<p>Node 20 on Windows is required and fails: with fail-fast true, later Linux and macOS legs can be cancelled. Node 23 is experimental and has <code>continue-on-error: true</code>: its failure does not cancel the required Node 20 and 22 legs.</p>",
+    "use_case": {
+      "when": "Use matrix failure policy when compatibility tests run across operating systems, runtimes, regions, or deployment variants.",
+      "example": "Test a Java library on supported JDK 17/21 plus an experimental JDK 26 early-access leg.",
+      "decision": "Use fail-fast when one required failure makes remaining results low-value and cancellation is safe. Disable it when complete failure evidence matters. Tolerate only clearly labeled experiments; never use continue-on-error to make required coverage green."
+    },
+    "practice": "Choose which leg fails and toggle fail-fast. Watch queued siblings become cancelled or continue while experimental tolerance stays distinct.",
+    "boundary": "The model assumes a fixed start order and instant failure. GitHub runner availability, already-completed jobs, cancellation latency, expressions, max-parallel, matrix expansion, billing, and step-level continue-on-error are not executed.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Failing leg <select id=\"failingLeg\"><option value=\"required\">required Windows / Node 20</option><option value=\"experimental\">experimental Linux / Node 23</option></select></label><label><input id=\"failFast\" type=\"checkbox\" checked> matrix fail-fast</label><div id=\"matrixWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintMatrix(){const exp=failingLeg.value==='experimental',ff=failFast.checked,cancel=ff&&!exp,jobs=[['linux / 20','passed'],['windows / 20',exp?'passed':'failed'],['mac / 22',cancel?'cancelled':'passed'],['linux / 23 experimental',exp?'failed (tolerated)':cancel?'cancelled':'passed']];matrixWorld.innerHTML='<p><strong>Question:</strong> Which evidence survives the failure?</p><div class=tiles>'+jobs.map(j=>'<div class=\"tile '+(j[1].includes('fail')?'active':'')+'\"><strong>'+j[0]+'</strong><br>'+j[1]+'</div>').join('')+'</div><p>'+(exp?'Experimental continue-on-error keeps required siblings running.':ff?'Required failure triggers sibling cancellation.':'Fail-fast is off, so all legs finish.')+'</p>';};failingLeg.onchange=paintMatrix;failFast.onchange=paintMatrix;paintMatrix();",
+    "questions": [
+      [
+        "A required matrix leg fails and fail-fast is true. What can happen?",
+        [
+          "Queued and in-progress sibling jobs are cancelled",
+          "Every sibling is guaranteed to finish",
+          "The failed job becomes experimental"
+        ],
+        0,
+        "A non-tolerated failure triggers matrix-wide fail-fast cancellation."
+      ],
+      [
+        "Why put continue-on-error on the experimental job rather than the whole workflow?",
+        [
+          "Tolerance stays scoped to that leg",
+          "It makes required failures pass",
+          "It increases matrix size"
+        ],
+        0,
+        "The required compatibility contract remains enforceable."
+      ],
+      [
+        "When should fail-fast be false?",
+        [
+          "You need the complete cross-platform failure pattern for diagnosis",
+          "Any single failure makes all remaining evidence worthless",
+          "You want to hide required failures"
+        ],
+        0,
+        "Full evidence can be worth the extra runner time."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "jobs=['linux20','windows20','mac22','linux23-exp']; fail_fast=True",
+          "note": "Define three required legs and one experiment."
+        },
+        {
+          "code": "results={'linux20':'pass','windows20':'fail'}",
+          "note": "A required Windows leg fails early."
+        },
+        {
+          "code": "if fail_fast and results['windows20']=='fail': results.update({'mac22':'cancelled','linux23-exp':'cancelled'})",
+          "note": "Fail-fast cancels siblings that have not completed."
+        },
+        {
+          "code": "required_green=all(results.get(j)=='pass' for j in ['linux20','windows20','mac22'])",
+          "note": "The required contract remains failed."
+        }
+      ],
+      "expect": {
+        "jobs": [
+          "linux20",
+          "windows20",
+          "mac22",
+          "linux23-exp"
+        ],
+        "fail_fast": true,
+        "results": {
+          "linux20": "pass",
+          "windows20": "fail",
+          "mac22": "cancelled",
+          "linux23-exp": "cancelled"
+        },
+        "required_green": false
+      },
+      "limit": "The model assumes a fixed start order and instant failure. GitHub runner availability, already-completed jobs, cancellation latency, expressions, max-parallel, matrix expansion, billing, and step-level continue-on-error are not executed.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "jobs": [
+              "linux20",
+              "windows20",
+              "mac22",
+              "linux23-exp"
+            ],
+            "fail_fast": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "jobs": [
+              "linux20",
+              "windows20",
+              "mac22",
+              "linux23-exp"
+            ],
+            "fail_fast": true,
+            "results": {
+              "linux20": "pass",
+              "windows20": "fail"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "jobs": [
+              "linux20",
+              "windows20",
+              "mac22",
+              "linux23-exp"
+            ],
+            "fail_fast": true,
+            "results": {
+              "linux20": "pass",
+              "windows20": "fail",
+              "mac22": "cancelled",
+              "linux23-exp": "cancelled"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "jobs": [
+              "linux20",
+              "windows20",
+              "mac22",
+              "linux23-exp"
+            ],
+            "fail_fast": true,
+            "results": {
+              "linux20": "pass",
+              "windows20": "fail",
+              "mac22": "cancelled",
+              "linux23-exp": "cancelled"
+            },
+            "required_green": false
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions workflow syntax: matrix fail-fast and continue-on-error",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstrategyfail-fast",
+        "Official documentation; checked November 1, 2026"
+      ],
+      [
+        "GitHub Actions: Running variations of jobs in a workflow",
+        "https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations#handling-failures",
+        "Official documentation; checked November 1, 2026"
+      ]
+    ],
+    "visual_explanation": "Four concrete matrix legs change state together. Required versus experimental failure controls whether siblings are cancelled, continued, or tolerated.",
+    "written_questions": [
+      "Which matrix legs are contractual, and which are explicitly experimental?",
+      "Would complete failure evidence or saved runner time matter more for this workflow?"
+    ],
+    "source_checked_on": "2026-11-01"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Give API errors a stable type, not a sentence clients must parse",
+    "goal": "Use RFC 9457 problem details so machines branch on a documented type while people receive occurrence-specific guidance.",
+    "tag": "APIs & Microservices · HTTP problem details",
+    "concept": "<p>A hospital form has a standard diagnosis code and a note for this patient. Software needs the code; a person needs the note.</p><p>RFC 9457 defines <code>application/problem+json</code>. <code>type</code> identifies the stable problem class. <code>title</code> summarizes that class. <code>detail</code> explains this occurrence. <code>instance</code> identifies this occurrence. Optional <code>status</code> mirrors the real HTTP status and must agree when generated.</p>",
+    "example": "<p>An order exceeds its account limit. The response is HTTP 403 with type <code>https://api.example/problems/credit-limit</code>, a helpful detail, and an extension <code>availableCredit: 30</code>. The client branches on <code>type</code>, never on the English detail sentence.</p>",
+    "use_case": {
+      "when": "Use problem details when an HTTP API needs a reusable machine-readable error envelope beyond the status code.",
+      "example": "An order API must distinguish credit-limit, inventory, and validation problems while keeping each occurrence traceable.",
+      "decision": "Reuse a plain status code when it already says enough. Define a stable documented type and typed extensions when clients need more. Do not expose stack traces, SQL, secrets, account internals, or personal data in detail or instance links."
+    },
+    "practice": "Switch problem types and toggle an unsafe debug field. Inspect which fields are stable class identity, occurrence detail, and security leakage.",
+    "boundary": "The model emits two synthetic problem shapes. It does not implement HTTP content negotiation, localization, authentication, caches, proxies, OpenAPI schemas, registries, dereferenceable type pages, or a security review.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Problem <select id=\"problemKind\"><option value=\"credit\">credit limit</option><option value=\"validation\">validation error</option></select></label><label><input id=\"debugLeak\" type=\"checkbox\"> include stack trace (unsafe)</label><div id=\"problemWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintProblem(){const credit=problemKind.value==='credit',leak=debugLeak.checked,status=credit?403:422,type=credit?'https://api.example/problems/credit-limit':'https://api.example/problems/validation',detail=credit?'Need 50; available 30':'orderId must be present',obj={type,title:credit?'Credit limit exceeded':'Request validation failed',status,detail,instance:'/problems/occ-42'};if(credit)obj.availableCredit=30;else obj.errors=[{pointer:'#/orderId',detail:'required'}];if(leak)obj.stack='SQLException at db.internal:5432';problemWorld.innerHTML='<p><strong>Question:</strong> What may a client safely branch on?</p><div class=tiles><div class=tile>HTTP '+status+'</div><div class=tile><strong>stable type</strong><br>'+type+'</div><div class=tile><strong>this occurrence</strong><br>'+detail+'</div><div class=\"tile '+(leak?'active':'')+'\">'+(leak?'implementation leaked':'no debug internals')+'</div></div><pre>'+JSON.stringify(obj,null,2)+'</pre>';};problemKind.onchange=paintProblem;debugLeak.onchange=paintProblem;paintProblem();",
+    "questions": [
+      [
+        "Which field should drive client remediation logic?",
+        [
+          "The documented type URI",
+          "The English detail sentence",
+          "A stack trace"
+        ],
+        0,
+        "Type is the problem class's primary identifier."
+      ],
+      [
+        "Why must the body status match the HTTP status when generated?",
+        [
+          "Generic HTTP software acts on the real response status",
+          "The title replaces HTTP semantics",
+          "Instance is a status code"
+        ],
+        0,
+        "Proxies and clients may ignore or not understand the problem body."
+      ],
+      [
+        "What must stay out of detail?",
+        [
+          "Stack dumps, secrets, and exploitable internals",
+          "A safe occurrence-specific explanation",
+          "A documented correction hint"
+        ],
+        0,
+        "Problem details are an interface, not a debugging dump."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "status=403; problem_type='https://api.example/problems/credit-limit'",
+          "note": "Choose HTTP semantics and a stable class identity."
+        },
+        {
+          "code": "problem={'type':problem_type,'title':'Credit limit exceeded','status':status}",
+          "note": "Create the shared problem envelope."
+        },
+        {
+          "code": "problem.update({'detail':'Need 50; available 30','instance':'/problems/occ-42','availableCredit':30})",
+          "note": "Add occurrence detail and a typed extension."
+        },
+        {
+          "code": "client_action='offer funding' if problem['type']==problem_type else 'generic error'",
+          "note": "Branch on type, not human prose."
+        }
+      ],
+      "expect": {
+        "status": 403,
+        "problem_type": "https://api.example/problems/credit-limit",
+        "problem": {
+          "type": "https://api.example/problems/credit-limit",
+          "title": "Credit limit exceeded",
+          "status": 403,
+          "detail": "Need 50; available 30",
+          "instance": "/problems/occ-42",
+          "availableCredit": 30
+        },
+        "client_action": "offer funding"
+      },
+      "limit": "The model emits two synthetic problem shapes. It does not implement HTTP content negotiation, localization, authentication, caches, proxies, OpenAPI schemas, registries, dereferenceable type pages, or a security review.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "status": 403,
+            "problem_type": "https://api.example/problems/credit-limit"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "status": 403,
+            "problem_type": "https://api.example/problems/credit-limit",
+            "problem": {
+              "type": "https://api.example/problems/credit-limit",
+              "title": "Credit limit exceeded",
+              "status": 403
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "status": 403,
+            "problem_type": "https://api.example/problems/credit-limit",
+            "problem": {
+              "type": "https://api.example/problems/credit-limit",
+              "title": "Credit limit exceeded",
+              "status": 403,
+              "detail": "Need 50; available 30",
+              "instance": "/problems/occ-42",
+              "availableCredit": 30
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "status": 403,
+            "problem_type": "https://api.example/problems/credit-limit",
+            "problem": {
+              "type": "https://api.example/problems/credit-limit",
+              "title": "Credit limit exceeded",
+              "status": 403,
+              "detail": "Need 50; available 30",
+              "instance": "/problems/occ-42",
+              "availableCredit": 30
+            },
+            "client_action": "offer funding"
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "RFC 9457: Problem Details for HTTP APIs",
+        "https://www.rfc-editor.org/rfc/rfc9457.html",
+        "IETF Standards Track RFC; published July 2023; checked November 1, 2026"
+      ],
+      [
+        "IANA HTTP Problem Types registry",
+        "https://www.iana.org/assignments/http-problem-types/http-problem-types.xhtml",
+        "Official registry; checked November 1, 2026"
+      ]
+    ],
+    "visual_explanation": "The response separates transport status, stable problem identity, occurrence detail, extensions, and an explicit unsafe-debug branch.",
+    "written_questions": [
+      "Which error strings do your clients currently parse and what stable problem types should replace them?",
+      "Which fields need a security/privacy review before they leave the service boundary?"
+    ],
+    "source_checked_on": "2026-11-01"
+  }
+]
