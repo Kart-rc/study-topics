@@ -1,0 +1,1313 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Consolidation case: make the 9 AM payments dashboard trustworthy and fast",
+    "goal": "Join five separate mechanisms into one release decision: wake on data, read less, reject bad rows, publish atomically, and add the right serving capacity.",
+    "tag": "Certification consolidation case · cycle 4, position 6",
+    "concept": "<p>A restaurant can open on time only if five things line up: ingredients arrive, the cook finds the right items, spoiled food is rejected, the menu changes without disappearing, and enough tables are open.</p><p>A data product has the same chain. An arrival trigger starts work. Storage statistics skip irrelevant files or micro-partitions. A quality gate decides whether the candidate may continue. Atomic publication keeps the old table visible until the new one is ready. Query evidence decides whether to add clusters for waiting queries or size for one hungry query.</p>",
+    "example": "<p>At 8:52 AM, twenty payment files arrive. A date and tenant filter needs only three storage blocks. The candidate has 100 rows; four have a null account ID. The release must leave yesterday's table live. After correction, the candidate publishes as version 43. At 9:00 AM, thirty dashboard queries arrive; three ten-slot lanes clear the queue.</p>",
+    "use_case": {
+      "when": "Use this release chain when a business dashboard or regulated data product has freshness, correctness, continuity, and query-latency obligations at the same time.",
+      "example": "A finance payments dashboard must be current by 9 AM, never expose invalid account rows, and remain queryable during publication.",
+      "decision": "Treat each mechanism as a separate control with its own evidence. Do not use more compute to hide a quality failure, do not publish by dropping the live table, and do not assume an arrival trigger proves data was processed."
+    },
+    "practice": "Choose the failure point. Follow the same candidate from arrival to serving and identify exactly where it must stop and what remains visible.",
+    "boundary": "This local release model uses fixed row, block, and query counts. It does not run either vendor, model cloud-event delivery, retries, concurrent writers, catalog privileges, task history, full SQL semantics, warm-up, credits, or a real query profile.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Release condition <select id=\"releaseCondition\"><option value=\"healthy\">healthy candidate</option><option value=\"quality\">four null account IDs</option><option value=\"drop\">drop live table before create</option><option value=\"queue\">healthy release, one serving cluster</option></select></label><div id=\"releaseWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintRelease(){const c=releaseCondition.value,quality=c!=='quality',atomic=c!=='drop',clusters=c==='queue'?1:3,published=quality&&atomic,live=published?'v43':c==='drop'?'missing':'v42',wait=published?Math.max(0,30-clusters*10):0;const stages=[['arrival','20 files'],['prune','3 of 20 blocks'],['quality',quality?'100 valid':'4 invalid'],['publish',published?'atomic v43':atomic?'blocked':'name gap'],['serve',published?clusters+' clusters / '+wait+' waiting':'old state retained']];releaseWorld.innerHTML='<p><strong>Question:</strong> What is visible at 9 AM?</p><svg viewBox=\"0 0 620 150\" role=img aria-label=\"Five-stage release path from arrival through serving\" style=\"width:100%;max-width:720px\">'+stages.map((s,i)=>'<line x1=\"'+(70+i*120)+'\" y1=\"54\" x2=\"'+(130+i*120)+'\" y2=\"54\" stroke=\"#73988b\" stroke-width=\"4\"/>'+(i<4?'<polygon points=\"'+(130+i*120)+',48 '+(142+i*120)+',54 '+(130+i*120)+',60\" fill=\"#73988b\"/>':'')+'<circle cx=\"'+(50+i*120)+'\" cy=\"54\" r=\"27\" fill=\"'+((s[0]==='quality'&&!quality)||(s[0]==='publish'&&!atomic)||(s[0]==='serve'&&wait)?'#f59e0b':'#34d399')+'\"/><text x=\"'+(50+i*120)+'\" y=\"58\" text-anchor=\"middle\" font-size=\"11\" fill=\"#173934\">'+s[0]+'</text><text x=\"'+(50+i*120)+'\" y=\"108\" text-anchor=\"middle\" font-size=\"10\" fill=\"currentColor\">'+s[1]+'</text>').join('')+'</svg><p><strong>Live table:</strong> '+live+'. '+(published?(wait?wait+' queries still wait; scale concurrency.':'release is visible and the toy queue is empty.'):'Release stopped before a safe new version became visible.')+'</p>';};releaseCondition.onchange=paintRelease;paintRelease();",
+    "questions": [
+      [
+        "Four invalid account rows reach the quality gate. What should the dashboard read?",
+        [
+          "Yesterday's valid live table",
+          "A partially updated table",
+          "No table name"
+        ],
+        0,
+        "The candidate must fail before atomic publication, preserving the last good version."
+      ],
+      [
+        "Why is the arrival trigger not a progress checkpoint?",
+        [
+          "It wakes work but does not prove which records committed",
+          "It automatically swaps tables",
+          "It sizes the SQL warehouse"
+        ],
+        0,
+        "Triggering and durable processing progress are separate responsibilities."
+      ],
+      [
+        "The release is valid, but thirty short queries wait. Which evidence-driven move fits?",
+        [
+          "Add concurrent serving clusters",
+          "Disable the quality gate",
+          "Drop and recreate the table"
+        ],
+        0,
+        "The bottleneck is query concurrency after a successful release, not data correctness or publication."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "files=20; candidate_rows=100; invalid_rows=4; live_version=42",
+          "note": "Start with arrived files and yesterday's live table."
+        },
+        {
+          "code": "blocks_read=3; blocks_skipped=files-blocks_read",
+          "note": "A selective filter prunes seventeen toy storage blocks."
+        },
+        {
+          "code": "quality_ok=invalid_rows==0; publish_allowed=quality_ok",
+          "note": "Four invalid rows stop publication."
+        },
+        {
+          "code": "visible_version=43 if publish_allowed else live_version; queued_queries=0",
+          "note": "The old version remains visible; serving never sees the bad candidate."
+        }
+      ],
+      "expect": {
+        "files": 20,
+        "candidate_rows": 100,
+        "invalid_rows": 4,
+        "live_version": 42,
+        "blocks_read": 3,
+        "blocks_skipped": 17,
+        "quality_ok": false,
+        "publish_allowed": false,
+        "visible_version": 42,
+        "queued_queries": 0
+      },
+      "limit": "This local release model uses fixed row, block, and query counts. It does not run either vendor, model cloud-event delivery, retries, concurrent writers, catalog privileges, task history, full SQL semantics, warm-up, credits, or a real query profile.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "files": 20,
+            "candidate_rows": 100,
+            "invalid_rows": 4,
+            "live_version": 42
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "files": 20,
+            "candidate_rows": 100,
+            "invalid_rows": 4,
+            "live_version": 42,
+            "blocks_read": 3,
+            "blocks_skipped": 17
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "files": 20,
+            "candidate_rows": 100,
+            "invalid_rows": 4,
+            "live_version": 42,
+            "blocks_read": 3,
+            "blocks_skipped": 17,
+            "quality_ok": false,
+            "publish_allowed": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "files": 20,
+            "candidate_rows": 100,
+            "invalid_rows": 4,
+            "live_version": 42,
+            "blocks_read": 3,
+            "blocks_skipped": 17,
+            "quality_ok": false,
+            "publish_allowed": false,
+            "visible_version": 42,
+            "queued_queries": 0
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks file arrival triggers",
+        "https://docs.databricks.com/aws/en/jobs/file-arrival-triggers",
+        "Official documentation; updated October 7, 2026; checked November 2, 2026"
+      ],
+      [
+        "Databricks data skipping",
+        "https://docs.databricks.com/aws/en/tables/data-skipping",
+        "Official documentation; checked November 2, 2026"
+      ],
+      [
+        "Databricks pipeline expectations",
+        "https://docs.databricks.com/aws/en/ldp/expectations",
+        "Official documentation; updated October 26, 2026; checked November 2, 2026"
+      ],
+      [
+        "Databricks CREATE TABLE and REPLACE",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-create-table-using",
+        "Official SQL reference; checked November 2, 2026"
+      ],
+      [
+        "Databricks SQL warehouse behavior",
+        "https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior",
+        "Official documentation; updated October 8, 2026; checked November 2, 2026"
+      ],
+      [
+        "Snowflake triggered tasks",
+        "https://docs.snowflake.com/en/user-guide/tasks-triggered",
+        "Official documentation; checked November 2, 2026"
+      ],
+      [
+        "Snowflake micro-partitions and pruning",
+        "https://docs.snowflake.com/en/user-guide/tables-clustering-micropartitions",
+        "Official documentation; checked November 2, 2026"
+      ],
+      [
+        "Snowflake ALTER TABLE, SWAP, and DMF syntax",
+        "https://docs.snowflake.com/en/sql-reference/sql/alter-table",
+        "Official SQL reference; checked November 2, 2026"
+      ],
+      [
+        "Snowflake multi-cluster warehouses",
+        "https://docs.snowflake.com/en/user-guide/warehouses-multicluster",
+        "Official documentation; checked November 2, 2026"
+      ]
+    ],
+    "visual_explanation": "The release path keeps triggering, pruning, quality, publication, and serving as separate gates. A failure changes the downstream path and the exact live-table state.",
+    "written_questions": [
+      "Which five pieces of evidence would you require before declaring this dashboard ready?",
+      "Where can a retry occur without exposing a partial or bad table?"
+    ],
+    "source_checked_on": "2026-11-02",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: make a failed expectation leave the previous table live",
+        "minutes": 9,
+        "html": "<p><strong>Follow one candidate.</strong> A file-arrival trigger wakes a Lakeflow Job. The transform filters by date and account so Delta file statistics can skip irrelevant files. A pipeline expectation with <code>ON VIOLATION FAIL UPDATE</code> stops and atomically rolls back that update when an invalid row appears. Publish a validated full replacement with <code>CREATE OR REPLACE TABLE</code>; then inspect queue and spill evidence separately.</p><pre><code><span>-- sourced SQL sketch; not executed</span><span>CONSTRAINT valid_account EXPECT (account_id IS NOT NULL)</span><span>  ON VIOLATION FAIL UPDATE;</span><span>CREATE OR REPLACE TABLE finance.payments_live AS</span><span>SELECT * FROM finance.payments_candidate;</span></code></pre><label>Databricks release <select id=\"dbCase\"><option value=\"healthy\">100 valid rows</option><option value=\"quality\">4 invalid rows</option><option value=\"queue\">valid, 20 queued queries</option></select></label><div id=\"dbReleaseWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> A failed expectation rolls back that update, but Databricks notes that parallel flows in a triggered pipeline do not all fail automatically. Put validation and publication in explicit task control flow when the whole release must stop.</p><p><strong>Execution label.</strong> SQL and product triggers were not run. The state path is local JavaScript.</p>",
+        "markdown": "A file-arrival trigger wakes the job; data-skipping statistics reduce reads; a fail-update expectation rolls back the failing update; atomic replacement publishes only the validated candidate; queue/spill evidence chooses serving capacity. SQL was not run.",
+        "javascript": "const dbCase=$('dbCase'),dbReleaseWorld=$('dbReleaseWorld');function paintDb(){const c=dbCase.value,bad=c==='quality',queued=c==='queue'?20:0,pub=!bad;dbReleaseWorld.innerHTML='<div class=step-flow><div class=tile>arrival<br>job wakes</div><div class=tile>filter<br>17 files skipped</div><div class=\"tile '+(bad?'active':'')+'\">expectation<br>'+(bad?'FAIL UPDATE':'passes')+'</div><div class=tile>live table<br>'+(pub?'v43':'v42 retained')+'</div><div class=\"tile '+(queued?'active':'')+'\">serving<br>'+queued+' queued</div></div>';};dbCase.onchange=paintDb;paintDb();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: measure quality, then make the swap an explicit release gate",
+        "minutes": 9,
+        "html": "<p><strong>Follow the same candidate with different mechanics.</strong> A stream can wake a triggered task. Micro-partition metadata prunes storage. A data metric function (DMF) measures quality and expectations can notify on thresholds, but that is not the Databricks fail-update transaction. Your orchestration must read the result and refuse publication. <code>ALTER TABLE candidate SWAP WITH live</code> performs the name swap only after that gate passes.</p><pre><code><span>-- sourced SQL sketch; not executed</span><span>ALTER TABLE payments_candidate</span><span>  ADD DATA METRIC FUNCTION SNOWFLAKE.CORE.NULL_COUNT ON (account_id)</span><span>  EXPECTATION no_nulls (VALUE = 0);</span><span>-- after orchestration verifies the result:</span><span>ALTER TABLE payments_candidate SWAP WITH payments_live;</span></code></pre><label>Snowflake release <select id=\"sfCase\"><option value=\"healthy\">100 valid rows</option><option value=\"quality\">4 invalid rows</option><option value=\"queue\">valid, 20 queued queries</option></select></label><label><input id=\"sfGate\" type=\"checkbox\" checked> orchestration blocks swap on quality breach</label><div id=\"sfReleaseWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Failure/fix.</strong> An expectation that emits evidence is not itself a publication rollback. Wire the quality result into task control, then swap. Multi-cluster targets concurrent queued queries and consumes more credits; it does not repair bad data.</p><p><strong>Execution label.</strong> No Snowflake SQL ran. The release path is local JavaScript.</p>",
+        "markdown": "A stream wakes a triggered task; micro-partition metadata prunes reads; DMFs measure and notify; orchestration must block the SWAP on a breach; multi-cluster addresses concurrency. Snowflake SQL was not run.",
+        "javascript": "const sfCase=$('sfCase'),sfGate=$('sfGate'),sfReleaseWorld=$('sfReleaseWorld');function paintSf(){const c=sfCase.value,bad=c==='quality',block=bad&&sfGate.checked,pub=!block,queued=c==='queue'?20:0;sfReleaseWorld.innerHTML='<div class=step-flow><div class=tile>stream<br>task wakes</div><div class=tile>prune<br>17 partitions skipped</div><div class=\"tile '+(bad?'active':'')+'\">DMF result<br>'+(bad?'NULL_COUNT 4':'NULL_COUNT 0')+'</div><div class=\"tile '+(bad&&!block?'active':'')+'\">SWAP<br>'+(pub?'v43 visible':'blocked; v42 live')+'</div><div class=\"tile '+(queued?'active':'')+'\">serving<br>'+queued+' queued</div></div><p>'+(bad&&!block?'Unsafe: evidence existed but the release ignored it.':'The release decision matches the configured gate.')+'</p>';};sfCase.onchange=paintSf;sfGate.onchange=paintSf;paintSf();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Release concern</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Wake</td><td>File-arrival trigger + job</td><td>Stream + triggered task</td></tr><tr><td>Read less</td><td>File statistics / skipping</td><td>Micro-partition pruning</td></tr><tr><td>Quality consequence</td><td>Expectation can fail and roll back update</td><td>DMF evidence; orchestration blocks release</td></tr><tr><td>Publish</td><td>CREATE OR REPLACE TABLE</td><td>ALTER TABLE ... SWAP WITH</td></tr><tr><td>Concurrency</td><td>IWM / cluster bounds</td><td>Multi-cluster warehouse</td></tr></tbody></table>",
+      "markdown": "| Concern | Databricks | Snowflake |\n|---|---|---|\n| Wake | file arrival + job | stream + triggered task |\n| Quality | fail-update expectation | DMF evidence + orchestration |\n| Publish | replace table | swap tables |\n| Concurrency | IWM / cluster bounds | multi-cluster |"
+    },
+    "product_questions": [
+      [
+        "A Databricks fail-update expectation finds four null account IDs. What publishes?",
+        [
+          "The prior live table remains",
+          "Four bad rows plus 96 good rows",
+          "An empty table"
+        ],
+        0,
+        "The failing update rolls back; publication must not advance to the candidate."
+      ],
+      [
+        "A Snowflake DMF expectation reports NULL_COUNT 4. What prevents an unsafe SWAP?",
+        [
+          "Explicit orchestration that checks the result and blocks",
+          "The multi-cluster warehouse",
+          "Micro-partition pruning"
+        ],
+        0,
+        "The quality signal must be connected to the release decision; compute and pruning do not enforce it."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks file arrival triggers",
+        "https://docs.databricks.com/aws/en/jobs/file-arrival-triggers",
+        "Official documentation; updated October 7, 2026; checked November 2, 2026"
+      ],
+      [
+        "Databricks data skipping",
+        "https://docs.databricks.com/aws/en/tables/data-skipping",
+        "Official documentation; checked November 2, 2026"
+      ],
+      [
+        "Databricks pipeline expectations",
+        "https://docs.databricks.com/aws/en/ldp/expectations",
+        "Official documentation; updated October 26, 2026; checked November 2, 2026"
+      ],
+      [
+        "Databricks CREATE TABLE and REPLACE",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-create-table-using",
+        "Official SQL reference; checked November 2, 2026"
+      ],
+      [
+        "Databricks SQL warehouse behavior",
+        "https://docs.databricks.com/aws/en/compute/sql-warehouse/warehouse-behavior",
+        "Official documentation; updated October 8, 2026; checked November 2, 2026"
+      ],
+      [
+        "Snowflake triggered tasks",
+        "https://docs.snowflake.com/en/user-guide/tasks-triggered",
+        "Official documentation; checked November 2, 2026"
+      ],
+      [
+        "Snowflake micro-partitions and pruning",
+        "https://docs.snowflake.com/en/user-guide/tables-clustering-micropartitions",
+        "Official documentation; checked November 2, 2026"
+      ],
+      [
+        "Snowflake ALTER TABLE, SWAP, and DMF syntax",
+        "https://docs.snowflake.com/en/sql-reference/sql/alter-table",
+        "Official SQL reference; checked November 2, 2026"
+      ],
+      [
+        "Snowflake multi-cluster warehouses",
+        "https://docs.snowflake.com/en/user-guide/warehouses-multicluster",
+        "Official documentation; checked November 2, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-03/databricks-certified-data-engineer-associate-exam-guide-may-4-2026.pdf",
+        "Official guide for exams on or after May 4, 2026; rechecked November 2, 2026"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official overview rechecked November 2, 2026; full study-guide IDs and weights still not exposed"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-02",
+      "session_type": "consolidation_case",
+      "cycle_position": 6,
+      "cycle_origin": "Day38",
+      "databricks": {
+        "target": "Databricks Certified Data Engineer Associate",
+        "guide_version": "2026-05-04",
+        "domains": [
+          "platform",
+          "ingestion",
+          "transformation_modeling",
+          "lakeflow_jobs",
+          "troubleshooting_optimization",
+          "governance_security"
+        ],
+        "scope": "Consolidates event-driven ingestion, storage skipping, fail-update quality gates, atomic replacement, and SQL warehouse evidence. Delivered coverage is not mastery."
+      },
+      "snowflake": {
+        "target": "SnowPro Core COF-C03",
+        "blueprint_status": "Official COF-C03 overview rechecked 2026-11-02; full study-guide objective IDs and weights remain unverified",
+        "planning_groups": [
+          "architecture_connectivity",
+          "account_warehouse_access",
+          "loading_unloading_transformation",
+          "performance",
+          "collaboration_protection"
+        ],
+        "scope": "Consolidates triggered tasks, pruning, DMF evidence, controlled table swap, and multi-cluster serving. Complete COF-C03 coverage is not claimed."
+      },
+      "product_lab_execution": "not_run"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "When the pool is full, CallerRunsPolicy makes the producer do the work",
+    "goal": "Use a bounded executor rejection policy as visible backpressure without confusing it with guaranteed admission or safe latency.",
+    "tag": "Java concurrency · ThreadPoolExecutor saturation",
+    "concept": "<p>A small kitchen has one cook and one waiting shelf. When both are occupied, the cashier cooks the next order instead of accepting more tickets. The cashier slows down, so new orders arrive less quickly.</p><p>A bounded <code>ThreadPoolExecutor</code> rejects when its workers and queue are full. <code>CallerRunsPolicy</code> runs that task on the thread that called <code>execute</code>, unless the executor is shut down. This feedback slows that producer.</p>",
+    "example": "<p>One worker runs task A and one queue slot holds task B. The request thread submits task C. C cannot enter the pool, so the request thread runs C synchronously. That is backpressure, but it can be dangerous if the caller is an event loop, holds a lock, or has a tight latency budget.</p>",
+    "use_case": {
+      "when": "Use this policy when work must not disappear, the producer is allowed to slow down, and a bounded queue protects memory.",
+      "example": "A batch coordinator submits CPU work to a small pool and can safely spend time completing overflow work itself.",
+      "decision": "Prefer explicit rejection or upstream rate limiting when the caller must stay responsive. Never use CallerRunsPolicy blindly on event-loop, UI, or lock-holding threads; after shutdown it discards instead of running."
+    },
+    "practice": "Fill the worker and queue, then switch the caller type. Predict whether task C slows a safe batch producer or blocks a latency-sensitive event loop.",
+    "boundary": "The Java replay executes a real bounded executor and observes the overflow task's thread. The browser model simplifies timing and does not cover fairness, exceptions, cancellation, queue wait, nested dependencies, shutdown races, or production sizing.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Submitting thread <select id=\"callerKind\"><option value=\"batch\">batch producer</option><option value=\"event\">event loop</option><option value=\"lock\">thread holding a lock</option></select></label><div id=\"callerWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintCaller(){const k=callerKind.value,safe=k==='batch';callerWorld.innerHTML='<p><strong>Question:</strong> Who runs overflow task C?</p><div class=tool-path><div class=tile>worker<br>A running</div><div class=arrow>+</div><div class=tile>queue<br>B waiting</div></div><div class=tool-path><div class=\"tile '+(safe?'':'active')+'\">'+k+' submits C</div><div class=arrow>→</div><div class=\"tile active\">caller runs C<br>'+(safe?'producer slows':'caller stalls dangerously')+'</div></div>';};callerKind.onchange=paintCaller;paintCaller();",
+    "questions": [
+      [
+        "The worker and bounded queue are full. Who runs the next task with CallerRunsPolicy?",
+        [
+          "The thread calling execute",
+          "A new unbounded worker",
+          "No thread; it always throws"
+        ],
+        0,
+        "The caller executes the rejected task while the executor is running."
+      ],
+      [
+        "Why can this create backpressure?",
+        [
+          "The producer spends time doing work instead of submitting more",
+          "The queue becomes unbounded",
+          "It increases maximumPoolSize"
+        ],
+        0,
+        "Synchronous overflow work reduces that caller's submission rate."
+      ],
+      [
+        "Which caller makes this policy especially risky?",
+        [
+          "A single-threaded event loop",
+          "A batch producer allowed to slow",
+          "A dedicated bulk loader with a latency budget"
+        ],
+        0,
+        "Blocking the event loop delays unrelated work and can amplify the incident."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var gate=new java.util.concurrent.CountDownLatch(1); var ranBy=new java.util.concurrent.atomic.AtomicReference<String>(\"not-run\");",
+          "note": "Create a gate for the worker and a place to record the overflow thread."
+        },
+        {
+          "code": "var pool=new java.util.concurrent.ThreadPoolExecutor(1,1,0L,java.util.concurrent.TimeUnit.MILLISECONDS,new java.util.concurrent.ArrayBlockingQueue<Runnable>(1),new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy()); pool.execute(() -> {try{gate.await();}catch(InterruptedException e){Thread.currentThread().interrupt();}}); Thread.sleep(50);",
+          "note": "Occupy the only worker."
+        },
+        {
+          "code": "pool.execute(() -> {}); String caller=Thread.currentThread().getName();",
+          "note": "Fill the only queue slot and record the submitting thread."
+        },
+        {
+          "code": "pool.execute(() -> ranBy.set(Thread.currentThread().getName())); boolean backpressure=caller.equals(ranBy.get()); gate.countDown(); pool.shutdown(); pool.awaitTermination(2,java.util.concurrent.TimeUnit.SECONDS);",
+          "note": "The overflow task runs on the caller, then the pool drains."
+        }
+      ],
+      "expect": {
+        "caller": "main",
+        "backpressure": "true"
+      },
+      "limit": "The Java replay executes a real bounded executor and observes the overflow task's thread. The browser model simplifies timing and does not cover fairness, exceptions, cancellation, queue wait, nested dependencies, shutdown races, or production sizing.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "gate": "java.util.concurrent.CountDownLatch@7e0b85f9[Count = 1]",
+            "ranBy": "not-run"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "gate": "java.util.concurrent.CountDownLatch@7e0b85f9[Count = 1]",
+            "ranBy": "not-run",
+            "pool": "java.util.concurrent.ThreadPoolExecutor@1725dc0f[Running, pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "gate": "java.util.concurrent.CountDownLatch@7e0b85f9[Count = 1]",
+            "ranBy": "not-run",
+            "pool": "java.util.concurrent.ThreadPoolExecutor@1725dc0f[Running, pool size = 1, active threads = 1, queued tasks = 1, completed tasks = 0]",
+            "caller": "main"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "gate": "java.util.concurrent.CountDownLatch@7e0b85f9[Count = 0]",
+            "ranBy": "main",
+            "pool": "java.util.concurrent.ThreadPoolExecutor@1725dc0f[Terminated, pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 2]",
+            "caller": "main",
+            "backpressure": "true"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java 26 ThreadPoolExecutor API",
+        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/concurrent/ThreadPoolExecutor.html",
+        "Official Java API; checked November 2, 2026"
+      ],
+      [
+        "Java 26 CallerRunsPolicy API",
+        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/concurrent/ThreadPoolExecutor.CallerRunsPolicy.html",
+        "Official Java API; checked November 2, 2026"
+      ]
+    ],
+    "visual_explanation": "The visual shows the third task moving back to the submitting thread only after the worker and queue are both occupied.",
+    "written_questions": [
+      "Which producers in your platform are allowed to slow down by running overflow work?",
+      "What metric distinguishes healthy backpressure from an event-loop or request-thread incident?"
+    ],
+    "source_checked_on": "2026-11-02"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Steer common work, block catastrophic work, and recover the rest",
+    "goal": "Choose a golden path, guardrail, safety net, or manual checkpoint based on the decision—not by calling every platform control a guardrail.",
+    "tag": "Distinguished Engineer judgment · platform control taxonomy",
+    "concept": "<p>Road signs, crash barriers, airbags, and a human traffic officer all improve safety, but they do different jobs.</p><p>A golden path makes the common safe choice easy. A guardrail is a hard stop for a catastrophic action. A safety net detects or reduces harm after failure. A manual checkpoint supplies judgment when the rule cannot be encoded safely. Naming the control clarifies the user experience and the evidence it must produce.</p>",
+    "example": "<p>For a data-product platform: a template creates encrypted buckets by default; policy blocks public access; monitoring detects policy drift and rolls back; a review board decides an unusual cross-region data-sharing exception. Replacing every step with approval queues would be slow, while replacing judgment with a brittle hard rule would reject legitimate exceptions.</p>",
+    "use_case": {
+      "when": "Use this taxonomy when platform teams design controls for self-service infrastructure, data publication, deployment, or access.",
+      "example": "Forty producer teams need a standard S3-to-lakehouse path, but a few regulated transfers require explicit exception review.",
+      "decision": "Steer repeatable low-risk work with a golden path; hard-block deterministic catastrophic conditions; detect and recover from residual failures; reserve manual review for high-context decisions. Measure friction and bypasses for every type."
+    },
+    "practice": "Choose a platform scenario and watch the decision move between steering, prevention, recovery, and judgment.",
+    "boundary": "The decision matrix is a teaching heuristic, not a compliance framework. Real controls can overlap, fail, or create new hazards. Legal, security, risk, and product owners still define non-negotiable requirements and exceptions.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Platform situation <select id=\"controlCase\"><option value=\"common\">common repeatable setup</option><option value=\"catastrophic\">public bucket is forbidden</option><option value=\"residual\">policy drift after deployment</option><option value=\"ambiguous\">novel regulated exception</option></select></label><div id=\"controlWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintControl(){const m={common:['golden path','steer','self-service encrypted template'],catastrophic:['guardrail','block','deny public access'],residual:['safety net','recover','detect drift and roll back'],ambiguous:['manual checkpoint','judge','time-bounded exception review']},v=m[controlCase.value];controlWorld.innerHTML='<p><strong>Question:</strong> What kind of control fits?</p><div class=adr-grid><div class=tile>steer<br>golden path</div><div class=tile>prevent<br>guardrail</div><div class=tile>recover<br>safety net</div><div class=tile>judge<br>manual checkpoint</div></div><p class=\"tile active\"><strong>'+v[0]+'</strong> · '+v[1]+' · '+v[2]+'</p>';};controlCase.onchange=paintControl;paintControl();",
+    "questions": [
+      [
+        "A public bucket is always forbidden and machine-detectable. Best primary control?",
+        [
+          "A hard guardrail",
+          "A voluntary template only",
+          "A post-incident meeting"
+        ],
+        0,
+        "A deterministic catastrophic condition should be blocked before it crosses the boundary."
+      ],
+      [
+        "Why is an encrypted-bucket template a golden path rather than a guardrail?",
+        [
+          "It steers the common choice without defining the final hard stop",
+          "It only works after an incident",
+          "It requires a review board"
+        ],
+        0,
+        "The template makes safe work fast; a separate policy can still enforce the non-negotiable boundary."
+      ],
+      [
+        "A novel regulated transfer needs context the platform cannot encode. Best fit?",
+        [
+          "A scoped manual checkpoint with owner and expiry",
+          "Silently bypass every control",
+          "A permanent block with no exception path"
+        ],
+        0,
+        "Human judgment is appropriate when the decision is high stakes and not safely reducible to a rule."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "risk='catastrophic'; deterministic=True; failure_already_happened=False",
+          "note": "Describe the decision, not the tool name."
+        },
+        {
+          "code": "control='guardrail' if risk=='catastrophic' and deterministic else 'golden path'",
+          "note": "A deterministic catastrophic condition gets a hard stop."
+        },
+        {
+          "code": "evidence={'control':control,'outcome':'public access denied','owner':'platform security'}",
+          "note": "Record both the mechanism and the observed result."
+        },
+        {
+          "code": "exception={'allowed':False,'review_required':True,'expires':None}",
+          "note": "A hard stop still has an explicit governed exception route, not a silent bypass."
+        }
+      ],
+      "expect": {
+        "risk": "catastrophic",
+        "deterministic": true,
+        "failure_already_happened": false,
+        "control": "guardrail",
+        "evidence": {
+          "control": "guardrail",
+          "outcome": "public access denied",
+          "owner": "platform security"
+        },
+        "exception": {
+          "allowed": false,
+          "review_required": true,
+          "expires": null
+        }
+      },
+      "limit": "The decision matrix is a teaching heuristic, not a compliance framework. Real controls can overlap, fail, or create new hazards. Legal, security, risk, and product owners still define non-negotiable requirements and exceptions.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "risk": "catastrophic",
+            "deterministic": true,
+            "failure_already_happened": false
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "risk": "catastrophic",
+            "deterministic": true,
+            "failure_already_happened": false,
+            "control": "guardrail"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "risk": "catastrophic",
+            "deterministic": true,
+            "failure_already_happened": false,
+            "control": "guardrail",
+            "evidence": {
+              "control": "guardrail",
+              "outcome": "public access denied",
+              "owner": "platform security"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "risk": "catastrophic",
+            "deterministic": true,
+            "failure_already_happened": false,
+            "control": "guardrail",
+            "evidence": {
+              "control": "guardrail",
+              "outcome": "public access denied",
+              "owner": "platform security"
+            },
+            "exception": {
+              "allowed": false,
+              "review_required": true,
+              "expires": null
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Google Cloud: What is platform engineering?",
+        "https://cloud.google.com/solutions/platform-engineering",
+        "Official foundation; checked November 2, 2026"
+      ],
+      [
+        "Google Cloud: Beyond guardrails—platform control mechanisms",
+        "https://cloud.google.com/blog/products/application-modernization/platform-engineering-control-mechanisms",
+        "Official engineering guidance; published August 15, 2025; checked November 2, 2026"
+      ]
+    ],
+    "visual_explanation": "A four-way control map makes the intended user experience visible: steer, prevent, recover, or ask for judgment.",
+    "written_questions": [
+      "Which current control is mislabeled as a guardrail and what behavior does it actually provide?",
+      "Where is a manual checkpoint adding judgment, and where is it merely compensating for missing automation?"
+    ],
+    "source_checked_on": "2026-11-02"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Ask for missing input without turning secrets into chat fields",
+    "goal": "Use MCP elicitation modes so a tool can pause for user input while the client controls consent and sensitive data stays out of in-band forms.",
+    "tag": "GenAI harness engineering · MCP 2026-07-28",
+    "concept": "<p>A clerk can ask for your delivery date on a form. They should send you to the payment terminal for a card secret instead of writing it on that form.</p><p>In MCP 2026-07-28, a server can return <code>input_required</code> during a request. The client displays an elicitation, the user may accept, decline, or cancel, and the client retries the original call with <code>inputResponses</code>. Form mode collects flat structured non-secret input. URL mode moves sensitive interaction out of band.</p>",
+    "example": "<p>A shipping tool needs a delivery date: form mode requests a date and lets the user review it. A payment step needs credentials: URL mode displays the target host and asks before navigation. If the user declines, the harness must stop or choose a non-sensitive alternative; it must not fabricate an answer.</p>",
+    "use_case": {
+      "when": "Use elicitation when a tool discovers missing information mid-call and the user—not the model—must supply or authorize it.",
+      "example": "A fulfillment MCP tool has the order ID but needs a delivery window; a separate payment service needs sensitive authorization.",
+      "decision": "Use a form only for reviewable non-secret primitive fields. Use URL mode for passwords, tokens, payment credentials, or sensitive authorization. Require the client capability and handle decline/cancel as normal outcomes."
+    },
+    "practice": "Switch between a delivery date and a payment credential, then accept or decline. Watch where data travels and whether the original tool call may retry.",
+    "boundary": "The model is a local replay of the 2026-07-28 protocol shape. It does not implement an MCP transport, capability negotiation, schema validation, browser navigation, origin verification, OAuth, retries, or server-side state.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Missing input <select id=\"inputKind\"><option value=\"date\">delivery date</option><option value=\"secret\">payment credential</option></select></label><label>User response <select id=\"inputAction\"><option value=\"accept\">accept</option><option value=\"decline\">decline</option><option value=\"cancel\">cancel</option></select></label><div id=\"elicitationWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintElicitation(){const secret=inputKind.value==='secret',action=inputAction.value,mode=secret?'URL':'form',retry=action==='accept';elicitationWorld.innerHTML='<p><strong>Question:</strong> Where should the missing value travel?</p><div class=step-flow><div class=tile>tool call<br>missing '+(secret?'credential':'date')+'</div><div class=tile>input_required<br>'+mode+' mode</div><div class=\"tile '+(action!=='accept'?'active':'')+'\">client UI<br>'+action+'</div><div class=tile>'+(retry?'retry original call':'stop without inventing')+'</div></div><p>'+(secret?'Credential stays outside the MCP form; client shows the destination host.':'User reviews the structured value before it is returned.')+'</p>';};inputKind.onchange=paintElicitation;inputAction.onchange=paintElicitation;paintElicitation();",
+    "questions": [
+      [
+        "A tool needs an API key. Which elicitation mode fits?",
+        [
+          "URL mode",
+          "Form mode with a password field",
+          "Put it in the model prompt"
+        ],
+        0,
+        "The specification forbids form mode for credentials and requires the out-of-band URL path."
+      ],
+      [
+        "Why does the client retry the original request after acceptance?",
+        [
+          "MRTR returns input_required instead of holding a bidirectional stream open",
+          "The server has already completed the side effect",
+          "The model must guess the answer first"
+        ],
+        0,
+        "The answer is attached as inputResponses to the retried request."
+      ],
+      [
+        "The user declines a delivery-date form. What should the harness do?",
+        [
+          "Treat decline as a normal outcome and stop or offer an alternative",
+          "Invent tomorrow's date",
+          "Retry forever"
+        ],
+        0,
+        "Consent is part of the protocol outcome, not an error to bypass."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "request={'method':'tools/call','name':'ship','arguments':{'order_id':'O-42'}}",
+          "note": "The original call has an order but no delivery date."
+        },
+        {
+          "code": "result={'resultType':'input_required','inputRequests':[{'method':'elicitation/create','params':{'mode':'form','message':'Choose delivery date'}}]}",
+          "note": "The server returns a structured request for user input."
+        },
+        {
+          "code": "input_response={'action':'accept','content':{'date':'2026-11-05'}}",
+          "note": "The client records an explicit reviewed response."
+        },
+        {
+          "code": "retry={**request,'inputResponses':[input_response]}; outcome='retry original call'",
+          "note": "The client retries the same operation with the response attached."
+        }
+      ],
+      "expect": {
+        "request": {
+          "method": "tools/call",
+          "name": "ship",
+          "arguments": {
+            "order_id": "O-42"
+          }
+        },
+        "result": {
+          "resultType": "input_required",
+          "inputRequests": [
+            {
+              "method": "elicitation/create",
+              "params": {
+                "mode": "form",
+                "message": "Choose delivery date"
+              }
+            }
+          ]
+        },
+        "input_response": {
+          "action": "accept",
+          "content": {
+            "date": "2026-11-05"
+          }
+        },
+        "retry": {
+          "method": "tools/call",
+          "name": "ship",
+          "arguments": {
+            "order_id": "O-42"
+          },
+          "inputResponses": [
+            {
+              "action": "accept",
+              "content": {
+                "date": "2026-11-05"
+              }
+            }
+          ]
+        },
+        "outcome": "retry original call"
+      },
+      "limit": "The model is a local replay of the 2026-07-28 protocol shape. It does not implement an MCP transport, capability negotiation, schema validation, browser navigation, origin verification, OAuth, retries, or server-side state.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "request": {
+              "method": "tools/call",
+              "name": "ship",
+              "arguments": {
+                "order_id": "O-42"
+              }
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "request": {
+              "method": "tools/call",
+              "name": "ship",
+              "arguments": {
+                "order_id": "O-42"
+              }
+            },
+            "result": {
+              "resultType": "input_required",
+              "inputRequests": [
+                {
+                  "method": "elicitation/create",
+                  "params": {
+                    "mode": "form",
+                    "message": "Choose delivery date"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "request": {
+              "method": "tools/call",
+              "name": "ship",
+              "arguments": {
+                "order_id": "O-42"
+              }
+            },
+            "result": {
+              "resultType": "input_required",
+              "inputRequests": [
+                {
+                  "method": "elicitation/create",
+                  "params": {
+                    "mode": "form",
+                    "message": "Choose delivery date"
+                  }
+                }
+              ]
+            },
+            "input_response": {
+              "action": "accept",
+              "content": {
+                "date": "2026-11-05"
+              }
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "request": {
+              "method": "tools/call",
+              "name": "ship",
+              "arguments": {
+                "order_id": "O-42"
+              }
+            },
+            "result": {
+              "resultType": "input_required",
+              "inputRequests": [
+                {
+                  "method": "elicitation/create",
+                  "params": {
+                    "mode": "form",
+                    "message": "Choose delivery date"
+                  }
+                }
+              ]
+            },
+            "input_response": {
+              "action": "accept",
+              "content": {
+                "date": "2026-11-05"
+              }
+            },
+            "retry": {
+              "method": "tools/call",
+              "name": "ship",
+              "arguments": {
+                "order_id": "O-42"
+              },
+              "inputResponses": [
+                {
+                  "action": "accept",
+                  "content": {
+                    "date": "2026-11-05"
+                  }
+                }
+              ]
+            },
+            "outcome": "retry original call"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP 2026-07-28 specification: Elicitation",
+        "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/client/elicitation.mdx",
+        "Official specification; checked November 2, 2026"
+      ],
+      [
+        "MCP 2026-07-28 release notes",
+        "https://blog.modelcontextprotocol.io/posts/2026-07-28/",
+        "Official release notes; published July 28, 2026; checked November 2, 2026"
+      ]
+    ],
+    "visual_explanation": "The replay shows the stateless pause-and-retry boundary and makes the sensitive-data path visibly different from a normal form.",
+    "written_questions": [
+      "Which tools in your harness currently guess missing user input instead of eliciting it?",
+      "Which requested values must never cross the in-band form path?"
+    ],
+    "source_checked_on": "2026-11-02"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "An analogue FFT reuses small butterflies instead of building one giant transform",
+    "goal": "Understand the research claim that a fast Fourier transform can be mapped onto analogue in-memory hardware at useful transform sizes.",
+    "tag": "New research · Nature Electronics · October 19, 2026",
+    "concept": "<p>Sorting 65,536 notes by comparing every note with every other note would explode the work. A fast Fourier transform (FFT) repeatedly combines small pairs—often called butterflies—so each stage reuses earlier results.</p><p>The reported work maps that staged FFT structure to analogue in-memory computing. The authors experimentally demonstrated one- and two-dimensional signals across up to 524,000 charge-trapping memory devices in one array and transforms up to 65,536 points. This is a research hardware result, not a drop-in CPU replacement.</p>",
+    "example": "<p>An 8-point teaching FFT has three stages because log2(8)=3. Each stage has four butterfly pairs, for twelve pair-combines. A direct 8×8 transform view suggests 64 multiply-accumulate relationships. The research contribution is mapping the reusable staged structure to analogue arrays instead of requiring one impractically large direct matrix.</p>",
+    "use_case": {
+      "when": "Use this research when evaluating future edge signal-processing accelerators for audio, imaging, communications, or sensor pipelines.",
+      "example": "A low-power edge sensor needs spectral features before it transmits data to the cloud.",
+      "decision": "Treat the paper as evidence that analogue arrays can execute large staged transforms. Production choice still needs accuracy, calibration, endurance, programmability, conversion overhead, latency, energy, yield, and workload evidence on the target hardware."
+    },
+    "practice": "Change the transform size. Compare direct relationships with staged butterfly combines and inspect how stages grow only logarithmically.",
+    "boundary": "The visual counts a radix-2 teaching graph; it does not simulate the paper's charge-trapping devices, analogue noise, precision, calibration, data converters, array mapping, measured energy, or image/audio accuracy.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Transform points <select id=\"fftPoints\"><option value=\"8\">8</option><option value=\"16\">16</option><option value=\"32\">32</option></select></label><div id=\"fftWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintFft(){const n=+fftPoints.value,stages=Math.log2(n),butterflies=n/2*stages,direct=n*n;let cols='';for(let s=0;s<=stages;s++)cols+='<div class=tile><strong>'+(s===0?'input':'stage '+s)+'</strong><br>'+n+' values'+(s?'<br>'+n/2+' pairs':'')+'</div>';fftWorld.innerHTML='<p><strong>Question:</strong> How does the staged graph avoid one giant direct map?</p><div class=step-flow>'+cols+'</div><p>Direct toy relationships: <strong>'+direct+'</strong>. FFT butterfly combines: <strong>'+butterflies+'</strong>. Stages: <strong>'+stages+'</strong>.</p>';};fftPoints.onchange=paintFft;paintFft();",
+    "questions": [
+      [
+        "How many stages does a radix-2 16-point FFT have?",
+        [
+          "4",
+          "8",
+          "16"
+        ],
+        0,
+        "The number of stages is log2(16)=4."
+      ],
+      [
+        "Why does the staged mapping matter for analogue arrays?",
+        [
+          "It reuses smaller butterfly operations instead of one giant direct transform matrix",
+          "It removes every analogue error",
+          "It makes all signals sparse"
+        ],
+        0,
+        "The decomposition changes the hardware scaling problem; it does not erase physical limitations."
+      ],
+      [
+        "What evidence is still needed before choosing this for an edge product?",
+        [
+          "System-level accuracy, conversion cost, energy, endurance, and target-workload results",
+          "Only the paper title",
+          "A larger cloud warehouse"
+        ],
+        0,
+        "A device demonstration is not a complete product qualification."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "import math; points=8; stages=int(math.log2(points))",
+          "note": "Start with an eight-point radix-2 transform."
+        },
+        {
+          "code": "pairs_per_stage=points//2; butterfly_combines=pairs_per_stage*stages",
+          "note": "Count four pair-combines across each of three stages."
+        },
+        {
+          "code": "direct_relationships=points*points; reduction=direct_relationships/butterfly_combines",
+          "note": "Compare the toy direct graph with the staged graph."
+        },
+        {
+          "code": "claim_boundary='operation graph only; not analogue accuracy or energy'",
+          "note": "Keep the teaching count separate from the paper's device measurements."
+        }
+      ],
+      "expect": {
+        "points": 8,
+        "stages": 3,
+        "pairs_per_stage": 4,
+        "butterfly_combines": 12,
+        "direct_relationships": 64,
+        "reduction": 5.333333333333333,
+        "claim_boundary": "operation graph only; not analogue accuracy or energy"
+      },
+      "limit": "The visual counts a radix-2 teaching graph; it does not simulate the paper's charge-trapping devices, analogue noise, precision, calibration, data converters, array mapping, measured energy, or image/audio accuracy.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "points": 8,
+            "stages": 3
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "points": 8,
+            "stages": 3,
+            "pairs_per_stage": 4,
+            "butterfly_combines": 12
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "points": 8,
+            "stages": 3,
+            "pairs_per_stage": 4,
+            "butterfly_combines": 12,
+            "direct_relationships": 64,
+            "reduction": 5.333333333333333
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "points": 8,
+            "stages": 3,
+            "pairs_per_stage": 4,
+            "butterfly_combines": 12,
+            "direct_relationships": 64,
+            "reduction": 5.333333333333333,
+            "claim_boundary": "operation graph only; not analogue accuracy or energy"
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Xiao et al., Analogue fast Fourier transforms for scalable and efficient signal processing",
+        "https://www.nature.com/articles/s41928-026-01725-x",
+        "Primary Nature Electronics article; published October 19, 2026; checked November 2, 2026"
+      ]
+    ],
+    "visual_explanation": "The stage graph grows by one column when point count doubles, while the direct relationship counter grows quadratically.",
+    "written_questions": [
+      "Which conversion or calibration cost could erase an analogue compute advantage in a real system?",
+      "What target workload would you benchmark before changing an edge architecture?"
+    ],
+    "source_checked_on": "2026-11-02"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A job timeout cancels the runner; it does not undo a deployment",
+    "goal": "Use GitHub Actions timeouts to bound stuck work while designing rollback and reconciliation as separate mechanisms.",
+    "tag": "GitHub Actions · timeout and deployment boundary",
+    "concept": "<p>A kitchen timer stops the oven. It does not turn a baked cake back into batter.</p><p><code>jobs.&lt;job_id&gt;.timeout-minutes</code> tells GitHub to cancel a job after a limit; the default is 360 minutes. Cancellation stops remaining runner work. Any external side effect already completed—such as changing production traffic—can remain. Rollback must be an explicit, independently reliable action.</p>",
+    "example": "<p>A deploy job switches production from v41 to v42 at minute 4. A smoke test hangs. At minute 10 the job is cancelled. Production still serves v42 because the traffic change happened outside the runner. A separate deployment controller or follow-up workflow must observe the incomplete release and restore v41 when policy requires it.</p>",
+    "use_case": {
+      "when": "Use a job timeout whenever runner work can hang, wait forever on infrastructure, or consume unbounded minutes.",
+      "example": "A GitHub Actions deployment waits on an EKS rollout or a smoke-test endpoint that never returns.",
+      "decision": "Set the timeout from expected duration plus measured headroom. Make scripts handle termination where possible, but assume cleanup may not finish. Keep rollback and external reconciliation outside the process being killed."
+    },
+    "practice": "Move the timeout before or after the traffic switch and toggle an external reconciler. Observe which production version survives cancellation.",
+    "boundary": "The timeline is synthetic. It does not execute GitHub Actions, send termination signals, model action-specific cleanup, runner limits, billing, token expiry, concurrency cancellation, or a real deployment controller.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Job timeout minute <input id=\"timeoutMinute\" type=\"range\" min=\"2\" max=\"15\" value=\"10\"></label><label><input id=\"reconciler\" type=\"checkbox\"> external reconciler restores last good version</label><div id=\"timeoutWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintTimeout(){const t=+timeoutMinute.value,switched=t>4,smoke=t>5,fix=reconciler.checked&&switched,prod=fix?'v41':switched?'v42':'v41';timeoutWorld.innerHTML='<p><strong>Question:</strong> What remains after cancellation at minute '+t+'?</p><svg viewBox=\"0 0 620 115\" role=img aria-label=\"Deployment job timeline with timeout\" style=\"width:100%;max-width:720px\"><line x1=\"35\" y1=\"42\" x2=\"585\" y2=\"42\" stroke=\"#93c5fd\" stroke-width=\"6\"/><circle cx=\"190\" cy=\"42\" r=\"14\" fill=\"'+(switched?'#34d399':'#94a3b8')+'\"/><text x=\"155\" y=\"80\" fill=\"currentColor\" font-size=\"12\">min 4 switch</text><circle cx=\"'+(35+t/15*550)+'\" cy=\"42\" r=\"15\" fill=\"#f59e0b\"/><text x=\"'+(15+t/15*550)+'\" y=\"18\" fill=\"currentColor\" font-size=\"12\">timeout</text></svg><p>Runner: cancelled. Smoke test: '+(smoke?'hung':'not started')+'. Production: <strong>'+prod+'</strong>. '+(fix?'The independent reconciler restored v41.':'Timeout alone performed no rollback.')+'</p>';};timeoutMinute.oninput=paintTimeout;reconciler.onchange=paintTimeout;paintTimeout();",
+    "questions": [
+      [
+        "The job times out after traffic already switched to v42. What does production serve?",
+        [
+          "v42 unless a separate rollback occurs",
+          "Automatically v41",
+          "No version because GitHub deletes production"
+        ],
+        0,
+        "Job cancellation does not reverse an external side effect."
+      ],
+      [
+        "Why keep rollback outside the timed-out job?",
+        [
+          "The process being killed may never reach its cleanup step",
+          "Timeouts guarantee cleanup",
+          "GITHUB_TOKEN makes deployments transactional"
+        ],
+        0,
+        "A cancellation boundary cannot be trusted to execute later steps."
+      ],
+      [
+        "How should you choose timeout-minutes?",
+        [
+          "Expected duration plus measured headroom and a recovery design",
+          "Always the 360-minute default",
+          "Shorter than every normal run"
+        ],
+        0,
+        "A useful bound distinguishes a stuck run from normal variance without creating avoidable cancellations."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "timeout_minute=10; traffic_switch_minute=4; smoke_hangs=True",
+          "note": "Define the job deadline and the completed external change."
+        },
+        {
+          "code": "traffic_switched=traffic_switch_minute < timeout_minute; production='v42' if traffic_switched else 'v41'",
+          "note": "The traffic switch happens before cancellation."
+        },
+        {
+          "code": "job='cancelled' if smoke_hangs else 'success'; rollback_ran=False",
+          "note": "The runner stops; no later rollback step is guaranteed."
+        },
+        {
+          "code": "reconciler_detects=(job=='cancelled' and production=='v42'); desired='v41' if reconciler_detects else production",
+          "note": "An independent observer can decide to restore the last good version."
+        }
+      ],
+      "expect": {
+        "timeout_minute": 10,
+        "traffic_switch_minute": 4,
+        "smoke_hangs": true,
+        "traffic_switched": true,
+        "production": "v42",
+        "job": "cancelled",
+        "rollback_ran": false,
+        "reconciler_detects": true,
+        "desired": "v41"
+      },
+      "limit": "The timeline is synthetic. It does not execute GitHub Actions, send termination signals, model action-specific cleanup, runner limits, billing, token expiry, concurrency cancellation, or a real deployment controller.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "timeout_minute": 10,
+            "traffic_switch_minute": 4,
+            "smoke_hangs": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "timeout_minute": 10,
+            "traffic_switch_minute": 4,
+            "smoke_hangs": true,
+            "traffic_switched": true,
+            "production": "v42"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "timeout_minute": 10,
+            "traffic_switch_minute": 4,
+            "smoke_hangs": true,
+            "traffic_switched": true,
+            "production": "v42",
+            "job": "cancelled",
+            "rollback_ran": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "timeout_minute": 10,
+            "traffic_switch_minute": 4,
+            "smoke_hangs": true,
+            "traffic_switched": true,
+            "production": "v42",
+            "job": "cancelled",
+            "rollback_ran": false,
+            "reconciler_detects": true,
+            "desired": "v41"
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions workflow syntax: job timeout-minutes",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idtimeout-minutes",
+        "Official documentation; checked November 2, 2026"
+      ]
+    ],
+    "visual_explanation": "The timeout marker moves across the deployment timeline, making the external traffic change persist even after runner cancellation.",
+    "written_questions": [
+      "Which workflows can change production before their final health signal?",
+      "What independent controller or workflow can detect and reconcile an abandoned deployment?"
+    ],
+    "source_checked_on": "2026-11-02"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "Let one service own each write; copy facts for cross-service reads",
+    "goal": "Use service-owned persistence to reduce schema coupling while making distributed queries and consistency costs explicit.",
+    "tag": "APIs & Microservices · database ownership",
+    "concept": "<p>Two households can share a fence, but one should not rearrange the other household's kitchen cupboards.</p><p>With database-per-service, each service owns its persistent data and exposes it through an API or published facts. Another service does not reach into its tables. This reduces schema and deployment coupling, but cross-service transactions and joins become harder; API composition, CQRS read models, events, or sagas carry that cost.</p>",
+    "example": "<p>Order Service owns <code>orders.total</code>. Shipping Service needs the amount to choose insurance. If it queries the table directly, renaming <code>total</code> breaks Shipping. If Order publishes a versioned <code>OrderPriced</code> fact, Shipping stores <code>order_total</code> in its own read model and evolves against the event contract.</p>",
+    "use_case": {
+      "when": "Use service-owned data when teams need independent deployment, scaling, security boundaries, or different persistence technology.",
+      "example": "Order writes Aurora while Shipping stores a DynamoDB read model built from order events.",
+      "decision": "Keep a shared database for a genuinely single bounded system or early small application when independent ownership is not needed. Split ownership only with a plan for cross-service queries, transactions, schema evolution, replay, and operational support."
+    },
+    "practice": "Toggle direct table access versus a copied read model, then rename the Order column. Watch which contract breaks and which data may become stale.",
+    "boundary": "The model uses one event and one schema rename. It does not implement delivery guarantees, outbox, ordering, replay, authorization, transactions, schema registry, deletions, privacy propagation, lag, or reconciliation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Shipping reads <select id=\"ownershipMode\"><option value=\"event\">its own event-built read model</option><option value=\"shared\">Order's table directly</option></select></label><label><input id=\"renameColumn\" type=\"checkbox\" checked> Order renames total to amount</label><div id=\"ownershipWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintOwnership(){const shared=ownershipMode.value==='shared',rename=renameColumn.checked,broken=shared&&rename;ownershipWorld.innerHTML='<p><strong>Question:</strong> Does an Order schema change break Shipping?</p><div class=tool-path><div class=tile><strong>Order Service</strong><br>owns orders.'+(rename?'amount':'total')+'</div><div class=arrow>'+(shared?'SQL read →':'OrderPriced v1 →')+'</div><div class=\"tile '+(broken?'active':'')+'\"><strong>Shipping Service</strong><br>'+(shared?(broken?'query broken':'query works'):'own read model<br>order_total=50')+'</div></div><p>'+(shared?'Fast join, but shared schema and failure coupling.':'Independent write ownership; read can be stale and needs replay/reconciliation.')+'</p>';};ownershipMode.onchange=paintOwnership;renameColumn.onchange=paintOwnership;paintOwnership();",
+    "questions": [
+      [
+        "Order renames a private column while Shipping queries it directly. What happens?",
+        [
+          "Shipping can break despite no Shipping deployment",
+          "The database rewrites Shipping automatically",
+          "The API contract protects the SQL query"
+        ],
+        0,
+        "Direct table access makes the private schema a hidden cross-service contract."
+      ],
+      [
+        "Why copy an OrderPriced fact into Shipping's read model?",
+        [
+          "Shipping can read locally against an explicit event contract",
+          "It creates a distributed ACID transaction",
+          "It removes all consistency lag"
+        ],
+        0,
+        "Local reads and explicit contracts reduce coupling, while accepting asynchronous consistency work."
+      ],
+      [
+        "When may one shared database be the simpler choice?",
+        [
+          "A small single bounded system without independent ownership needs",
+          "Whenever services have different compliance boundaries",
+          "When every team must deploy independently"
+        ],
+        0,
+        "Splitting persistence adds real operational and consistency cost; do it for a clear boundary."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "order_table={'order_id':'O-42','total':50}; shipping_sql_column='total'",
+          "note": "Both services initially depend on one table column."
+        },
+        {
+          "code": "order_table={'order_id':'O-42','amount':50}; direct_read=order_table.get(shipping_sql_column)",
+          "note": "Order renames its private column; the hidden consumer gets no value."
+        },
+        {
+          "code": "event={'type':'OrderPriced.v1','order_id':'O-42','order_total':50}; shipping_view={event['order_id']:event['order_total']}",
+          "note": "An explicit event contract builds a Shipping-owned read model."
+        },
+        {
+          "code": "shipping_quote=shipping_view['O-42']*0.02; consistency='eventual'",
+          "note": "Shipping reads locally, with asynchronous consistency as the declared tradeoff."
+        }
+      ],
+      "expect": {
+        "order_table": {
+          "order_id": "O-42",
+          "amount": 50
+        },
+        "shipping_sql_column": "total",
+        "direct_read": null,
+        "event": {
+          "type": "OrderPriced.v1",
+          "order_id": "O-42",
+          "order_total": 50
+        },
+        "shipping_view": {
+          "O-42": 50
+        },
+        "shipping_quote": 1.0,
+        "consistency": "eventual"
+      },
+      "limit": "The model uses one event and one schema rename. It does not implement delivery guarantees, outbox, ordering, replay, authorization, transactions, schema registry, deletions, privacy propagation, lag, or reconciliation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "order_table": {
+              "order_id": "O-42",
+              "total": 50
+            },
+            "shipping_sql_column": "total"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "order_table": {
+              "order_id": "O-42",
+              "amount": 50
+            },
+            "shipping_sql_column": "total",
+            "direct_read": null
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "order_table": {
+              "order_id": "O-42",
+              "amount": 50
+            },
+            "shipping_sql_column": "total",
+            "direct_read": null,
+            "event": {
+              "type": "OrderPriced.v1",
+              "order_id": "O-42",
+              "order_total": 50
+            },
+            "shipping_view": {
+              "O-42": 50
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "order_table": {
+              "order_id": "O-42",
+              "amount": 50
+            },
+            "shipping_sql_column": "total",
+            "direct_read": null,
+            "event": {
+              "type": "OrderPriced.v1",
+              "order_id": "O-42",
+              "order_total": 50
+            },
+            "shipping_view": {
+              "O-42": 50
+            },
+            "shipping_quote": 1.0,
+            "consistency": "eventual"
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "AWS Prescriptive Guidance: Database-per-service pattern",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/modernization-data-persistence/database-per-service.html",
+        "Official architecture guidance; checked November 2, 2026"
+      ],
+      [
+        "AWS Prescriptive Guidance: Data persistence patterns for microservices",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/modernization-data-persistence/",
+        "Official pattern catalog; checked November 2, 2026"
+      ]
+    ],
+    "visual_explanation": "The ownership diagram makes the hidden shared-schema contract break on rename while the explicit event-built read model remains locally readable.",
+    "written_questions": [
+      "Which current database table has writers or direct readers from more than one service?",
+      "What replay, lag, deletion, and reconciliation obligations would a copied read model add?"
+    ],
+    "source_checked_on": "2026-11-02"
+  }
+]
