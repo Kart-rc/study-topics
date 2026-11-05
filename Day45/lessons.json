@@ -1,0 +1,1298 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Keep good rows usable and bad rows inspectable",
+    "goal": "Choose an ingestion error policy that preserves valid data without hiding malformed or schema-drifted records.",
+    "tag": "Certification cycle 5 · focused lesson 1 · ingestion evidence",
+    "concept": "<p>A warehouse receives four cartons. Two are correct, one has the right items under unfamiliar labels, and one is crushed. Throwing away the whole truck protects consistency but delays every good carton. Accepting everything without labels hides the damage.</p><p>Data ingestion needs the same explicit lanes: accepted rows, recoverable surprises, and records that could not be parsed. The useful control is not “ignore errors.” It is “keep every outcome countable and inspectable, then decide what may advance.”</p>",
+    "example": "<p>A payments file contains four rows: P-1 is valid; P-2 has <code>amount=\"twelve\"</code>; P-3 is malformed JSON; P-4 is valid. The production decision is whether P-1 and P-4 may enter bronze while P-2 and P-3 remain visible for repair. The answer depends on downstream risk, reconciliation, and whether partial loading changes business meaning.</p>",
+    "use_case": {
+      "when": "Use explicit exception lanes when source files can contain recoverable drift or isolated corruption and delaying every valid row is more harmful than bounded partial progress.",
+      "example": "A partner sends hourly payment events; two valid records should remain available while a type mismatch and a truncated JSON record are investigated.",
+      "decision": "Abort the batch when completeness is the contract or partial progress breaks reconciliation. Otherwise load valid rows only when rejected and rescued counts, source locations, alert thresholds, replay ownership, and publication gates are all explicit."
+    },
+    "practice": "Switch between abort and inspectable-exception policies. Predict which rows advance and whether publication is allowed before revealing the lanes.",
+    "boundary": "This local model classifies four fixed synthetic rows. It does not parse files, contact storage, preserve vendor load metadata, model concurrent files, exactly-once replay, schema inference, permissions, cost, encryption, or downstream reconciliation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Policy <select id=\"ingestPolicy\"><option value=\"lanes\">load good rows; inspect exceptions</option><option value=\"abort\">abort the whole batch</option></select></label><label><input id=\"requireComplete\" type=\"checkbox\"> publication requires all four rows</label><div id=\"ingestWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintIngest(){const lanes=ingestPolicy.value==='lanes',complete=requireComplete.checked;const good=lanes?2:0,rescued=lanes?1:0,corrupt=lanes?1:0,publish=lanes&&!complete;ingestWorld.innerHTML='<p><strong>Question:</strong> Which records survive, and may the release advance?</p><div class=tiles><div class=tile>accepted<br>P-1, P-4<br><strong>'+good+'</strong></div><div class=tile>recoverable drift<br>P-2<br><strong>'+rescued+'</strong></div><div class=\"tile active\">malformed<br>P-3<br><strong>'+corrupt+'</strong></div></div><p>Publication: <strong>'+(publish?'allowed with exception evidence':'blocked')+'</strong>. '+(lanes?'All four outcomes remain countable.':'No target rows are committed in this toy abort policy.')+'</p>';};ingestPolicy.onchange=paintIngest;requireComplete.onchange=paintIngest;paintIngest();",
+    "questions": [
+      [
+        "Two rows are valid, one has a type mismatch, and one is malformed. When is partial progress defensible?",
+        [
+          "Every outcome is visible and the business contract permits partial loading",
+          "Errors are silently discarded",
+          "The source path is unknown"
+        ],
+        0,
+        "Partial progress needs evidence, replay ownership, and a business rule that does not require atomic file completeness."
+      ],
+      [
+        "Why separate recoverable drift from malformed syntax?",
+        [
+          "They need different diagnosis and repair paths",
+          "Both should be renamed success",
+          "It guarantees downstream correctness"
+        ],
+        0,
+        "A schema mismatch may preserve field data; malformed syntax might not yield a record at all."
+      ],
+      [
+        "What can still block publication after good rows load?",
+        [
+          "A completeness or reconciliation gate",
+          "The presence of a bronze table",
+          "A successful local JavaScript model"
+        ],
+        0,
+        "Landing and publishing are separate decisions; business completeness can require the full file."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "rows=[{'id':'P-1','state':'valid'},{'id':'P-2','state':'type_mismatch'},{'id':'P-3','state':'malformed'},{'id':'P-4','state':'valid'}]",
+          "note": "Start with two valid rows and two different error classes."
+        },
+        {
+          "code": "accepted=[r['id'] for r in rows if r['state']=='valid']; rescued=[r['id'] for r in rows if r['state']=='type_mismatch']",
+          "note": "Keep valid rows separate from recoverable schema surprises."
+        },
+        {
+          "code": "corrupt=[r['id'] for r in rows if r['state']=='malformed']; accounted=len(accepted)+len(rescued)+len(corrupt)",
+          "note": "Give malformed records their own visible lane and reconcile the counts."
+        },
+        {
+          "code": "can_publish=accounted==len(rows) and len(corrupt)<=1; decision='publish_with_exception' if can_publish else 'hold'",
+          "note": "Apply an explicit synthetic publication rule; landing alone is not approval."
+        }
+      ],
+      "expect": {
+        "rows": [
+          {
+            "id": "P-1",
+            "state": "valid"
+          },
+          {
+            "id": "P-2",
+            "state": "type_mismatch"
+          },
+          {
+            "id": "P-3",
+            "state": "malformed"
+          },
+          {
+            "id": "P-4",
+            "state": "valid"
+          }
+        ],
+        "accepted": [
+          "P-1",
+          "P-4"
+        ],
+        "rescued": [
+          "P-2"
+        ],
+        "corrupt": [
+          "P-3"
+        ],
+        "accounted": 4,
+        "can_publish": true,
+        "decision": "publish_with_exception"
+      },
+      "limit": "This local model classifies four fixed synthetic rows. It does not parse files, contact storage, preserve vendor load metadata, model concurrent files, exactly-once replay, schema inference, permissions, cost, encryption, or downstream reconciliation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "rows": [
+              {
+                "id": "P-1",
+                "state": "valid"
+              },
+              {
+                "id": "P-2",
+                "state": "type_mismatch"
+              },
+              {
+                "id": "P-3",
+                "state": "malformed"
+              },
+              {
+                "id": "P-4",
+                "state": "valid"
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "rows": [
+              {
+                "id": "P-1",
+                "state": "valid"
+              },
+              {
+                "id": "P-2",
+                "state": "type_mismatch"
+              },
+              {
+                "id": "P-3",
+                "state": "malformed"
+              },
+              {
+                "id": "P-4",
+                "state": "valid"
+              }
+            ],
+            "accepted": [
+              "P-1",
+              "P-4"
+            ],
+            "rescued": [
+              "P-2"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "rows": [
+              {
+                "id": "P-1",
+                "state": "valid"
+              },
+              {
+                "id": "P-2",
+                "state": "type_mismatch"
+              },
+              {
+                "id": "P-3",
+                "state": "malformed"
+              },
+              {
+                "id": "P-4",
+                "state": "valid"
+              }
+            ],
+            "accepted": [
+              "P-1",
+              "P-4"
+            ],
+            "rescued": [
+              "P-2"
+            ],
+            "corrupt": [
+              "P-3"
+            ],
+            "accounted": 4
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "rows": [
+              {
+                "id": "P-1",
+                "state": "valid"
+              },
+              {
+                "id": "P-2",
+                "state": "type_mismatch"
+              },
+              {
+                "id": "P-3",
+                "state": "malformed"
+              },
+              {
+                "id": "P-4",
+                "state": "valid"
+              }
+            ],
+            "accepted": [
+              "P-1",
+              "P-4"
+            ],
+            "rescued": [
+              "P-2"
+            ],
+            "corrupt": [
+              "P-3"
+            ],
+            "accounted": 4,
+            "can_publish": true,
+            "decision": "publish_with_exception"
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks Auto Loader schema inference and evolution",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema",
+        "Official documentation; updated September 11, 2026"
+      ],
+      [
+        "Databricks Auto Loader best practices",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/best-practices",
+        "Official documentation; checked November 4, 2026"
+      ],
+      [
+        "Snowflake COPY INTO table",
+        "https://docs.snowflake.com/en/sql-reference/sql/copy-into-table",
+        "Official SQL reference; checked November 4, 2026"
+      ],
+      [
+        "Snowflake VALIDATE",
+        "https://docs.snowflake.com/en/sql-reference/functions/validate",
+        "Official SQL reference; checked November 4, 2026"
+      ]
+    ],
+    "visual_explanation": "The three lanes answer which exact records advance, which preserve recoverable fields, and which need source-level repair; the separate publication verdict prevents landing from being mistaken for business approval.",
+    "written_questions": [
+      "Which source in your platform may progress partially, and what reconciliation proof makes that safe?",
+      "Who owns replay of rescued and corrupt records, and how does publication wait for the required outcome?"
+    ],
+    "source_checked_on": "2026-11-04",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: preserve drift in _rescued_data and malformed input in _corrupt_record",
+        "minutes": 9,
+        "html": "<p><strong>Predict first.</strong> P-2 has <code>amount=\"twelve\"</code>; P-3 is truncated JSON. Which column should explain each?</p><pre><code><span># sourced PySpark sketch; not executed in Databricks</span><span>df = (spark.readStream.format(\"cloudFiles\")</span><span> .option(\"cloudFiles.format\", \"json\")</span><span> .option(\"cloudFiles.schemaHints\", \"_corrupt_record string\")</span><span> .option(\"columnNameOfCorruptRecord\", \"_corrupt_record\")</span><span> .load(source))</span></code></pre><p><code>_rescued_data</code> preserves fields missing from the schema or carrying type/case mismatches. <code>_corrupt_record</code> captures rows the parser cannot form. Databricks recommends the corrupt-record column over <code>badRecordsPath</code> because the latter can have race conditions. Monitor both columns and keep publication policy separate.</p><label>Input row <select id=\"dbRow\"><option value=\"P-1\">P-1 valid</option><option value=\"P-2\">P-2 type mismatch</option><option value=\"P-3\">P-3 malformed JSON</option></select></label><div id=\"dbRowWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Execution label.</strong> No Databricks runtime was contacted. This is a local JavaScript decision model; the Python replay is local.</p>",
+        "markdown": "Auto Loader keeps schema/type surprises in `_rescued_data` and can capture unparseable rows in `_corrupt_record`. Monitor both, reconcile counts, and decide publication separately. The PySpark sketch was not run in Databricks.",
+        "javascript": "const dbRow=$('dbRow'),dbRowWorld=$('dbRowWorld');function paintDbRow(){const r=dbRow.value,m={\"P-1\":['bronze columns','null','null'],\"P-2\":['bronze identity','{amount: twelve}','null'],\"P-3\":['no parsed fields','null','raw truncated input']}[r];dbRowWorld.innerHTML='<div class=step-flow><div class=tile>input<br>'+r+'</div><div class=tile>parsed target<br>'+m[0]+'</div><div class=tile>_rescued_data<br>'+m[1]+'</div><div class=\"tile active\">_corrupt_record<br>'+m[2]+'</div></div>';};dbRow.onchange=paintDbRow;paintDbRow();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: preflight COPY errors, then choose abort or partial load deliberately",
+        "minutes": 9,
+        "html": "<p><strong>Predict first.</strong> What changes in the target when <code>VALIDATION_MODE</code> is used? Nothing: it tests files and returns errors instead of loading.</p><pre><code><span>-- sourced SQL sketch; not executed in Snowflake</span><span>COPY INTO payments FROM @landing/payments</span><span> FILE_FORMAT=(FORMAT_NAME='payments_json')</span><span> VALIDATION_MODE=RETURN_ERRORS;</span><span>-- only after reviewing policy:</span><span>COPY INTO payments FROM @landing/payments</span><span> FILE_FORMAT=(FORMAT_NAME='payments_json')</span><span> ON_ERROR=CONTINUE;</span></code></pre><p><code>ON_ERROR=CONTINUE</code> loads valid rows and reports errors; the rejected row is not stored in the target as a rescued-data column. Use COPY results and <code>VALIDATE</code> where supported. <code>VALIDATE</code> has limits, including no results for the default <code>ABORT_STATEMENT</code> and failure for COPY transformations.</p><label>Mode <select id=\"sfMode\"><option value=\"validate\">VALIDATION_MODE=RETURN_ERRORS</option><option value=\"abort\">ON_ERROR=ABORT_STATEMENT</option><option value=\"continue\">ON_ERROR=CONTINUE</option></select></label><div id=\"sfModeWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Execution label.</strong> No Snowflake SQL ran; this is a local model of the documented policy.</p>",
+        "markdown": "`VALIDATION_MODE=RETURN_ERRORS` inspects without loading. `ABORT_STATEMENT` commits no target rows on error. `CONTINUE` loads valid rows and reports rejected records; those errors are not rows in the target. SQL was not executed.",
+        "javascript": "const sfMode=$('sfMode'),sfModeWorld=$('sfModeWorld');function paintSfMode(){const m={validate:[0,2,'errors returned; target unchanged'],abort:[0,1,'statement aborted at error'],continue:[2,2,'good rows loaded; two errors reported']}[sfMode.value];sfModeWorld.innerHTML='<div class=tiles><div class=tile>target rows added<br><strong>'+m[0]+'</strong></div><div class=\"tile active\">errors visible<br><strong>'+m[1]+'</strong></div></div><p>'+m[2]+'. Publication remains a separate gate.</p>';};sfMode.onchange=paintSfMode;paintSfMode();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks Auto Loader</th><th>Snowflake COPY</th></tr></thead><tbody><tr><td>Type/schema surprise</td><td>can live in _rescued_data</td><td>load error unless transformed/handled</td></tr><tr><td>Malformed row</td><td>can be captured in _corrupt_record</td><td>reported as COPY error; not a target row</td></tr><tr><td>Preflight</td><td>inspect stream/schema behavior and quality columns</td><td>VALIDATION_MODE returns errors without loading</td></tr><tr><td>Common rule</td><td colspan=2>reconcile outcomes and gate publication explicitly</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Recoverable drift | `_rescued_data` | COPY error or explicit transformation |\n| Malformed row | `_corrupt_record` | COPY error, not target row |\n| Preflight | inspect quality columns | `VALIDATION_MODE` |"
+    },
+    "product_questions": [
+      [
+        "P-2 has a type mismatch but its original field should remain inspectable in Auto Loader. Where does it belong?",
+        [
+          "_rescued_data",
+          "_corrupt_record",
+          "The checkpoint only"
+        ],
+        0,
+        "The rescued-data column preserves schema, type, and case mismatches; corrupt-record is for rows the parser cannot form."
+      ],
+      [
+        "What does Snowflake VALIDATION_MODE=RETURN_ERRORS do to the target table?",
+        [
+          "It returns load errors without loading rows",
+          "It loads only valid rows",
+          "It swaps the target table"
+        ],
+        0,
+        "Validation mode tests files and returns errors instead of loading the target."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks Auto Loader schema inference and evolution",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema",
+        "Official documentation; updated September 11, 2026"
+      ],
+      [
+        "Databricks Auto Loader best practices",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/best-practices",
+        "Official documentation; checked November 4, 2026"
+      ],
+      [
+        "Snowflake COPY INTO table",
+        "https://docs.snowflake.com/en/sql-reference/sql/copy-into-table",
+        "Official SQL reference; checked November 4, 2026"
+      ],
+      [
+        "Snowflake VALIDATE",
+        "https://docs.snowflake.com/en/sql-reference/functions/validate",
+        "Official SQL reference; checked November 4, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-05/databricks-certified-data-engineer-associate-exam-guide-may-2026-000.pdf",
+        "Official May 4, 2026 guide; rechecked November 4, 2026"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official overview rechecked November 4, 2026; full objective IDs and weights remain unverified"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-04",
+      "session_type": "focused",
+      "cycle_position": 1,
+      "cycle_origin": "Day45",
+      "databricks": {
+        "scope": "Data Ingestion and Loading: Auto Loader schema enforcement/evolution, rescued and corrupt records, monitoring, and publication boundaries."
+      },
+      "snowflake": {
+        "scope": "Loading, unloading, and transformation planning group: COPY validation, ON_ERROR choice, error evidence, and partial-load boundaries. This is a planning group, not a claimed full COF-C03 objective map."
+      },
+      "product_lab_execution": "not_run; browser models are local JavaScript and the recorded example is local Python"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "A CountDownLatch counts arrivals—not successful results",
+    "goal": "Use a latch to wait for a fixed set of completions while tracking success and failure separately.",
+    "tag": "Java concurrency foundation · Java SE 26 API checked",
+    "concept": "<p>Three movers must report back before the truck leaves. The dispatcher can count three reports, but that count does not say all three deliveries succeeded.</p><p>A <code>CountDownLatch</code> releases waiters when its count reaches zero. Calling <code>countDown()</code> in <code>finally</code> prevents a failed worker from trapping the coordinator forever. The latch records arrival only; a separate result or exception record decides success.</p>",
+    "example": "<p>Shard A warms successfully. Shard B fails authentication. Shard C warms successfully. All three workers count down, so <code>await</code> returns. Startup must still remain blocked because B is <code>FAILED</code>. Also, the latch is one-shot; it cannot be reset for the next refresh cycle.</p>",
+    "use_case": {
+      "when": "Use a CountDownLatch when a known, fixed number of one-time operations must all finish before a coordinator proceeds.",
+      "example": "A Java service waits for three independent cache warmers to report completion before evaluating readiness.",
+      "decision": "Use a latch only for one-shot arrival. Store outcomes separately, use a timeout, and choose CyclicBarrier/Phaser or structured task coordination when participants repeat or change."
+    },
+    "practice": "Change shard B from failed to ready and change the number of reports. Watch the gate and the readiness decision remain separate.",
+    "boundary": "The browser model is sequential and deterministic. It does not create threads, model memory visibility beyond the API guarantee, interrupts, executor rejection, late workers, retries, cancellation, repeated phases, or production readiness checks.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Shard B <select id=\"latchB\"><option value=\"fail\">fails</option><option value=\"ready\">is ready</option></select></label><label>Workers reported <input id=\"latchReports\" type=\"range\" min=\"0\" max=\"3\" value=\"3\"></label><div id=\"latchWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintLatch(){const reports=+latchReports.value,remaining=3-reports,bReady=latchB.value==='ready',gate=remaining===0,start=gate&&bReady;latchWorld.innerHTML='<p><strong>Question:</strong> May the service announce readiness?</p><div class=step-flow><div class=tile>latch count<br><strong>'+remaining+'</strong></div><div class=tile>all arrived<br>'+gate+'</div><div class=\"tile '+(gate&&!start?'active':'')+'\">all succeeded<br>'+start+'</div></div><p>'+(gate&&!start?'The latch opened, but shard B failed. Inspect outcomes before startup.':start?'All reports arrived and all outcomes succeeded.':'Await is still blocked.')+'</p>';};latchB.onchange=paintLatch;latchReports.oninput=paintLatch;paintLatch();",
+    "questions": [
+      [
+        "All three workers call countDown, but one failed. What does await report?",
+        [
+          "The latch opened; success still needs separate evidence",
+          "The failure keeps the latch above zero",
+          "The latch resets itself"
+        ],
+        0,
+        "CountDownLatch tracks count, not the meaning of each completion."
+      ],
+      [
+        "Why put countDown in finally?",
+        [
+          "Every worker reports completion even when its work throws",
+          "It converts failure into success",
+          "It resets the latch"
+        ],
+        0,
+        "The coordinator should not wait forever merely because a worker ended exceptionally."
+      ],
+      [
+        "What is the boundary for a second warm-up cycle?",
+        [
+          "The latch is one-shot and cannot be reset",
+          "The count becomes three automatically",
+          "Calling await adds participants"
+        ],
+        0,
+        "The Java API documents CountDownLatch as one-shot; use a reusable coordination primitive when phases repeat."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var latch = new java.util.concurrent.CountDownLatch(3); int remaining = 3; String shardA = \"PENDING\"; String shardB = \"PENDING\"; String shardC = \"PENDING\";",
+          "note": "Create a real Java latch for three one-time completions."
+        },
+        {
+          "code": "shardA = \"READY\"; latch.countDown(); remaining = (int) latch.getCount();",
+          "note": "Shard A succeeds and reports completion; two reports remain."
+        },
+        {
+          "code": "shardB = \"FAILED\"; latch.countDown(); remaining = (int) latch.getCount();",
+          "note": "Shard B fails but still reports completion from its finally block."
+        },
+        {
+          "code": "shardC = \"READY\"; latch.countDown(); remaining = (int) latch.getCount();",
+          "note": "The last report opens the latch even though one outcome is failed."
+        },
+        {
+          "code": "boolean allArrived = latch.await(1, java.util.concurrent.TimeUnit.MILLISECONDS); boolean startupAllowed = allArrived && shardA.equals(\"READY\") && shardB.equals(\"READY\") && shardC.equals(\"READY\");",
+          "note": "Await proves arrival. Readiness also checks every outcome."
+        }
+      ],
+      "expect": {
+        "remaining": "0",
+        "shardA": "READY",
+        "shardB": "FAILED",
+        "shardC": "READY",
+        "allArrived": "true",
+        "startupAllowed": "false"
+      },
+      "limit": "The browser model is sequential and deterministic. It does not create threads, model memory visibility beyond the API guarantee, interrupts, executor rejection, late workers, retries, cancellation, repeated phases, or production readiness checks.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "latch": "java.util.concurrent.CountDownLatch@75329a49[Count = 3]",
+            "remaining": "3",
+            "shardA": "PENDING",
+            "shardB": "PENDING",
+            "shardC": "PENDING"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "latch": "java.util.concurrent.CountDownLatch@75329a49[Count = 2]",
+            "remaining": "2",
+            "shardA": "READY",
+            "shardB": "PENDING",
+            "shardC": "PENDING"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "latch": "java.util.concurrent.CountDownLatch@75329a49[Count = 1]",
+            "remaining": "1",
+            "shardA": "READY",
+            "shardB": "FAILED",
+            "shardC": "PENDING"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "latch": "java.util.concurrent.CountDownLatch@75329a49[Count = 0]",
+            "remaining": "0",
+            "shardA": "READY",
+            "shardB": "FAILED",
+            "shardC": "READY"
+          }
+        },
+        {
+          "step": 4,
+          "state": {
+            "latch": "java.util.concurrent.CountDownLatch@75329a49[Count = 0]",
+            "remaining": "0",
+            "shardA": "READY",
+            "shardB": "FAILED",
+            "shardC": "READY",
+            "allArrived": "true",
+            "startupAllowed": "false"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java SE 26 CountDownLatch",
+        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/concurrent/CountDownLatch.html",
+        "Official Java API; checked November 4, 2026"
+      ]
+    ],
+    "visual_explanation": "The latch count reaches zero in a separate column from the success verdict, making the central trap visible: completion and correctness are different facts.",
+    "written_questions": [
+      "Which one-time startup or migration gate in your services needs separate outcome tracking?",
+      "What repeated or dynamic workflow would make CountDownLatch the wrong primitive?"
+    ],
+    "source_checked_on": "2026-11-04"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "During an incident, one person commands while another changes the system",
+    "goal": "Separate incident coordination, operational work, and communication so responders do not compete for attention or control.",
+    "tag": "Distinguished Engineer · incident command",
+    "concept": "<p>In an emergency room, the coordinator does not perform every procedure while answering every family question. Splitting roles protects the attention of the people doing each job.</p><p>In a large incident, the Incident Commander holds the overall state and priorities. The Operations Lead is the group changing the system. The Communications Lead gives periodic updates. The commander owns any role not yet delegated, but should split roles as the incident grows.</p>",
+    "example": "<p>A payment API has 35% errors. Priya becomes commander and sets the goal: stop bad writes, restore checkout, then reconcile. Marco leads operations and is the only group applying changes. Lee posts stakeholder updates every 15 minutes. Engineers may investigate in parallel, but change requests flow through Ops.</p>",
+    "use_case": {
+      "when": "Use explicit incident roles when impact, responders, dependencies, or stakeholder demand exceed what one person can track safely.",
+      "example": "A cross-region payment incident involves API, Kafka, database, customer support, risk, and executive stakeholders.",
+      "decision": "Keep a lightweight single owner for small incidents. Split command, operations, and communications once context switching or conflicting changes appear; record handoffs and one current objective."
+    },
+    "practice": "Change incident size and role delegation. Observe when one person becomes an attention bottleneck and when the operating lane becomes clear.",
+    "boundary": "The model uses only three roles and a synthetic attention score. It does not represent organization-specific severity, legal/security response, psychological safety, shifts, time zones, tooling, authority, or actual incident outcomes.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Active responders <input id=\"incidentPeople\" type=\"range\" min=\"2\" max=\"14\" value=\"9\"></label><label>Role split <select id=\"incidentSplit\"><option value=\"split\">IC + Ops + Comms</option><option value=\"one\">one person does all three</option></select></label><div id=\"incidentWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintIncident(){const n=+incidentPeople.value,split=incidentSplit.value==='split',switches=split?2:n+3,clarity=Math.max(10,100-switches*6);incidentWorld.innerHTML='<p><strong>Question:</strong> Who may change production while everyone else investigates?</p><div class=tiles><div class=tile>Command<br>'+(split?'Priya':'one overloaded owner')+'</div><div class=\"tile active\">System changes<br>'+(split?'Marco / Ops only':'competing responders')+'</div><div class=tile>Updates<br>'+(split?'Lee every 15 min':'interrupts owner')+'</div></div><p>Teaching attention score: <strong>'+clarity+'%</strong>. It is illustrative, not a measured SRE metric.</p>';};incidentPeople.oninput=paintIncident;incidentSplit.onchange=paintIncident;paintIncident();",
+    "questions": [
+      [
+        "Who should apply operational changes in the described incident?",
+        [
+          "The Ops group coordinated with the Incident Commander",
+          "Every investigator independently",
+          "The Communications Lead"
+        ],
+        0,
+        "A single operating lane reduces conflicting changes while command retains the high-level state."
+      ],
+      [
+        "Why separate communications?",
+        [
+          "Stakeholder updates stop interrupting operational diagnosis",
+          "It hides impact",
+          "It grants database access"
+        ],
+        0,
+        "A Communications Lead keeps updates accurate and frees Ops and command to do their jobs."
+      ],
+      [
+        "When is a three-role structure unnecessary?",
+        [
+          "A small incident one person can safely coordinate without attention loss",
+          "A cross-region outage with ten responders",
+          "Conflicting production changes are already occurring"
+        ],
+        0,
+        "Use the lightest structure that preserves control; delegate when scale creates contention."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "incident={'impact':'35% payment errors','objective':'stop bad writes'}; roles={'IC':'Priya'}",
+          "note": "Declare one incident and one current objective; the commander initially owns undelegated roles."
+        },
+        {
+          "code": "roles['Ops']='Marco'; change_authority=['Ops']",
+          "note": "Delegate operational work and name one lane for system changes."
+        },
+        {
+          "code": "roles['Comms']='Lee'; update_minutes=15",
+          "note": "Delegate periodic stakeholder communication."
+        },
+        {
+          "code": "investigations=['API','Kafka','database']; decision='findings flow to IC; approved actions flow to Ops'",
+          "note": "Parallelize investigation without parallelizing uncontrolled changes."
+        }
+      ],
+      "expect": {
+        "incident": {
+          "impact": "35% payment errors",
+          "objective": "stop bad writes"
+        },
+        "roles": {
+          "IC": "Priya",
+          "Ops": "Marco",
+          "Comms": "Lee"
+        },
+        "change_authority": [
+          "Ops"
+        ],
+        "update_minutes": 15,
+        "investigations": [
+          "API",
+          "Kafka",
+          "database"
+        ],
+        "decision": "findings flow to IC; approved actions flow to Ops"
+      },
+      "limit": "The model uses only three roles and a synthetic attention score. It does not represent organization-specific severity, legal/security response, psychological safety, shifts, time zones, tooling, authority, or actual incident outcomes.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "incident": {
+              "impact": "35% payment errors",
+              "objective": "stop bad writes"
+            },
+            "roles": {
+              "IC": "Priya"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "incident": {
+              "impact": "35% payment errors",
+              "objective": "stop bad writes"
+            },
+            "roles": {
+              "IC": "Priya",
+              "Ops": "Marco"
+            },
+            "change_authority": [
+              "Ops"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "incident": {
+              "impact": "35% payment errors",
+              "objective": "stop bad writes"
+            },
+            "roles": {
+              "IC": "Priya",
+              "Ops": "Marco",
+              "Comms": "Lee"
+            },
+            "change_authority": [
+              "Ops"
+            ],
+            "update_minutes": 15
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "incident": {
+              "impact": "35% payment errors",
+              "objective": "stop bad writes"
+            },
+            "roles": {
+              "IC": "Priya",
+              "Ops": "Marco",
+              "Comms": "Lee"
+            },
+            "change_authority": [
+              "Ops"
+            ],
+            "update_minutes": 15,
+            "investigations": [
+              "API",
+              "Kafka",
+              "database"
+            ],
+            "decision": "findings flow to IC; approved actions flow to Ops"
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Google SRE Workbook: Incident response",
+        "https://sre.google/workbook/incident-response/",
+        "Official Google SRE guidance; checked November 4, 2026"
+      ],
+      [
+        "Google SRE Book: Managing incidents",
+        "https://sre.google/sre-book/managing-incidents/",
+        "Official Google SRE guidance; checked November 4, 2026"
+      ]
+    ],
+    "visual_explanation": "The role lanes show that investigation can fan out while production changes converge on one Ops lane and stakeholder questions converge on Communications.",
+    "written_questions": [
+      "At what incident size or signal will your team split IC, Ops, and Communications?",
+      "How will you prevent a senior stakeholder from bypassing the operating lane during an outage?"
+    ],
+    "source_checked_on": "2026-11-04"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "For new MCP tools, pass the path explicitly—and enforce a real sandbox",
+    "goal": "Replace deprecated MCP roots in new designs with explicit path/resource inputs while keeping filesystem authority outside the protocol hint.",
+    "tag": "GenAI harness engineering · MCP 2026-07-28 migration",
+    "concept": "<p>A note saying “work in this folder” is not a locked door. It tells a worker where to focus; it does not stop them opening another door.</p><p>MCP roots were informational workspace hints, not access control. In protocol version 2026-07-28, roots are deprecated for new designs. Prefer explicit tool parameters, resource URIs, server configuration, or environment variables. Then enforce actual access with process permissions, containers, allowlists, and canonical-path checks.</p>",
+    "example": "<p>An old lineage server asks the client for root <code>file:///workspace/payments</code>. A malicious input still requests <code>../../secrets</code>; the root hint alone cannot block it. The new tool accepts <code>resource_uri=file:///workspace/payments/job.sql</code>, resolves it, and the sandbox rejects anything outside the mounted workspace.</p>",
+    "use_case": {
+      "when": "Use explicit resource or path inputs when an agent tool must read a known project artifact, especially while migrating from MCP roots.",
+      "example": "A lineage tool receives one SQL resource URI and runs inside a container that mounts only the approved repository read-only.",
+      "decision": "Do not add roots to a new 2026-07-28 design. Keep compatibility only when needed, expose explicit inputs, canonicalize paths, and make the operating-system or container boundary the authority."
+    },
+    "practice": "Try a file inside the mounted workspace and a traversal path. Compare an informational root check with canonicalization plus a sandbox mount.",
+    "boundary": "This model normalizes two synthetic paths. It does not implement URI parsing, symlink/race defenses, Windows paths, remote resources, authentication, process isolation, MCP transport, client consent, or production sandboxing.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Requested path <select id=\"pathRequest\"><option value=\"inside\">/workspace/payments/job.sql</option><option value=\"traversal\">/workspace/payments/../../secrets.txt</option></select></label><label>Control <select id=\"pathControl\"><option value=\"sandbox\">canonical path + sandbox</option><option value=\"hint\">root hint only</option></select></label><div id=\"pathWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintPath(){const traversal=pathRequest.value==='traversal',sandbox=pathControl.value==='sandbox',canonical=traversal?'/secrets.txt':'/workspace/payments/job.sql',allow=!traversal||!sandbox;pathWorld.innerHTML='<p><strong>Question:</strong> Does the tool read the file?</p><div class=tool-path><div class=tile>explicit request<br>'+canonical+'</div><div class=arrow>→</div><div class=tile>'+(sandbox?'mounted /workspace/payments':'informational root')+'</div><div class=arrow>→</div><div class=\"tile '+(!allow?'active':'')+'\">'+(allow?'ALLOW':'DENY')+'</div></div><p>'+(sandbox?'Authority comes from the enforced boundary.':'The hint does not enforce filesystem access.')+'</p>';};pathRequest.onchange=paintPath;pathControl.onchange=paintPath;paintPath();",
+    "questions": [
+      [
+        "What replaced roots for a new 2026-07-28 MCP design?",
+        [
+          "Explicit tool parameters, resource URIs, configuration, or environment variables",
+          "A larger root list",
+          "Model memory"
+        ],
+        0,
+        "The current migration guidance deprecates roots and recommends explicit inputs/configuration."
+      ],
+      [
+        "Why is an explicit path still not enough?",
+        [
+          "The server needs an enforced sandbox or permission boundary",
+          "Paths automatically authorize themselves",
+          "The model must see every directory"
+        ],
+        0,
+        "Input describes the target; operating-system and application controls determine authority."
+      ],
+      [
+        "What should happen to an existing 2025-11-25 client using roots?",
+        [
+          "Maintain compatibility during migration, but do not treat roots as access control",
+          "Assume roots became a security sandbox",
+          "Publish secrets as resources"
+        ],
+        0,
+        "Roots remain functional during the deprecation window; migration and real enforcement are separate concerns."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "requested='/workspace/payments/../../secrets.txt'; deprecated_roots=False",
+          "note": "A new design receives the target explicitly and does not add deprecated roots."
+        },
+        {
+          "code": "import posixpath; canonical=posixpath.normpath(requested); mount='/workspace/payments'",
+          "note": "Canonicalize the teaching path before comparing boundaries."
+        },
+        {
+          "code": "inside=canonical==mount or canonical.startswith(mount+'/'); decision='ALLOW' if inside else 'DENY'",
+          "note": "The traversal resolves outside the mounted workspace and is denied."
+        },
+        {
+          "code": "authority='read-only sandbox mount'; protocol_input='resource_uri tool parameter'",
+          "note": "Keep protocol input separate from the actual authority boundary."
+        }
+      ],
+      "expect": {
+        "requested": "/workspace/payments/../../secrets.txt",
+        "deprecated_roots": false,
+        "canonical": "/secrets.txt",
+        "mount": "/workspace/payments",
+        "inside": false,
+        "decision": "DENY",
+        "authority": "read-only sandbox mount",
+        "protocol_input": "resource_uri tool parameter"
+      },
+      "limit": "This model normalizes two synthetic paths. It does not implement URI parsing, symlink/race defenses, Windows paths, remote resources, authentication, process isolation, MCP transport, client consent, or production sandboxing.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "requested": "/workspace/payments/../../secrets.txt",
+            "deprecated_roots": false
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "requested": "/workspace/payments/../../secrets.txt",
+            "deprecated_roots": false,
+            "canonical": "/secrets.txt",
+            "mount": "/workspace/payments"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "requested": "/workspace/payments/../../secrets.txt",
+            "deprecated_roots": false,
+            "canonical": "/secrets.txt",
+            "mount": "/workspace/payments",
+            "inside": false,
+            "decision": "DENY"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "requested": "/workspace/payments/../../secrets.txt",
+            "deprecated_roots": false,
+            "canonical": "/secrets.txt",
+            "mount": "/workspace/payments",
+            "inside": false,
+            "decision": "DENY",
+            "authority": "read-only sandbox mount",
+            "protocol_input": "resource_uri tool parameter"
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP 2026-07-28 release: deprecations",
+        "https://blog.modelcontextprotocol.io/posts/2026-07-28/",
+        "Official MCP release post; published July 28, 2026"
+      ],
+      [
+        "MCP Python SDK: sampling and roots",
+        "https://py.sdk.modelcontextprotocol.io/handlers/sampling-and-roots/",
+        "Official SDK documentation; checked November 4, 2026"
+      ],
+      [
+        "MCP Go SDK client roots",
+        "https://go.sdk.modelcontextprotocol.io/client/",
+        "Official SDK documentation; checked November 4, 2026"
+      ]
+    ],
+    "visual_explanation": "The path passes through two visibly separate gates—an explicit request and an enforced mount—so a deprecated workspace hint cannot be mistaken for authorization.",
+    "written_questions": [
+      "Which of your agent tools still depends on roots, and what explicit input will replace it?",
+      "What OS, container, or allowlist control actually prevents a traversal or symlink escape?"
+    ],
+    "source_checked_on": "2026-11-04"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "A foundry metal film becomes a tiny quantum-sensor inductor",
+    "goal": "Understand how high kinetic inductance compresses a useful cryogenic circuit element into a commercial CMOS process.",
+    "tag": "New primary research · Nature Electronics · November 4, 2026",
+    "concept": "<p>A normal coil stores magnetic energy by winding a long conductor through space. At cryogenic temperature, the inertia of superconducting charge carriers can also resist changing current. That effect is called kinetic inductance.</p><p>The researchers used titanium nitride already present in a commercial 22-nm CMOS process. They report about 7 nH per square micrometre, compared with 200 nH per square millimetre for a conventional spiral in their figure. This enables a compact nonlinear superinductor integrated with a silicon quantum dot sensor.</p>",
+    "example": "<p>A teaching target of 126 nH needs 18 μm² at 7 nH/μm². At 200 nH/mm², a conventional spiral would need 0.63 mm², or 630,000 μm²—about 35,000 times the area. The paper reports an 18 μm² sensor and power SNR 4,500 at 4 ns. These are cryogenic research results, not ordinary room-temperature logic.</p>",
+    "use_case": {
+      "when": "Use this research when evaluating dense cryogenic readout or sensing circuits that could benefit from foundry-integrated high impedance and nonlinearity.",
+      "example": "A semiconductor spin-qubit chip needs a radio-frequency single-electron transistor close to the quantum dot without a large bespoke off-chip inductor.",
+      "decision": "Treat the article as evidence for one commercial-process prototype. Adoption needs independent evidence for operating temperature, process access, reproducibility, noise, control electronics, packaging, yield, and system-scale qubit readout."
+    },
+    "practice": "Change the target inductance. Compare the required TiN and spiral areas on a logarithmic bar, where both remain visible despite a 35,000-fold ratio.",
+    "boundary": "This calculator uses two reported inductance densities and linear area scaling. It does not model geometry, parasitics, frequency, nonlinearity, superconducting transition, process variation, quantum-dot physics, SNR, fabrication yield, temperature, or packaging.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Target inductance (nH) <input id=\"inductanceTarget\" type=\"range\" min=\"63\" max=\"252\" step=\"63\" value=\"126\"></label><div id=\"inductanceWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintInductance(){const n=+inductanceTarget.value,tin=n/7,spiral=n/200*1e6,ratio=spiral/tin,max=Math.log10(spiral);const a=Math.log10(tin)/max*100,b=100;inductanceWorld.innerHTML='<p><strong>Question:</strong> How much area supplies '+n+' nH in this density-only model?</p><div class=tile>TiN · '+tin.toLocaleString()+' μm²<div class=meter><div style=\"width:'+a+'%\"></div></div></div><div class=tile>spiral · '+spiral.toLocaleString()+' μm²<div class=meter><div style=\"width:'+b+'%\"></div></div></div><p>Area ratio: <strong>'+ratio.toLocaleString()+'×</strong>. Bars use a log scale so the small bar remains visible.</p>';};inductanceTarget.oninput=paintInductance;paintInductance();",
+    "questions": [
+      [
+        "Why can the TiN structure be much smaller in the density-only comparison?",
+        [
+          "Its kinetic inductance per area is far higher",
+          "It removes cryogenic requirements",
+          "It stores no energy"
+        ],
+        0,
+        "Higher inductance density supplies the target value in less area."
+      ],
+      [
+        "What is the area ratio from 7 nH/μm² versus 200 nH/mm²?",
+        [
+          "About 35,000×",
+          "35×",
+          "3.5×"
+        ],
+        0,
+        "Convert one square millimetre to one million square micrometres before comparing."
+      ],
+      [
+        "What remains a research boundary?",
+        [
+          "System-scale yield, cryogenic operation, packaging, and reproducibility",
+          "The arithmetic definition of area",
+          "That CMOS exists"
+        ],
+        0,
+        "One integrated prototype does not establish scalable product deployment."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "target_nh=126; tin_density_nh_per_um2=7",
+          "note": "Set the teaching target and reported TiN density."
+        },
+        {
+          "code": "spiral_density_nh_per_mm2=200; spiral_density_nh_per_um2=spiral_density_nh_per_mm2/1_000_000",
+          "note": "Convert the spiral density to the same square-micrometre unit."
+        },
+        {
+          "code": "tin_area_um2=target_nh/tin_density_nh_per_um2; spiral_area_um2=target_nh/spiral_density_nh_per_um2",
+          "note": "Calculate 18 μm² versus 630,000 μm² for the same teaching target."
+        },
+        {
+          "code": "area_ratio=spiral_area_um2/tin_area_um2; claim='commercial-CMOS cryogenic prototype'; production_ready=False",
+          "note": "Keep the area comparison and research claim separate from production readiness."
+        }
+      ],
+      "expect": {
+        "target_nh": 126,
+        "tin_density_nh_per_um2": 7,
+        "spiral_density_nh_per_mm2": 200,
+        "spiral_density_nh_per_um2": 0.0002,
+        "tin_area_um2": 18.0,
+        "spiral_area_um2": 630000.0,
+        "area_ratio": 35000.0,
+        "claim": "commercial-CMOS cryogenic prototype",
+        "production_ready": false
+      },
+      "limit": "This calculator uses two reported inductance densities and linear area scaling. It does not model geometry, parasitics, frequency, nonlinearity, superconducting transition, process variation, quantum-dot physics, SNR, fabrication yield, temperature, or packaging.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "target_nh": 126,
+            "tin_density_nh_per_um2": 7
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "target_nh": 126,
+            "tin_density_nh_per_um2": 7,
+            "spiral_density_nh_per_mm2": 200,
+            "spiral_density_nh_per_um2": 0.0002
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "target_nh": 126,
+            "tin_density_nh_per_um2": 7,
+            "spiral_density_nh_per_mm2": 200,
+            "spiral_density_nh_per_um2": 0.0002,
+            "tin_area_um2": 18.0,
+            "spiral_area_um2": 630000.0
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "target_nh": 126,
+            "tin_density_nh_per_um2": 7,
+            "spiral_density_nh_per_mm2": 200,
+            "spiral_density_nh_per_um2": 0.0002,
+            "tin_area_um2": 18.0,
+            "spiral_area_um2": 630000.0,
+            "area_ratio": 35000.0,
+            "claim": "commercial-CMOS cryogenic prototype",
+            "production_ready": false
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Swift et al., A nonlinear superinductor in a deep-submicrometre integrated circuit",
+        "https://www.nature.com/articles/s41928-026-01728-8",
+        "Primary open-access Nature Electronics article; published November 4, 2026"
+      ]
+    ],
+    "visual_explanation": "A logarithmic area comparison makes the unit conversion and 35,000-fold density advantage visible without pretending the two geometries are otherwise equivalent.",
+    "written_questions": [
+      "Which system bottleneck would justify integrating a cryogenic superinductor into the foundry stack?",
+      "What process, temperature, noise, and yield evidence would you need before scaling beyond the prototype?"
+    ],
+    "source_checked_on": "2026-11-04"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "Writing GITHUB_ENV changes the next step—not the current shell",
+    "goal": "Use GitHub Actions environment files with the correct step boundary and avoid treating them like immediate shell assignments.",
+    "tag": "CI/CD & GitHub Actions · workflow state",
+    "concept": "<p>Dropping a note into the next shift's inbox does not change what the current worker already knows.</p><p>A step appends <code>NAME=value</code> to the file named by <code>GITHUB_ENV</code>. The runner reads that file after the step and injects the value into later steps in the same job. The writing step does not gain the new variable unless it also sets its own shell variable.</p>",
+    "example": "<p>Step 1 writes <code>RELEASE_COLOR=blue</code> to <code>$GITHUB_ENV</code>. An immediate <code>echo \"$RELEASE_COLOR\"</code> is empty. Step 2 sees <code>blue</code>. A different job does not inherit it; use job outputs or artifacts for cross-job state.</p>",
+    "use_case": {
+      "when": "Use GITHUB_ENV when several later steps in one job need a small runtime value discovered by an earlier step.",
+      "example": "A build step computes the immutable image digest; later scan and summary steps need it within the same job.",
+      "decision": "Use a normal shell variable inside the current step, GITHUB_ENV for later steps in one job, job outputs for small cross-job control data, and artifacts for files. Never write untrusted multiline data without a collision-safe method."
+    },
+    "practice": "Advance through the workflow steps and choose whether the same or a different job is reading. Watch when the variable becomes visible.",
+    "boundary": "The model omits runner implementation, shells, encoding, multiline delimiters, command injection, reserved variables, composite actions, containers, matrices, secret masking, and actual GitHub execution.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Reader <select id=\"envReader\"><option value=\"same\">writing step</option><option value=\"next\">next step, same job</option><option value=\"job\">different job</option></select></label><div id=\"envWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintEnv(){const r=envReader.value,value=r==='next'?'blue':'(unset)',reason=r==='same'?'runner has not processed GITHUB_ENV yet':r==='next'?'runner injected the queued value':'GITHUB_ENV does not cross job boundaries';envWorld.innerHTML='<p><strong>Question:</strong> What does RELEASE_COLOR contain?</p><div class=step-flow><div class=tile>step 1 writes file<br>RELEASE_COLOR=blue</div><div class=tile>runner boundary<br>process env file</div><div class=\"tile '+(r!=='next'?'active':'')+'\">'+r+'<br><strong>'+value+'</strong></div></div><p>'+reason+'.</p>';};envReader.onchange=paintEnv;paintEnv();",
+    "questions": [
+      [
+        "Step 1 appends COLOR=blue to GITHUB_ENV, then immediately echoes $COLOR. What appears?",
+        [
+          "The previous/unset value unless the shell also assigned COLOR",
+          "blue is guaranteed immediately",
+          "The value appears in every job"
+        ],
+        0,
+        "The writing step cannot access the newly queued environment value through GITHUB_ENV."
+      ],
+      [
+        "Who sees the value?",
+        [
+          "Subsequent steps in the same job",
+          "All repository workflows",
+          "Earlier steps"
+        ],
+        0,
+        "The runner injects the value after the writing step for later steps in that job."
+      ],
+      [
+        "What should carry a file to another job?",
+        [
+          "An artifact, with an output for small control metadata",
+          "GITHUB_ENV alone",
+          "A comment in the YAML"
+        ],
+        0,
+        "Environment files are job-local; artifacts are the file transport mechanism."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "step1_shell={}; github_env=[]",
+          "note": "Begin the writing step with no RELEASE_COLOR variable."
+        },
+        {
+          "code": "github_env.append('RELEASE_COLOR=blue'); same_step=step1_shell.get('RELEASE_COLOR')",
+          "note": "Queue the value for the runner; the current shell still does not see it."
+        },
+        {
+          "code": "next_step={'RELEASE_COLOR':'blue'}; same_job_value=next_step['RELEASE_COLOR']",
+          "note": "At the step boundary, the runner injects the queued value."
+        },
+        {
+          "code": "different_job={}; cross_job_value=different_job.get('RELEASE_COLOR'); transport='job output or artifact'",
+          "note": "A different job needs an explicit cross-job mechanism."
+        }
+      ],
+      "expect": {
+        "step1_shell": {},
+        "github_env": [
+          "RELEASE_COLOR=blue"
+        ],
+        "same_step": null,
+        "next_step": {
+          "RELEASE_COLOR": "blue"
+        },
+        "same_job_value": "blue",
+        "different_job": {},
+        "cross_job_value": null,
+        "transport": "job output or artifact"
+      },
+      "limit": "The model omits runner implementation, shells, encoding, multiline delimiters, command injection, reserved variables, composite actions, containers, matrices, secret masking, and actual GitHub execution.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "step1_shell": {},
+            "github_env": []
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "step1_shell": {},
+            "github_env": [
+              "RELEASE_COLOR=blue"
+            ],
+            "same_step": null
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "step1_shell": {},
+            "github_env": [
+              "RELEASE_COLOR=blue"
+            ],
+            "same_step": null,
+            "next_step": {
+              "RELEASE_COLOR": "blue"
+            },
+            "same_job_value": "blue"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "step1_shell": {},
+            "github_env": [
+              "RELEASE_COLOR=blue"
+            ],
+            "same_step": null,
+            "next_step": {
+              "RELEASE_COLOR": "blue"
+            },
+            "same_job_value": "blue",
+            "different_job": {},
+            "cross_job_value": null,
+            "transport": "job output or artifact"
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions workflow commands: environment files",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands",
+        "Official GitHub documentation; checked November 4, 2026"
+      ]
+    ],
+    "visual_explanation": "The runner boundary is a visible gate between the file write and the next process, explaining both the same-step surprise and the cross-job limit.",
+    "written_questions": [
+      "Which values in your workflows are same-step, later-step, cross-job, or file-sized?",
+      "Where could untrusted text written to an environment file alter later commands?"
+    ],
+    "source_checked_on": "2026-11-04"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "If the ETag still matches, return 304 and keep the cached body",
+    "goal": "Use If-None-Match to validate a cached representation without retransmitting an unchanged response body.",
+    "tag": "APIs & Microservices · HTTP conditional requests",
+    "concept": "<p>A library member asks, “Has edition v7 changed?” If not, the librarian only says “still v7” instead of photocopying the whole book again.</p><p>An API sends an <code>ETag</code> with a representation. On a later GET, the client sends <code>If-None-Match</code>. If a listed tag matches the selected representation, the server returns <code>304 Not Modified</code> with no response content; the client reuses its cached body.</p>",
+    "example": "<p>The order summary body is 5,120 bytes with ETag <code>\"v7\"</code>. A client holding v7 sends <code>If-None-Match: \"v7\"</code> and receives 304 plus no body bytes. A client holding v6 receives 200, the v7 body, and the new tag.</p>",
+    "use_case": {
+      "when": "Use conditional GET when clients repeatedly fetch a cacheable resource that changes less often than it is read.",
+      "example": "A dashboard polls an order summary every 20 seconds while the summary changes only a few times per hour.",
+      "decision": "Use ETags when the server can generate stable validators and caches understand representation variants. Prefer push/events for immediate change notification; do not use 304 as authorization or as proof that every variant is identical."
+    },
+    "practice": "Change the client tag and selected representation. Predict 304 versus 200 and the number of body bytes sent.",
+    "boundary": "The model compares simple strong-looking strings. RFC If-None-Match uses weak comparison for cache validation. The model omits Vary, content negotiation, intermediaries, freshness, authorization, ranges, HEAD, wildcard semantics, weak tag generation, and header bytes.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Client cache tag <select id=\"cacheTag\"><option value=\"v7\">\"v7\"</option><option value=\"v6\">\"v6\"</option><option value=\"none\">none</option></select></label><label>Server version <select id=\"serverTag\"><option value=\"v7\">\"v7\"</option><option value=\"v8\">\"v8\"</option></select></label><div id=\"cacheWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintCache(){const c=cacheTag.value,s=serverTag.value,match=c===s,status=match?304:200,bytes=match?0:5120;cacheWorld.innerHTML='<p><strong>Question:</strong> Does the server resend the representation?</p><div class=tool-path><div class=tile>If-None-Match<br>'+(c==='none'?'not sent':'&quot;'+c+'&quot;')+'</div><div class=arrow>→</div><div class=tile>selected ETag<br>&quot;'+s+'&quot;</div><div class=arrow>→</div><div class=\"tile '+(status===200?'active':'')+'\">'+status+'<br>'+bytes.toLocaleString()+' body bytes</div></div><p>'+(match?'Client keeps its cached body.':'Client replaces its cache with the returned representation and tag.')+' Header bytes are intentionally omitted.</p>';};cacheTag.onchange=paintCache;serverTag.onchange=paintCache;paintCache();",
+    "questions": [
+      [
+        "Client and selected representation both have ETag v7. What response follows a conditional GET?",
+        [
+          "304 with no response content; reuse cached body",
+          "200 with the full body",
+          "412 because GET is unsafe"
+        ],
+        0,
+        "A matching If-None-Match condition on GET produces 304 Not Modified."
+      ],
+      [
+        "The client sends v6 while the server selects v7. What happens?",
+        [
+          "200 with the current body and validator",
+          "304 because both are ETags",
+          "The server deletes the cache"
+        ],
+        0,
+        "No listed tag matches, so the GET proceeds normally with the current representation."
+      ],
+      [
+        "What is a key boundary?",
+        [
+          "ETags validate one selected representation; variants and authorization still matter",
+          "304 authenticates the caller",
+          "Every response may share one tag"
+        ],
+        0,
+        "Validators do not replace cache keys, Vary handling, or access control."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "server={'etag':'\"v7\"','body_bytes':5120}; client={'etag':'\"v7\"','cached_bytes':5120}",
+          "note": "The client holds the same validator and body as the selected server representation."
+        },
+        {
+          "code": "if_none_match=client['etag']; matches=if_none_match==server['etag']",
+          "note": "Compare the teaching tags for this conditional GET."
+        },
+        {
+          "code": "status=304 if matches else 200; response_body_bytes=0 if matches else server['body_bytes']",
+          "note": "A match returns 304 without retransmitting the representation content."
+        },
+        {
+          "code": "usable_bytes=client['cached_bytes'] if status==304 else response_body_bytes; decision='reuse cache' if status==304 else 'replace cache'",
+          "note": "The client continues using the cached v7 body."
+        }
+      ],
+      "expect": {
+        "server": {
+          "etag": "\"v7\"",
+          "body_bytes": 5120
+        },
+        "client": {
+          "etag": "\"v7\"",
+          "cached_bytes": 5120
+        },
+        "if_none_match": "\"v7\"",
+        "matches": true,
+        "status": 304,
+        "response_body_bytes": 0,
+        "usable_bytes": 5120,
+        "decision": "reuse cache"
+      },
+      "limit": "The model compares simple strong-looking strings. RFC If-None-Match uses weak comparison for cache validation. The model omits Vary, content negotiation, intermediaries, freshness, authorization, ranges, HEAD, wildcard semantics, weak tag generation, and header bytes.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "server": {
+              "etag": "\"v7\"",
+              "body_bytes": 5120
+            },
+            "client": {
+              "etag": "\"v7\"",
+              "cached_bytes": 5120
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "server": {
+              "etag": "\"v7\"",
+              "body_bytes": 5120
+            },
+            "client": {
+              "etag": "\"v7\"",
+              "cached_bytes": 5120
+            },
+            "if_none_match": "\"v7\"",
+            "matches": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "server": {
+              "etag": "\"v7\"",
+              "body_bytes": 5120
+            },
+            "client": {
+              "etag": "\"v7\"",
+              "cached_bytes": 5120
+            },
+            "if_none_match": "\"v7\"",
+            "matches": true,
+            "status": 304,
+            "response_body_bytes": 0
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "server": {
+              "etag": "\"v7\"",
+              "body_bytes": 5120
+            },
+            "client": {
+              "etag": "\"v7\"",
+              "cached_bytes": 5120
+            },
+            "if_none_match": "\"v7\"",
+            "matches": true,
+            "status": 304,
+            "response_body_bytes": 0,
+            "usable_bytes": 5120,
+            "decision": "reuse cache"
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "RFC 9110: HTTP Semantics, If-None-Match",
+        "https://www.rfc-editor.org/rfc/rfc9110.html#name-if-none-match",
+        "Internet standard; published June 2022; checked November 4, 2026"
+      ],
+      [
+        "RFC 9110: 304 Not Modified",
+        "https://www.rfc-editor.org/rfc/rfc9110.html#name-304-not-modified",
+        "Internet standard; published June 2022; checked November 4, 2026"
+      ]
+    ],
+    "visual_explanation": "The validator comparison ends in either a zero-body 304 path or a full-body 200 path, making cache reuse and representation replacement distinct outcomes.",
+    "written_questions": [
+      "Which high-read, low-change API in your platform would benefit from conditional GET?",
+      "How will content negotiation, Vary, authorization, and validator generation keep caches correct?"
+    ],
+    "source_checked_on": "2026-11-04"
+  }
+]

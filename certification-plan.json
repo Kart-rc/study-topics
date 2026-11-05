@@ -2,7 +2,7 @@
   "schema_version": 1,
   "created_on": "2026-10-08",
   "target_date": "2026-12-31",
-  "source_checked_on": "2026-11-03",
+  "source_checked_on": "2026-11-04",
   "guide_recheck": "weekly and before booking",
   "time_budget_minutes": 30,
   "tracks": [
@@ -948,6 +948,40 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day45/data-engineering",
+      "product_material_added_on": "2026-11-04",
+      "session_type": "focused",
+      "cycle_position": 1,
+      "cycle_origin": "Day45",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "ingestion",
+        "transformation_modeling",
+        "governance_security",
+        "troubleshooting_optimization"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official COF-C03 overview rechecked 2026-11-04; full objective IDs and weights still unverified; planning groups only",
+      "snowflake_planning_groups": [
+        "loading_unloading_transformation",
+        "data_formats",
+        "account_warehouse_access"
+      ],
+      "source_checked_on": "2026-11-04",
+      "source_versions": {
+        "databricks": "May 4 exam guide, Auto Loader schema documentation updated 2026-09-11, and best-practices documentation rechecked 2026-11-04",
+        "snowflake": "COF-C03 overview, COPY INTO, and VALIDATE references rechecked 2026-11-04; full guide IDs/weights unverified"
+      },
+      "depth": "Focused ingestion-error classification, rescued/corrupt evidence, COPY validation and ON_ERROR choices, count reconciliation, and publication boundaries. No mastery or complete exam coverage claim.",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql_pyspark": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -1087,6 +1121,11 @@
       "day_number": 44,
       "date": "2026-11-03",
       "key": "Day22/data-engineering+products+7"
+    },
+    {
+      "day_number": 45,
+      "date": "2026-11-04",
+      "key": "Day26/data-engineering+products+3"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
