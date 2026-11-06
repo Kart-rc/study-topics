@@ -1,0 +1,1295 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Deeper installment: explode the items without losing the order",
+    "goal": "Turn one parent array into child rows while preserving parent identity and choosing null-preserving behavior deliberately.",
+    "tag": "Certification cycle 5 · focused lesson 2 · nested transformation",
+    "concept": "<p>A packing slip has one order number and several item lines. If you cut off the item lines without copying the order number onto each one, the pieces become useless.</p><p>An <em>explode</em> or <em>flatten</em> operation turns each array element into a row. That changes cardinality: one parent can become many rows. An outer form can also keep a parent whose array is null by emitting one row with a null child.</p>",
+    "example": "<p>Order O-10 has items A and B. Order O-11 has a null items field. A normal explode yields two rows, both for O-10. An outer explode yields those same two rows plus <code>O-11, NULL</code>. The extra row is useful only if “an order with no readable items” must remain visible for diagnosis or a later left-side count.</p>",
+    "use_case": {
+      "when": "Use array expansion when downstream work needs one row per nested child while retaining the parent key.",
+      "example": "A bronze order event contains an items array; silver needs one order-item row for SKU-level revenue and a visible exception for an order with no item array.",
+      "decision": "Use ordinary expansion when null parents should disappear. Use outer expansion when parent preservation is part of the contract. Measure input parents, output children, and null-child rows so fan-out does not silently inflate aggregates."
+    },
+    "practice": "Choose normal or outer behavior and inspect exactly which order-item rows survive. Predict the parent count and output count first.",
+    "boundary": "The local model expands two fixed arrays. It does not parse VARIANT values, distinguish missing from JSON null, recurse through multiple arrays, model skew, shuffle cost, malformed children, permissions, warehouse size, or vendor execution.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Expansion <select id=\"fanMode\"><option value=\"outer\">outer: preserve null parent</option><option value=\"inner\">normal: omit null parent</option></select></label><div id=\"fanWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintFan(){const outer=fanMode.value==='outer';const rows=outer?['O-10 → A','O-10 → B','O-11 → NULL']:['O-10 → A','O-10 → B'];fanWorld.innerHTML='<p><strong>Question:</strong> Which parent-child rows survive?</p><div class=dbgroup><strong>2 parent orders</strong><div class=tiles><div class=tile>O-10<br>[A, B]</div><div class=\"tile active\">O-11<br>items = NULL</div></div></div><p class=arrow>↓ '+(outer?'outer expansion':'normal expansion')+'</p><div class=tiles>'+rows.map(x=>'<div class=tile>'+x+'</div>').join('')+'</div><p>Output rows: <strong>'+rows.length+'</strong>; distinct parents retained: <strong>'+(outer?2:1)+'</strong>.</p>';};fanMode.onchange=paintFan;paintFan();",
+    "questions": [
+      [
+        "O-10 has two items and O-11 has a null array. What does outer expansion produce?",
+        [
+          "Three rows, including O-11 with a null child",
+          "Two rows and no O-11",
+          "One row per input file"
+        ],
+        0,
+        "Outer semantics preserve the null parent with one null child row."
+      ],
+      [
+        "Why copy order_id onto every child row?",
+        [
+          "To preserve the relationship after fan-out",
+          "To prevent all shuffles",
+          "To make every child unique automatically"
+        ],
+        0,
+        "The parent key is the join and grouping context for each emitted child."
+      ],
+      [
+        "What still needs a guard after expansion?",
+        [
+          "Fan-out counts and aggregate grain",
+          "Only the SQL spelling",
+          "The browser color"
+        ],
+        0,
+        "A many-child parent can multiply rows and double-count parent-level measures."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "orders=[{'order_id':'O-10','items':['A','B']},{'order_id':'O-11','items':None}]",
+          "note": "Start with two parents: one two-item array and one null array."
+        },
+        {
+          "code": "normal=[{'order_id':o['order_id'],'item':item} for o in orders for item in (o['items'] or [])]",
+          "note": "Normal expansion emits children only where elements exist."
+        },
+        {
+          "code": "outer=[{'order_id':o['order_id'],'item':item} for o in orders for item in (o['items'] if o['items'] is not None else [None])]",
+          "note": "Outer expansion emits one null child for the null array."
+        },
+        {
+          "code": "normal_parents=len({r['order_id'] for r in normal}); outer_parents=len({r['order_id'] for r in outer}); outer_rows=len(outer)",
+          "note": "Reconcile both row count and retained parent count."
+        }
+      ],
+      "expect": {
+        "orders": [
+          {
+            "order_id": "O-10",
+            "items": [
+              "A",
+              "B"
+            ]
+          },
+          {
+            "order_id": "O-11",
+            "items": null
+          }
+        ],
+        "normal": [
+          {
+            "order_id": "O-10",
+            "item": "A"
+          },
+          {
+            "order_id": "O-10",
+            "item": "B"
+          }
+        ],
+        "outer": [
+          {
+            "order_id": "O-10",
+            "item": "A"
+          },
+          {
+            "order_id": "O-10",
+            "item": "B"
+          },
+          {
+            "order_id": "O-11",
+            "item": null
+          }
+        ],
+        "normal_parents": 1,
+        "outer_parents": 2,
+        "outer_rows": 3
+      },
+      "limit": "The local model expands two fixed arrays. It does not parse VARIANT values, distinguish missing from JSON null, recurse through multiple arrays, model skew, shuffle cost, malformed children, permissions, warehouse size, or vendor execution.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "orders": [
+              {
+                "order_id": "O-10",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "order_id": "O-11",
+                "items": null
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "orders": [
+              {
+                "order_id": "O-10",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "order_id": "O-11",
+                "items": null
+              }
+            ],
+            "normal": [
+              {
+                "order_id": "O-10",
+                "item": "A"
+              },
+              {
+                "order_id": "O-10",
+                "item": "B"
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "orders": [
+              {
+                "order_id": "O-10",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "order_id": "O-11",
+                "items": null
+              }
+            ],
+            "normal": [
+              {
+                "order_id": "O-10",
+                "item": "A"
+              },
+              {
+                "order_id": "O-10",
+                "item": "B"
+              }
+            ],
+            "outer": [
+              {
+                "order_id": "O-10",
+                "item": "A"
+              },
+              {
+                "order_id": "O-10",
+                "item": "B"
+              },
+              {
+                "order_id": "O-11",
+                "item": null
+              }
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "orders": [
+              {
+                "order_id": "O-10",
+                "items": [
+                  "A",
+                  "B"
+                ]
+              },
+              {
+                "order_id": "O-11",
+                "items": null
+              }
+            ],
+            "normal": [
+              {
+                "order_id": "O-10",
+                "item": "A"
+              },
+              {
+                "order_id": "O-10",
+                "item": "B"
+              }
+            ],
+            "outer": [
+              {
+                "order_id": "O-10",
+                "item": "A"
+              },
+              {
+                "order_id": "O-10",
+                "item": "B"
+              },
+              {
+                "order_id": "O-11",
+                "item": null
+              }
+            ],
+            "normal_parents": 1,
+            "outer_parents": 2,
+            "outer_rows": 3
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks SQL explode",
+        "https://docs.databricks.com/aws/en/sql/language-manual/functions/explode",
+        "Official documentation updated September 11, 2026; checked November 5, 2026"
+      ],
+      [
+        "Databricks SQL explode_outer",
+        "https://docs.databricks.com/aws/en/sql/language-manual/functions/explode_outer",
+        "Official documentation; checked November 5, 2026"
+      ],
+      [
+        "Snowflake FLATTEN",
+        "https://docs.snowflake.com/en/sql-reference/functions/flatten",
+        "Official SQL reference; checked November 5, 2026"
+      ]
+    ],
+    "visual_explanation": "The parent boxes visibly fan out into child rows, so the learner can see both cardinality growth and the one parent that disappears without outer semantics.",
+    "written_questions": [
+      "Which nested array in your platform should become a child table, and what is its correct grain?",
+      "Which parent-level measure could be double-counted after fan-out, and what reconciliation would catch it?"
+    ],
+    "source_checked_on": "2026-11-05",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: use a table-valued explode and keep the parent key",
+        "minutes": 9,
+        "html": "<p><strong>Predict first.</strong> With two items and one null array, how many rows does <code>explode_outer</code> return? Three.</p><pre><code><span>-- sourced SQL sketch; not executed in Databricks</span><span>SELECT o.order_id, i.item</span><span>FROM bronze_orders AS o,</span><span>LATERAL explode_outer(o.items) AS i(item);</span></code></pre><p>On Databricks SQL and Runtime 12.2 LTS or later, the documented modern form invokes the generator as a table reference; older select-list and <code>LATERAL VIEW</code> forms are deprecated there. <code>explode</code> drops a null collection; <code>explode_outer</code> emits one null row.</p><label>Databricks function <select id=\"dbExplode\"><option value=\"outer\">explode_outer</option><option value=\"inner\">explode</option></select></label><div id=\"dbExplodeWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Execution label.</strong> The SQL was not run in Databricks. This is a local JavaScript model; the Python replay ran locally.</p>",
+        "markdown": "Use a table-valued `explode` on modern runtimes and retain the parent key. `explode_outer` preserves a null collection with one null child. The SQL was not executed in Databricks.",
+        "javascript": "const dbExplode=$('dbExplode'),dbExplodeWorld=$('dbExplodeWorld');function paintDbExplode(){const out=dbExplode.value==='outer'?['O-10/A','O-10/B','O-11/NULL']:['O-10/A','O-10/B'];dbExplodeWorld.innerHTML='<div class=step-flow><div class=tile>Delta parents<br>O-10, O-11</div><div class=tile>'+dbExplode.value+'(items)</div><div class=\"tile active\">'+out.join('<br>')+'</div></div><p>'+out.length+' rows; '+(out.some(x=>x.includes('O-11'))?'O-11 remains visible.':'O-11 is absent.')+'</p>';};dbExplode.onchange=paintDbExplode;paintDbExplode();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: correlate each FLATTEN row back to its parent",
+        "minutes": 9,
+        "html": "<p><strong>Predict first.</strong> Which FLATTEN column carries the child value? <code>VALUE</code>. Keep the source alias beside it.</p><pre><code><span>-- sourced SQL sketch; not executed in Snowflake</span><span>SELECT o.order_id, f.value:sku::string AS sku</span><span>FROM bronze_orders AS o,</span><span>LATERAL FLATTEN(INPUT =&gt; o.payload:items, OUTER =&gt; TRUE) f;</span></code></pre><p><code>FLATTEN</code> is a table function over VARIANT, OBJECT, or ARRAY. <code>OUTER =&gt; TRUE</code> creates one null-valued row for a zero-row expansion. Its output also carries path, index, value, and source context; those fields help diagnose shape and position.</p><label>OUTER <select id=\"sfOuter\"><option value=\"true\">TRUE</option><option value=\"false\">FALSE</option></select></label><div id=\"sfFlatWorld\" class=\"world\" aria-live=\"polite\"></div><p><strong>Execution label.</strong> No Snowflake SQL ran. The visual is a local model of the documented row shape.</p>",
+        "markdown": "Correlate Snowflake `LATERAL FLATTEN` output to the parent alias. `OUTER => TRUE` preserves a zero-row expansion with a null-valued row. SQL was not executed.",
+        "javascript": "const sfOuter=$('sfOuter'),sfFlatWorld=$('sfFlatWorld');function paintSfFlat(){const outer=sfOuter.value==='true';const rows=outer?['INDEX 0 · A','INDEX 1 · B','INDEX NULL · VALUE NULL']:['INDEX 0 · A','INDEX 1 · B'];sfFlatWorld.innerHTML='<div class=tiles>'+rows.map((x,i)=>'<div class=\"tile '+(i===2?'active':'')+'\">'+x+'</div>').join('')+'</div><p>Parent key is selected from <code>o</code>; child position and value come from <code>f</code>.</p>';};sfOuter.onchange=paintSfFlat;paintSfFlat();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Decision</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Expand array</td><td>explode as table reference</td><td>LATERAL FLATTEN</td></tr><tr><td>Keep null/zero-row parent</td><td>explode_outer</td><td>OUTER =&gt; TRUE</td></tr><tr><td>Child position</td><td>posexplode when needed</td><td>INDEX output column</td></tr><tr><td>Shared rule</td><td colspan=2>select the parent key and reconcile fan-out before aggregating</td></tr></tbody></table>",
+      "markdown": "| Decision | Databricks | Snowflake |\n|---|---|---|\n| Expand | `explode` | `LATERAL FLATTEN` |\n| Preserve outer parent | `explode_outer` | `OUTER => TRUE` |\n| Position | `posexplode` | `INDEX` |"
+    },
+    "product_questions": [
+      [
+        "On a modern Databricks runtime, what is the recommended invocation shape?",
+        [
+          "Use explode as a table reference",
+          "Hide it in a string",
+          "Use only the deprecated select-list form"
+        ],
+        0,
+        "Databricks documents table-reference invocation for SQL and Runtime 12.2 LTS and above."
+      ],
+      [
+        "What must accompany Snowflake f.value in the child result?",
+        [
+          "The parent key from the correlated source",
+          "A new random order id",
+          "Only the warehouse name"
+        ],
+        0,
+        "The lateral output needs its parent identity to remain meaningful."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks SQL explode",
+        "https://docs.databricks.com/aws/en/sql/language-manual/functions/explode",
+        "Official documentation updated September 11, 2026; checked November 5, 2026"
+      ],
+      [
+        "Databricks SQL explode_outer",
+        "https://docs.databricks.com/aws/en/sql/language-manual/functions/explode_outer",
+        "Official documentation; checked November 5, 2026"
+      ],
+      [
+        "Snowflake FLATTEN",
+        "https://docs.snowflake.com/en/sql-reference/functions/flatten",
+        "Official SQL reference; checked November 5, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-05/databricks-certified-data-engineer-associate-exam-guide-may-2026-000.pdf",
+        "Official guide for exam version May 4, 2026; rechecked November 5, 2026"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official overview rechecked November 5, 2026; full objective IDs and weights remain unverified"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-05",
+      "session_type": "focused",
+      "cycle_position": 2,
+      "cycle_origin": "Day45",
+      "databricks": {
+        "scope": "Data Transformation and Modeling: exploding arrays, preserving keys, and validating row grain."
+      },
+      "snowflake": {
+        "scope": "Structured and semi-structured data plus loading/transformation planning groups: lateral FLATTEN, outer behavior, and output columns. Planning groups only; no complete COF-C03 map claimed."
+      },
+      "product_lab_execution": "not_run; browser models are local JavaScript and the recorded example is local Python"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "An unbounded executor queue can make maximumPoolSize irrelevant",
+    "goal": "Predict whether a Java ThreadPoolExecutor creates a thread, queues work, or rejects it from its core size and queue policy.",
+    "tag": "Java concurrency foundation · Java SE 26 checked",
+    "concept": "<p>A restaurant has two cooks, space for an unlimited stack of tickets, and a sign saying “up to eight cooks.” The manager never hires cook three because the ticket stack is never full.</p><p><code>ThreadPoolExecutor</code> adds threads beyond <code>corePoolSize</code> only when the work queue cannot accept the task. An unbounded queue always accepts it, so the pool stays at the core size and <code>maximumPoolSize</code> does not help with the backlog.</p>",
+    "example": "<p>Core size is 2, maximum size is 8, and ten slow requests arrive together. With an unbounded queue, two run and eight wait. With a bounded queue of two, two run, two queue, and later submissions can create up to six more workers before rejection policy applies.</p>",
+    "use_case": {
+      "when": "Use this reasoning when a Java service shows rising queue delay even though maximumPoolSize looks generous.",
+      "example": "A Kafka enrichment service has core=2, max=8, and an unbounded LinkedBlockingQueue; lag rises while the pool never exceeds two workers.",
+      "decision": "Choose an unbounded queue only when smoothed bursts cannot outrun service capacity for long. Use a bounded queue, explicit rejection/backpressure, and load tests when latency and memory need hard limits."
+    },
+    "practice": "Switch the queue between unbounded and capacity two, then increase submitted work. Watch the same max-pool setting lead to different worker and queue counts.",
+    "boundary": "The model assumes all tasks arrive before any finish and one task per worker. It omits task duration variance, keep-alive, prestarting, priorities, memory use, rejection handlers, shutdown, interrupts, virtual threads, and actual scheduling.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Queue <select id=\"queueKind\"><option value=\"unbounded\">unbounded</option><option value=\"bounded\">capacity 2</option></select></label><label>Tasks <input id=\"queueTasks\" type=\"range\" min=\"1\" max=\"12\" value=\"10\"></label><div id=\"queueWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintQueue(){const n=+queueTasks.value,b=queueKind.value==='bounded';let running=Math.min(n,2),remaining=n-running,queued=b?Math.min(remaining,2):remaining;remaining-=queued;running+=b?Math.min(remaining,6):0;const rejected=Math.max(0,n-running-queued);queueWorld.innerHTML='<p><strong>Question:</strong> Does max=8 create extra workers?</p><div class=tiles><div class=tile>running workers<br><strong>'+running+'</strong> / 8</div><div class=\"tile '+(!b?'active':'')+'\">queued<br><strong>'+queued+'</strong></div><div class=tile>rejected<br><strong>'+rejected+'</strong></div></div><p>'+(b?'The full bounded queue unlocks growth beyond core.':'The queue never fills, so the pool stays at core=2.')+'</p>';};queueKind.onchange=paintQueue;queueTasks.oninput=paintQueue;paintQueue();",
+    "questions": [
+      [
+        "Core=2, max=8, and an unbounded queue receive ten simultaneous tasks. How many workers start?",
+        [
+          "Two; the other eight queue",
+          "Eight; max always wins",
+          "Ten"
+        ],
+        0,
+        "The unbounded queue accepts work after the two core workers are busy."
+      ],
+      [
+        "Why can a bounded queue grow the pool beyond core?",
+        [
+          "A full queue makes the executor try another worker before rejection",
+          "It changes Java syntax",
+          "It makes tasks faster"
+        ],
+        0,
+        "The documented admission sequence checks the queue before adding non-core workers."
+      ],
+      [
+        "What limit still needs design?",
+        [
+          "Queue memory, waiting time, and rejection/backpressure",
+          "Only the variable name",
+          "The maximum value alone"
+        ],
+        0,
+        "A finite maximum does not bound an unbounded backlog."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "int core = 2; int max = 8; int submitted = 10; boolean unbounded = true;",
+          "note": "Configure the teaching pool and simultaneous burst."
+        },
+        {
+          "code": "int running = Math.min(core, submitted); int remaining = submitted - running;",
+          "note": "The first two tasks occupy core workers."
+        },
+        {
+          "code": "int queued = unbounded ? remaining : Math.min(2, remaining); boolean queueFull = !unbounded && queued == 2;",
+          "note": "The unbounded queue accepts every remaining task and never reports full."
+        },
+        {
+          "code": "int extraWorkers = queueFull ? Math.min(max - core, remaining - queued) : 0; running += extraWorkers; String result = running + \" running, \" + queued + \" queued\";",
+          "note": "No full-queue signal means no non-core workers are created."
+        }
+      ],
+      "expect": {
+        "core": "2",
+        "max": "8",
+        "submitted": "10",
+        "unbounded": "true",
+        "running": "2",
+        "remaining": "8",
+        "queued": "8",
+        "queueFull": "false",
+        "extraWorkers": "0",
+        "result": "2 running, 8 queued"
+      },
+      "limit": "The model assumes all tasks arrive before any finish and one task per worker. It omits task duration variance, keep-alive, prestarting, priorities, memory use, rejection handlers, shutdown, interrupts, virtual threads, and actual scheduling.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "core": "2",
+            "max": "8",
+            "submitted": "10",
+            "unbounded": "true"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "core": "2",
+            "max": "8",
+            "submitted": "10",
+            "unbounded": "true",
+            "running": "2",
+            "remaining": "8"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "core": "2",
+            "max": "8",
+            "submitted": "10",
+            "unbounded": "true",
+            "running": "2",
+            "remaining": "8",
+            "queued": "8",
+            "queueFull": "false"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "core": "2",
+            "max": "8",
+            "submitted": "10",
+            "unbounded": "true",
+            "running": "2",
+            "remaining": "8",
+            "queued": "8",
+            "queueFull": "false",
+            "extraWorkers": "0",
+            "result": "2 running, 8 queued"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java SE 26 ThreadPoolExecutor",
+        "https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/concurrent/ThreadPoolExecutor.html",
+        "Official Java API; checked November 5, 2026"
+      ]
+    ],
+    "visual_explanation": "The same core and maximum sizes feed two different queue shapes, revealing why the queue-full decision—not the max number by itself—controls worker growth.",
+    "written_questions": [
+      "Which production executor has a max size that its queue policy prevents it from reaching?",
+      "What queue-delay and rejection signals will define safe backpressure?"
+    ],
+    "source_checked_on": "2026-11-05"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Scaling lead time spends headroom before new capacity arrives",
+    "goal": "Set an autoscaling trigger early enough that demand growth does not exhaust the current fleet during detection and startup delay.",
+    "tag": "Distinguished Engineer judgment · capacity and reliability",
+    "concept": "<p>A fire engine called at the moment a building is fully on fire is already late. Autoscaling also has delay: metrics travel, a policy decides, resources start, and health checks pass.</p><p>Headroom is unused capacity held for that interval. A useful trigger accounts for how much demand can grow before replacement capacity becomes ready, plus uncertainty. A 90% target may be too late even when average utilization looks comfortable.</p>",
+    "example": "<p>A service can handle 1,000 requests per second. It is receiving 750, growing by 70 per minute, and new nodes take four minutes to serve traffic. Before they arrive, demand reaches 1,030. To survive that deterministic ramp, the trigger must fire by 720 requests per second or earlier, before adding uncertainty.</p>",
+    "use_case": {
+      "when": "Use lead-time headroom when capacity arrives minutes after demand changes and exhaustion causes queues, throttling, or SLO breaches.",
+      "example": "An EKS API tier needs four minutes for metric propagation, node provisioning, image pull, and readiness while a partner launch adds 70 requests per second each minute.",
+      "decision": "Use predictive or scheduled scaling for known events, target tracking with measured headroom for organic growth, and load shedding for bursts faster than any provisioning path. Re-measure lead time and growth instead of copying a universal percentage."
+    },
+    "practice": "Change growth and ready time. Watch the demand ramp cross the current capacity line and see the latest safe trigger move left.",
+    "boundary": "This is a deterministic linear-growth model. It omits stochastic bursts, correlated failures, warm pools, nonlinear service curves, queueing, downstream bottlenecks, metric lag distributions, cost, and multi-region failover.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Growth rps/min <input id=\"growth\" type=\"range\" min=\"10\" max=\"100\" step=\"10\" value=\"70\"></label><label>Ready time min <input id=\"lead\" type=\"range\" min=\"1\" max=\"8\" value=\"4\"></label><div id=\"headroomWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintHeadroom(){const g=+growth.value,l=+lead.value,cap=1000,start=750,end=start+g*l,trigger=cap-g*l;let bars='';for(let m=0;m<=l;m++){const v=start+g*m;bars+='<div class=tile>minute '+m+'<div class=meter><div style=\"width:'+Math.min(100,v/cap*100)+'%\"></div></div>'+v+' rps'+(v>cap?' · OVER':'')+'</div>';}headroomWorld.innerHTML='<p><strong>Question:</strong> Will current capacity last until new nodes are ready?</p>'+bars+'<p>Latest deterministic trigger: <strong>'+trigger+' rps</strong>. Demand at readiness: <strong>'+end+' rps</strong>.</p>';};growth.oninput=paintHeadroom;lead.oninput=paintHeadroom;paintHeadroom();",
+    "questions": [
+      [
+        "Capacity is 1,000 rps, growth 70 rps/min, and lead time four minutes. What is the latest deterministic trigger?",
+        [
+          "720 rps",
+          "930 rps",
+          "1,280 rps"
+        ],
+        0,
+        "Reserve 70×4=280 rps of headroom: 1,000−280=720."
+      ],
+      [
+        "Why is a high utilization target risky?",
+        [
+          "Detection and provisioning consume time while demand can keep rising",
+          "It always costs more",
+          "It disables metrics"
+        ],
+        0,
+        "The existing fleet must survive the entire response delay."
+      ],
+      [
+        "What handles a burst faster than provisioning?",
+        [
+          "Load shedding or pre-provisioned capacity",
+          "A later alarm",
+          "A larger dashboard"
+        ],
+        0,
+        "Autoscaling cannot create capacity before its measured lead time."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "capacity_rps=1000; current_rps=750; growth_rps_per_min=70; ready_minutes=4",
+          "note": "Set the measured capacity, demand ramp, and end-to-end scaling delay."
+        },
+        {
+          "code": "growth_during_lead=growth_rps_per_min*ready_minutes",
+          "note": "Demand can add 280 rps while the fleet is still unchanged."
+        },
+        {
+          "code": "demand_at_ready=current_rps+growth_during_lead; latest_trigger=capacity_rps-growth_during_lead",
+          "note": "The current trigger is late; deterministic demand reaches 1,030 rps."
+        },
+        {
+          "code": "survives=demand_at_ready<=capacity_rps; required_headroom_fraction=growth_during_lead/capacity_rps",
+          "note": "The model needs at least 28% headroom before uncertainty."
+        }
+      ],
+      "expect": {
+        "capacity_rps": 1000,
+        "current_rps": 750,
+        "growth_rps_per_min": 70,
+        "ready_minutes": 4,
+        "growth_during_lead": 280,
+        "demand_at_ready": 1030,
+        "latest_trigger": 720,
+        "survives": false,
+        "required_headroom_fraction": 0.28
+      },
+      "limit": "This is a deterministic linear-growth model. It omits stochastic bursts, correlated failures, warm pools, nonlinear service curves, queueing, downstream bottlenecks, metric lag distributions, cost, and multi-region failover.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "capacity_rps": 1000,
+            "current_rps": 750,
+            "growth_rps_per_min": 70,
+            "ready_minutes": 4
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "capacity_rps": 1000,
+            "current_rps": 750,
+            "growth_rps_per_min": 70,
+            "ready_minutes": 4,
+            "growth_during_lead": 280
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "capacity_rps": 1000,
+            "current_rps": 750,
+            "growth_rps_per_min": 70,
+            "ready_minutes": 4,
+            "growth_during_lead": 280,
+            "demand_at_ready": 1030,
+            "latest_trigger": 720
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "capacity_rps": 1000,
+            "current_rps": 750,
+            "growth_rps_per_min": 70,
+            "ready_minutes": 4,
+            "growth_during_lead": 280,
+            "demand_at_ready": 1030,
+            "latest_trigger": 720,
+            "survives": false,
+            "required_headroom_fraction": 0.28
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Well-Architected REL07-BP03",
+        "https://docs.aws.amazon.com/wellarchitected/latest/framework/rel_adapt_to_changes_proactive_adapt_auto.html",
+        "Official AWS guidance; checked November 5, 2026"
+      ]
+    ],
+    "visual_explanation": "A time-indexed capacity bar shows demand consuming the unused band before nodes become ready, turning an abstract utilization target into a deadline.",
+    "written_questions": [
+      "What is the measured p95 end-to-end scaling lead time for your slowest tier?",
+      "Which burst requires pre-scaling or load shedding because reactive scaling cannot arrive in time?"
+    ],
+    "source_checked_on": "2026-11-05"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Return a durable task handle when a tool call will outlive the connection",
+    "goal": "Use the MCP Tasks extension for long work while respecting polling, durable IDs, input requests, and cooperative cancellation.",
+    "tag": "GenAI harness engineering · MCP Tasks extension 2026-07-28",
+    "concept": "<p>A coat-check ticket is not the coat. It is a durable handle that lets you leave, return, and retrieve the result later.</p><p>The MCP Tasks extension lets a server return <code>resultType: task</code> from a supported tool call. The client persists the task ID and polls <code>tasks/get</code> at the suggested interval. The task may need input, complete, fail, or be cooperatively cancelled.</p>",
+    "example": "<p>A deployment tool returns task T-42 with status <code>working</code> and a five-second poll interval. Later it becomes <code>input_required</code> for production approval. The client answers through <code>tasks/update</code>, resumes polling, and eventually receives the original tool result. A reconnect is safe because the task ID was stored durably.</p>",
+    "use_case": {
+      "when": "Use a task handle when tool work can take minutes, cross a disconnect, wait for approval, or map onto an external durable job.",
+      "example": "An agent starts an ECS deployment, disconnects, then resumes status checks and supplies an approval response without restarting the deployment.",
+      "decision": "Keep ordinary tool results for short work. Use Tasks only after capability negotiation, persist opaque task IDs securely, honor pollIntervalMs, and design cancellation as intent rather than proof of termination."
+    },
+    "practice": "Advance T-42 through working, input required, resumed, and completed. Try cancellation and observe that acknowledgement does not force the terminal state.",
+    "boundary": "This model is a fixed state machine. It does not run MCP, authenticate callers, encrypt task IDs, persist a server database, route HTTP headers, rate-limit polls, execute deployments, or prove cancellation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Action <select id=\"taskAction\"><option value=\"poll1\">poll: still working</option><option value=\"input\">poll: input required</option><option value=\"answer\">send approval</option><option value=\"done\">poll: completed</option><option value=\"cancel\">request cancel</option></select></label><div id=\"taskWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintTask(){const m={poll1:['working','wait 5000 ms, then poll'],input:['input_required','answer the approval request'],answer:['working','update acknowledged; resume polling'],done:['completed','read the final tool result'],cancel:['working','cancel acknowledged; work may still finish']}[taskAction.value];taskWorld.innerHTML='<p><strong>Question:</strong> What does the durable handle prove now?</p><div class=step-flow><div class=tile>taskId<br>T-42</div><div class=tile>client action<br>'+taskAction.options[taskAction.selectedIndex].text+'</div><div class=\"tile active\">status<br><strong>'+m[0]+'</strong></div></div><p>'+m[1]+'. The task ID remains an opaque capability.</p>';};taskAction.onchange=paintTask;paintTask();",
+    "questions": [
+      [
+        "Why persist the task ID before disconnecting?",
+        [
+          "So polling can resume without starting the side effect again",
+          "To enumerate every server task",
+          "To bypass authorization"
+        ],
+        0,
+        "The durable handle reconnects the client to the existing operation."
+      ],
+      [
+        "What should a client do with pollIntervalMs?",
+        [
+          "Respect it and allow it to change",
+          "Poll continuously",
+          "Treat it as the result"
+        ],
+        0,
+        "The extension permits rate limiting when clients poll faster than suggested."
+      ],
+      [
+        "A tasks/cancel call is acknowledged. What is guaranteed?",
+        [
+          "Cancellation intent was accepted, not that work stopped",
+          "The task is already cancelled",
+          "The result was rolled back"
+        ],
+        0,
+        "Cancellation is cooperative and may end in another terminal status."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "task={'taskId':'T-42','status':'working','pollIntervalMs':5000}; durable_store={'taskId':task['taskId']} ",
+          "note": "Persist the opaque handle before the connection can disappear."
+        },
+        {
+          "code": "task['status']='input_required'; task['inputRequests']={'approval':'approve production?'}",
+          "note": "A later poll reveals that the server needs input."
+        },
+        {
+          "code": "approval=True; task.pop('inputRequests'); task['status']='working'",
+          "note": "The client answers through the update path and the task resumes."
+        },
+        {
+          "code": "task['status']='completed'; task['result']={'deployment':'green','state':'ready'}; final=task['result']",
+          "note": "A terminal poll returns the same result shape the original tool call would have returned."
+        }
+      ],
+      "expect": {
+        "task": {
+          "taskId": "T-42",
+          "status": "completed",
+          "pollIntervalMs": 5000,
+          "result": {
+            "deployment": "green",
+            "state": "ready"
+          }
+        },
+        "durable_store": {
+          "taskId": "T-42"
+        },
+        "approval": true,
+        "final": {
+          "deployment": "green",
+          "state": "ready"
+        }
+      },
+      "limit": "This model is a fixed state machine. It does not run MCP, authenticate callers, encrypt task IDs, persist a server database, route HTTP headers, rate-limit polls, execute deployments, or prove cancellation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "task": {
+              "taskId": "T-42",
+              "status": "working",
+              "pollIntervalMs": 5000
+            },
+            "durable_store": {
+              "taskId": "T-42"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "task": {
+              "taskId": "T-42",
+              "status": "input_required",
+              "pollIntervalMs": 5000,
+              "inputRequests": {
+                "approval": "approve production?"
+              }
+            },
+            "durable_store": {
+              "taskId": "T-42"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "task": {
+              "taskId": "T-42",
+              "status": "working",
+              "pollIntervalMs": 5000
+            },
+            "durable_store": {
+              "taskId": "T-42"
+            },
+            "approval": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "task": {
+              "taskId": "T-42",
+              "status": "completed",
+              "pollIntervalMs": 5000,
+              "result": {
+                "deployment": "green",
+                "state": "ready"
+              }
+            },
+            "durable_store": {
+              "taskId": "T-42"
+            },
+            "approval": true,
+            "final": {
+              "deployment": "green",
+              "state": "ready"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP Tasks Extension overview",
+        "https://tasks.extensions.modelcontextprotocol.io/",
+        "Official extension documentation; schema dated July 28, 2026; checked November 5, 2026"
+      ],
+      [
+        "MCP Tasks specification draft",
+        "https://tasks.extensions.modelcontextprotocol.io/specification/draft/tasks",
+        "Official extension specification; checked November 5, 2026"
+      ],
+      [
+        "SEP-2663 Tasks Extension",
+        "https://tasks.extensions.modelcontextprotocol.io/seps/2663-tasks-extension",
+        "Final SEP; extension release July 28, 2026"
+      ]
+    ],
+    "visual_explanation": "The same opaque task ID remains fixed while status and required client action change, making durability distinct from the underlying work and from cancellation.",
+    "written_questions": [
+      "Which tool in your harness can outlive a transport connection and should return a durable task?",
+      "Where will task IDs be stored, scoped, expired, and protected as bearer-like capabilities?"
+    ],
+    "source_checked_on": "2026-11-05"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Grow the infrared detector directly on the read-out chip",
+    "goal": "Understand how monolithic in-situ PbS growth removes a bonding boundary while keeping the reported research limits visible.",
+    "tag": "New primary research · Nature · October 28, 2026",
+    "concept": "<p>A conventional infrared camera can be like placing a finished tile on top of a circuit and connecting every pixel through a separate bonding step. Misalignment, cost, and interface complexity grow with the array.</p><p>The reported method grows lead sulfide detector material directly on a CMOS read-out integrated circuit using a room-temperature aqueous process. The researchers controlled Pb–OH complexation and environmental disturbance to form quasi-single-crystalline films with pixel-level uniformity.</p>",
+    "example": "<p>The paper reports a 640×512 array: 327,680 pixels. Its antimony-doped photodiodes reached specific detectivity of 4.4×10<sup>11</sup> Jones at 2.5 µm and captured infrared images. Those are paper results for a demonstrated platform, not a guarantee of manufacturing yield or field reliability.</p>",
+    "use_case": {
+      "when": "Use this research when evaluating lower-complexity integration of infrared detector material with read-out electronics, including flexible substrates.",
+      "example": "A sensor team wants a high-resolution infrared focal-plane array without separately fabricating and bonding a detector wafer onto the ROIC.",
+      "decision": "Treat monolithic aqueous growth as promising research evidence. Product adoption still needs independent data on yield, pixel defects, long-term stability, packaging, toxicity controls, calibration, environmental robustness, and process compatibility."
+    },
+    "practice": "Switch between bonded and in-situ integration. Watch the detector/read-out boundary change, then calculate the exact pixel count for the reported array.",
+    "boundary": "The visual is a structural comparison, not a fabrication simulator. It does not model crystal growth, transport, detectivity, noise, defects, spectral response, toxicity, encapsulation, yield, or commercial cost.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Integration <select id=\"sensorMode\"><option value=\"misi\">grow PbS on ROIC</option><option value=\"bond\">bond separate detector</option></select></label><div id=\"sensorWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintSensor(){const direct=sensorMode.value==='misi';sensorWorld.innerHTML='<p><strong>Question:</strong> Where is the detector/read-out interface made?</p><div class=dbgroup><div class=tile>'+ (direct?'PbS film grown in place':'separate detector wafer') +'</div>'+(direct?'':'<p class=arrow>↓ pixel bonding/alignment</p>')+'<div class=\"tile active\">CMOS read-out circuit<br>640 × 512</div></div><p>Pixels: <strong>327,680</strong>. '+(direct?'The paper demonstrates room-temperature aqueous in-situ growth.':'The conventional comparison retains a separate bonding boundary.')+'</p>';};sensorMode.onchange=paintSensor;paintSensor();",
+    "questions": [
+      [
+        "What integration step changes in the reported method?",
+        [
+          "PbS detector material is grown directly on the ROIC",
+          "The ROIC is removed",
+          "Infrared light is converted to sound"
+        ],
+        0,
+        "Monolithic in-situ integration combines material growth and electronic integration on the read-out chip."
+      ],
+      [
+        "How many pixels are in the reported 640×512 array?",
+        [
+          "327,680",
+          "32,768",
+          "1,152"
+        ],
+        0,
+        "Multiply the two array dimensions."
+      ],
+      [
+        "What remains unproven by one paper?",
+        [
+          "Manufacturing yield and long-term field reliability",
+          "That 640×512 has pixels",
+          "That PbS is a material"
+        ],
+        0,
+        "A research demonstration does not establish scalable product qualification."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "width=640; height=512; pixels=width*height",
+          "note": "Calculate the exact array size reported in the paper."
+        },
+        {
+          "code": "process='room-temperature aqueous growth on CMOS ROIC'; bonding_boundary=False",
+          "note": "Record the structural change without claiming that every manufacturing boundary disappears."
+        },
+        {
+          "code": "detectivity_jones=4.4e11; wavelength_um=2.5",
+          "note": "Keep the reported performance metric tied to its wavelength."
+        },
+        {
+          "code": "evidence='research demonstration'; production_ready=False",
+          "note": "Separate the peer-reviewed result from product readiness."
+        }
+      ],
+      "expect": {
+        "width": 640,
+        "height": 512,
+        "pixels": 327680,
+        "process": "room-temperature aqueous growth on CMOS ROIC",
+        "bonding_boundary": false,
+        "detectivity_jones": 440000000000.0,
+        "wavelength_um": 2.5,
+        "evidence": "research demonstration",
+        "production_ready": false
+      },
+      "limit": "The visual is a structural comparison, not a fabrication simulator. It does not model crystal growth, transport, detectivity, noise, defects, spectral response, toxicity, encapsulation, yield, or commercial cost.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "width": 640,
+            "height": 512,
+            "pixels": 327680
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "width": 640,
+            "height": 512,
+            "pixels": 327680,
+            "process": "room-temperature aqueous growth on CMOS ROIC",
+            "bonding_boundary": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "width": 640,
+            "height": 512,
+            "pixels": 327680,
+            "process": "room-temperature aqueous growth on CMOS ROIC",
+            "bonding_boundary": false,
+            "detectivity_jones": 440000000000.0,
+            "wavelength_um": 2.5
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "width": 640,
+            "height": 512,
+            "pixels": 327680,
+            "process": "room-temperature aqueous growth on CMOS ROIC",
+            "bonding_boundary": false,
+            "detectivity_jones": 440000000000.0,
+            "wavelength_um": 2.5,
+            "evidence": "research demonstration",
+            "production_ready": false
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Li et al., Monolithically and in situ integrated PbS infrared imagers",
+        "https://www.nature.com/articles/s41586-026-11222-y",
+        "Primary Nature article; published October 28, 2026; checked November 5, 2026"
+      ]
+    ],
+    "visual_explanation": "A vertical material stack shows whether the detector arrives as a separately bonded layer or grows directly on the read-out circuit, which is the central integration claim.",
+    "written_questions": [
+      "Which packaging or integration boundary in your sensor roadmap dominates cost or yield?",
+      "What reliability, toxicity, calibration, and yield evidence would be required before a field trial?"
+    ],
+    "source_checked_on": "2026-11-05"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "Blue/green rollback switches traffic; it does not rewind shared data",
+    "goal": "Separate environment deployment, traffic routing, health gates, and data compatibility in a GitHub Actions blue/green release.",
+    "tag": "CI/CD & GitHub Actions · deployment strategy",
+    "concept": "<p>A restaurant opens a fully prepared second dining room before sending guests there. If service fails, the host sends new guests back to the old room.</p><p>Blue/green deployment keeps the old version (blue) serving while the replacement (green) is installed and tested. A router shifts traffic only after checks. GitHub Actions can orchestrate jobs and protected environments; the actual traffic shift belongs to the deployment platform.</p>",
+    "example": "<p>Blue serves 100% of checkout traffic. GitHub deploys green, smoke tests it, then CodeDeploy shifts 10% to green. If green errors, routing returns to blue. Any database writes green already made remain and must be backward-compatible or explicitly compensated.</p>",
+    "use_case": {
+      "when": "Use blue/green when you need production-like validation and a fast traffic rollback while briefly paying for two environments.",
+      "example": "An ECS checkout service deploys a new task set, receives a 10% canary, and returns traffic to the old task set if the error gate fails.",
+      "decision": "Choose blue/green when routing is controllable and both versions can safely share dependencies. Prefer in-place for low-risk stateless work; use expand/contract schemas or isolated data paths when shared-data compatibility is not guaranteed."
+    },
+    "practice": "Move traffic from blue to green and inject a green failure. Observe routing reverse while the shared-data marker stays changed.",
+    "boundary": "This model omits real GitHub jobs, AWS credentials, CodeDeploy configuration, health-check windows, DNS, sticky sessions, connection draining, queues, database migration details, cost, and region failure.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Green traffic <select id=\"greenTraffic\"><option value=\"0\">0%</option><option value=\"10\">10%</option><option value=\"100\">100%</option></select></label><label><input id=\"greenFails\" type=\"checkbox\"> green health gate fails</label><div id=\"deployWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintDeploy(){let g=+greenTraffic.value;const fail=greenFails.checked,requested=g;if(fail&&g>0)g=0;const b=100-g;deployWorld.innerHTML='<p><strong>Question:</strong> Where do the next 100 requests go?</p><div class=tiles><div class=tile>blue old version<br><div class=meter><div style=\"width:'+b+'%\"></div></div><strong>'+b+'</strong> requests</div><div class=\"tile '+(g>0?'active':'')+'\">green new version<br><div class=meter><div style=\"width:'+g+'%\"></div></div><strong>'+g+'</strong> requests</div></div><p>'+(fail&&requested>0?'Health gate failed: router returned new traffic to blue. A green database write would still remain.':'Traffic follows the requested split after the gate.')+'</p>';};greenTraffic.onchange=paintDeploy;greenFails.onchange=paintDeploy;paintDeploy();",
+    "questions": [
+      [
+        "Green fails during a 10% canary. What is the fast rollback?",
+        [
+          "Route new traffic back to blue",
+          "Delete the Git history",
+          "Assume database writes vanish"
+        ],
+        0,
+        "Blue/green rollback is primarily a routing action while blue remains available."
+      ],
+      [
+        "What does a GitHub environment approval provide?",
+        [
+          "A gate before the deployment job and its environment secrets",
+          "The load balancer implementation",
+          "Automatic database rewind"
+        ],
+        0,
+        "GitHub gates orchestration; the deployment platform moves traffic."
+      ],
+      [
+        "What is the shared-data boundary?",
+        [
+          "Both versions must tolerate the database state during rollback",
+          "Blue owns all past data",
+          "Green writes are always temporary"
+        ],
+        0,
+        "Routing reversal does not undo already committed side effects."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "traffic={'blue':100,'green':0}; shared_db={'schema':'expand-compatible','green_writes':0}",
+          "note": "Start with blue serving and a schema both versions can read."
+        },
+        {
+          "code": "green_deployed=True; smoke_passed=True; traffic={'blue':90,'green':10}",
+          "note": "Deploy and test green before shifting a 10% canary."
+        },
+        {
+          "code": "shared_db['green_writes']=3; green_error_rate=0.08; gate_passed=green_error_rate<0.02",
+          "note": "Green writes three records, then fails the synthetic error gate."
+        },
+        {
+          "code": "traffic={'blue':100,'green':0} if not gate_passed else traffic; rollback='route to blue'; data_rewound=False",
+          "note": "Routing rolls back quickly, but committed shared data remains."
+        }
+      ],
+      "expect": {
+        "traffic": {
+          "blue": 100,
+          "green": 0
+        },
+        "shared_db": {
+          "schema": "expand-compatible",
+          "green_writes": 3
+        },
+        "green_deployed": true,
+        "smoke_passed": true,
+        "green_error_rate": 0.08,
+        "gate_passed": false,
+        "rollback": "route to blue",
+        "data_rewound": false
+      },
+      "limit": "This model omits real GitHub jobs, AWS credentials, CodeDeploy configuration, health-check windows, DNS, sticky sessions, connection draining, queues, database migration details, cost, and region failure.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "traffic": {
+              "blue": 100,
+              "green": 0
+            },
+            "shared_db": {
+              "schema": "expand-compatible",
+              "green_writes": 0
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "traffic": {
+              "blue": 90,
+              "green": 10
+            },
+            "shared_db": {
+              "schema": "expand-compatible",
+              "green_writes": 0
+            },
+            "green_deployed": true,
+            "smoke_passed": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "traffic": {
+              "blue": 90,
+              "green": 10
+            },
+            "shared_db": {
+              "schema": "expand-compatible",
+              "green_writes": 3
+            },
+            "green_deployed": true,
+            "smoke_passed": true,
+            "green_error_rate": 0.08,
+            "gate_passed": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "traffic": {
+              "blue": 100,
+              "green": 0
+            },
+            "shared_db": {
+              "schema": "expand-compatible",
+              "green_writes": 3
+            },
+            "green_deployed": true,
+            "smoke_passed": true,
+            "green_error_rate": 0.08,
+            "gate_passed": false,
+            "rollback": "route to blue",
+            "data_rewound": false
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions: deploying with environments",
+        "https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments",
+        "Official GitHub documentation; checked November 5, 2026"
+      ],
+      [
+        "AWS CodeDeploy overview",
+        "https://docs.aws.amazon.com/codedeploy/latest/userguide/welcome.html",
+        "Official AWS documentation; checked November 5, 2026"
+      ],
+      [
+        "AWS CodeDeploy deployment configurations",
+        "https://docs.aws.amazon.com/codedeploy/latest/userguide/deployment-configurations.html",
+        "Official AWS documentation; checked November 5, 2026"
+      ]
+    ],
+    "visual_explanation": "Two proportional traffic bars move independently of the shared-data state, making the exact power—and the exact limit—of a blue/green rollback visible.",
+    "written_questions": [
+      "Which router or deployment service actually shifts traffic in your release path?",
+      "Which database change would make returning to blue unsafe, and how will expand/contract sequencing prevent it?"
+    ],
+    "source_checked_on": "2026-11-05"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "GraphQL serializes top-level mutation fields—not the whole distributed transaction",
+    "goal": "Use mutation ordering correctly without mistaking serial resolver execution for atomicity or rollback.",
+    "tag": "APIs & Microservices · GraphQL September 2025 specification",
+    "concept": "<p>A cashier handles “reserve item” before “charge card.” Doing those actions in order prevents them from starting together, but it does not erase the reservation if the charge fails.</p><p>The GraphQL specification executes the top-level fields of a mutation serially, in textual order. Other fields should be side-effect-free and may execute normally. Serial order is an execution rule, not a cross-service transaction.</p>",
+    "example": "<p>A mutation calls <code>reserveInventory</code> and then <code>chargeCard</code>. Reservation succeeds; charging fails. The response can contain the reservation result and an error for charging. Inventory remains reserved unless the API explicitly releases it, makes the operation idempotent, or coordinates a durable workflow.</p>",
+    "use_case": {
+      "when": "Use multiple top-level mutation fields when their textual order is meaningful and each field has a clear independently observable result.",
+      "example": "An internal operations API reserves stock before attempting a payment, with an explicit release action on payment failure.",
+      "decision": "Prefer one purpose-built mutation when the business operation needs one invariant and one idempotency key. Use serial top-level fields only when partial success is acceptable and compensation, retries, and authorization are designed explicitly."
+    },
+    "practice": "Fail the second mutation field and inspect what remains. Then switch to a single orchestrated field and compare the visible contract—not an assumed distributed transaction.",
+    "boundary": "The model is sequential Python, not a GraphQL executor. It omits null propagation, aliases, fragments, transport retries, resolver concurrency below the top level, authorization, database transactions, federation, and actual compensation failure.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Charge result <select id=\"chargeResult\"><option value=\"fail\">fails</option><option value=\"ok\">succeeds</option></select></label><div id=\"mutationWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintMutation(){const ok=chargeResult.value==='ok';mutationWorld.innerHTML='<p><strong>Question:</strong> What survives after the second field?</p><div class=step-flow><div class=tile>1 reserveInventory<br><strong>RES-9</strong></div><div class=arrow>then</div><div class=\"tile '+(!ok?'active':'')+'\">2 chargeCard<br><strong>'+(ok?'PAID':'ERROR')+'</strong></div></div><p>Reservation: <strong>'+(ok?'kept for the paid order':'still present until explicit release')+'</strong>. Serial order is not rollback.</p>';};chargeResult.onchange=paintMutation;paintMutation();",
+    "questions": [
+      [
+        "reserveInventory succeeds and chargeCard fails. What does serial execution guarantee?",
+        [
+          "Charge started after reserve finished; the reservation is not automatically undone",
+          "Both effects roll back",
+          "Charge ran in parallel"
+        ],
+        0,
+        "Serial top-level execution orders the resolvers but does not create a distributed transaction."
+      ],
+      [
+        "Why might one purpose-built mutation be clearer?",
+        [
+          "It can expose one business invariant and idempotency contract",
+          "It forces every database to be atomic",
+          "It removes authorization"
+        ],
+        0,
+        "A business operation can own coordination and partial-failure semantics explicitly."
+      ],
+      [
+        "What must be designed for retries?",
+        [
+          "Idempotency and compensation for already completed effects",
+          "Only field order",
+          "A larger response"
+        ],
+        0,
+        "A retried request can repeat the first effect unless it has a stable identity and safe recovery path."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "events=[]; reservation=None; payment=None",
+          "note": "Begin the two top-level mutation fields with no effects."
+        },
+        {
+          "code": "reservation='RES-9'; events.append('inventory reserved')",
+          "note": "The first top-level field completes before the second begins."
+        },
+        {
+          "code": "payment='FAILED'; events.append('payment failed')",
+          "note": "The second field fails after the reservation already exists."
+        },
+        {
+          "code": "needs_compensation=reservation is not None and payment=='FAILED'; automatic_rollback=False",
+          "note": "The API must explicitly release or otherwise reconcile the reservation."
+        }
+      ],
+      "expect": {
+        "events": [
+          "inventory reserved",
+          "payment failed"
+        ],
+        "reservation": "RES-9",
+        "payment": "FAILED",
+        "needs_compensation": true,
+        "automatic_rollback": false
+      },
+      "limit": "The model is sequential Python, not a GraphQL executor. It omits null propagation, aliases, fragments, transport retries, resolver concurrency below the top level, authorization, database transactions, federation, and actual compensation failure.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "events": [],
+            "reservation": null,
+            "payment": null
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "events": [
+              "inventory reserved"
+            ],
+            "reservation": "RES-9",
+            "payment": null
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "events": [
+              "inventory reserved",
+              "payment failed"
+            ],
+            "reservation": "RES-9",
+            "payment": "FAILED"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "events": [
+              "inventory reserved",
+              "payment failed"
+            ],
+            "reservation": "RES-9",
+            "payment": "FAILED",
+            "needs_compensation": true,
+            "automatic_rollback": false
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "GraphQL Specification September 2025: executing the root selection set",
+        "https://spec.graphql.org/September2025/#sec-Executing-the-Root-Selection-Set",
+        "Official GraphQL specification; published September 2025; checked November 5, 2026"
+      ]
+    ],
+    "visual_explanation": "A two-step mutation timeline stops at the failed second field while the first field's effect remains visible, separating ordering from atomic rollback.",
+    "written_questions": [
+      "Which existing mutation exposes multiple side effects that callers may wrongly assume are atomic?",
+      "Would one orchestrated mutation, a saga, or explicit compensation make its retry contract clearer?"
+    ],
+    "source_checked_on": "2026-11-05"
+  }
+]

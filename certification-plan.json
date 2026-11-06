@@ -2,7 +2,7 @@
   "schema_version": 1,
   "created_on": "2026-10-08",
   "target_date": "2026-12-31",
-  "source_checked_on": "2026-11-04",
+  "source_checked_on": "2026-11-05",
   "guide_recheck": "weekly and before booking",
   "time_budget_minutes": 30,
   "tracks": [
@@ -982,6 +982,37 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day46/data-engineering",
+      "product_material_added_on": "2026-11-05",
+      "session_type": "focused",
+      "cycle_position": 2,
+      "cycle_origin": "Day45",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "transformation_modeling",
+        "ingestion"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official COF-C03 overview rechecked 2026-11-05; full objective IDs and weights still unverified; planning groups only",
+      "snowflake_planning_groups": [
+        "data_formats",
+        "loading_unloading_transformation"
+      ],
+      "source_checked_on": "2026-11-05",
+      "source_versions": {
+        "databricks": "May 4 exam guide and explode/explode_outer SQL references rechecked 2026-11-05",
+        "snowflake": "COF-C03 overview and FLATTEN reference rechecked 2026-11-05; full guide IDs/weights unverified"
+      },
+      "depth": "Focused nested-array cardinality, parent-key preservation, outer semantics, and fan-out reconciliation. This deepens Day20 product material; no mastery or complete exam coverage claim.",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -1126,6 +1157,11 @@
       "day_number": 45,
       "date": "2026-11-04",
       "key": "Day26/data-engineering+products+3"
+    },
+    {
+      "day_number": 46,
+      "date": "2026-11-05",
+      "key": "Day28/data-engineering+products+1"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
