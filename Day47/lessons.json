@@ -1,0 +1,1363 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Send the small lookup table to the data—not the data to the lookup",
+    "goal": "Recognize when a small-side join can avoid moving a large fact table, and know where Databricks and Snowflake expose different controls.",
+    "tag": "Certification cycle 5 · focused lesson 3 · join planning",
+    "concept": "<p>A stadium has 10,000 ticket scans and one 20-row gate map. It is cheaper to give every scanner a copy of the tiny map than to send all ticket scans to one map.</p><p>A broadcast join copies a small relation to workers that hold partitions of the large relation. Each worker joins locally. This can remove a large shuffle, but the copied side must fit comfortably in worker memory.</p>",
+    "example": "<p>Four workers each hold 2.5 million payment rows. The merchant dimension has 5,000 rows and is 8 MB. Broadcasting sends 8 MB to each worker: 32 MB total. Shuffling both inputs would move the 10-million-row fact side as well. If the “small” side grows to 2 GB, four copies can turn the optimization into memory pressure.</p>",
+    "use_case": {
+      "when": "Use small-side join planning when a very large fact table repeatedly enriches from a genuinely small, reusable dimension.",
+      "example": "Ten million card events join to 5,000 merchant-risk records before an hourly fraud aggregate.",
+      "decision": "First measure compressed and runtime size, freshness, skew, and the physical plan. Broadcast only when the copied side is safely small. On Snowflake, inspect the optimizer's chosen plan rather than looking for a Databricks-style broadcast hint."
+    },
+    "practice": "Change the dimension size and worker count. Predict copied bytes and whether the dimension is still a safe candidate before revealing the modeled plan.",
+    "boundary": "The local model uses size arithmetic, not a Spark or Snowflake optimizer. It omits serialization overhead, compression, statistics quality, join type support, skew, cache reuse, spill, network topology, warehouse internals, concurrency, and actual query profiles.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Dimension size <select id=\"dimSize\"><option value=\"8\">8 MB</option><option value=\"256\">256 MB</option><option value=\"2048\">2,048 MB</option></select></label><label>Workers <input id=\"joinWorkers\" type=\"range\" min=\"2\" max=\"8\" value=\"4\"></label><div id=\"joinWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintJoin(){const s=+dimSize.value,w=+joinWorkers.value,total=s*w,safe=s<=256;joinWorld.innerHTML='<p><strong>Question:</strong> What moves to each worker?</p><div class=step-flow><div class=tile>merchant dimension<br><strong>'+s+' MB</strong></div><div class=arrow>↘ copies</div><div class=tiles>'+Array.from({length:w},(_,i)=>'<div class=\"tile '+(safe?'ok':'fail')+'\">worker '+(i+1)+'<br>2.5M fact rows<br>+'+s+' MB</div>').join('')+'</div></div><p>Total dimension transfer: <strong>'+total.toLocaleString()+' MB</strong>. '+(safe?'Candidate only: verify the real plan and memory headroom.':'Unsafe in this toy: measure and let a distributed strategy win.')+'</p>';};dimSize.onchange=paintJoin;joinWorkers.oninput=paintJoin;paintJoin();",
+    "questions": [
+      [
+        "An 8 MB dimension joins to a 10-million-row fact table on four workers. What does broadcast change?",
+        [
+          "Each worker receives the 8 MB dimension so its fact partition can join locally",
+          "All fact rows move to one worker",
+          "The join becomes logically different"
+        ],
+        0,
+        "Broadcast changes physical data movement, not relational results."
+      ],
+      [
+        "Why is a broadcast hint not a universal fix?",
+        [
+          "The copied side can exceed memory and some join strategies may not support the hint",
+          "It deletes table statistics",
+          "It makes keys unique"
+        ],
+        0,
+        "Replication trades shuffle for copies and memory; Databricks also documents that hints are not guaranteed for unsupported strategies."
+      ],
+      [
+        "What is the closest Snowflake action?",
+        [
+          "Inspect Query Profile and improve pruning/statistics/query shape; Snowflake has no Databricks broadcast hint",
+          "Add BROADCAST to Snowflake SQL",
+          "Disable the optimizer"
+        ],
+        0,
+        "The products expose different controls: Snowflake manages distribution and exposes plan evidence."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "fact_rows=10_000_000; dimension_mb=8; workers=4",
+          "note": "Start with a large fact relation and a measured small dimension."
+        },
+        {
+          "code": "broadcast_transfer_mb=dimension_mb*workers",
+          "note": "Broadcast creates one dimension copy per worker."
+        },
+        {
+          "code": "fact_rows_per_worker=fact_rows//workers",
+          "note": "Fact partitions remain where their worker can join locally."
+        },
+        {
+          "code": "candidate=dimension_mb<=256; result={'transfer_mb':broadcast_transfer_mb,'fact_rows_per_worker':fact_rows_per_worker,'candidate':candidate}",
+          "note": "A threshold is only a teaching guard; the real physical plan and memory decide."
+        }
+      ],
+      "expect": {
+        "fact_rows": 10000000,
+        "dimension_mb": 8,
+        "workers": 4,
+        "broadcast_transfer_mb": 32,
+        "fact_rows_per_worker": 2500000,
+        "candidate": true,
+        "result": {
+          "transfer_mb": 32,
+          "fact_rows_per_worker": 2500000,
+          "candidate": true
+        }
+      },
+      "limit": "The local model uses size arithmetic, not a Spark or Snowflake optimizer. It omits serialization overhead, compression, statistics quality, join type support, skew, cache reuse, spill, network topology, warehouse internals, concurrency, and actual query profiles.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "fact_rows": 10000000,
+            "dimension_mb": 8,
+            "workers": 4
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "fact_rows": 10000000,
+            "dimension_mb": 8,
+            "workers": 4,
+            "broadcast_transfer_mb": 32
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "fact_rows": 10000000,
+            "dimension_mb": 8,
+            "workers": 4,
+            "broadcast_transfer_mb": 32,
+            "fact_rows_per_worker": 2500000
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "fact_rows": 10000000,
+            "dimension_mb": 8,
+            "workers": 4,
+            "broadcast_transfer_mb": 32,
+            "fact_rows_per_worker": 2500000,
+            "candidate": true,
+            "result": {
+              "transfer_mb": 32,
+              "fact_rows_per_worker": 2500000,
+              "candidate": true
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks SQL hints",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-qry-select-hints",
+        "Official Databricks documentation; checked November 6, 2026"
+      ],
+      [
+        "Databricks adaptive query execution",
+        "https://docs.databricks.com/aws/en/optimizations/aqe",
+        "Official Databricks documentation; checked November 6, 2026"
+      ],
+      [
+        "Snowflake JOIN",
+        "https://docs.snowflake.com/en/sql-reference/constructs/join",
+        "Official Snowflake SQL reference; checked November 6, 2026"
+      ],
+      [
+        "Snowflake Query Profile",
+        "https://docs.snowflake.com/en/user-guide/ui-snowsight-activity",
+        "Official Snowflake documentation; checked November 6, 2026"
+      ]
+    ],
+    "visual_explanation": "The dimension visibly fans out while each fact partition stays on its worker. Increasing dimension size expands every copy, exposing the memory trade rather than merely printing a cost formula.",
+    "written_questions": [
+      "Which production dimension is small enough to consider broadcasting, and what measured size supports that claim?",
+      "Which Query Profile or Spark-plan evidence would make you reverse the decision?"
+    ],
+    "source_checked_on": "2026-11-06",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: hint the small alias, then verify the executed plan",
+        "minutes": 9,
+        "html": "<p><strong>Predict first.</strong> The hint names the exposed table alias on the small side.</p><pre><code><span>-- sourced SQL sketch; not executed in Databricks</span><span>SELECT /*+ BROADCAST(m) */ p.payment_id, m.risk_band</span><span>FROM payments p JOIN merchant_risk m</span><span>ON p.merchant_id = m.merchant_id;</span></code></pre><p>Databricks documents <code>BROADCAST</code> as the highest-priority join hint and says it can override the automatic broadcast threshold. A hint is still not guaranteed when the strategy does not support the join. AQE may adapt from runtime statistics; a pre-planned broadcast can avoid first shuffling both sides.</p><label>Dimension runtime size <select id=\"dbJoinSize\"><option value=\"8\">8 MB</option><option value=\"2048\">2 GB</option></select></label><div id=\"dbJoinWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL not run in Databricks. The browser runs a local teaching model; the Python trace ran locally.</p>",
+        "markdown": "Hint the small alias with `BROADCAST`, then verify the executed plan and memory. SQL not run in Databricks.",
+        "javascript": "const dbJoinSize=$('dbJoinSize'),dbJoinWorld=$('dbJoinWorld');function paintDbJoin(){const s=+dbJoinSize.value,ok=s<512;dbJoinWorld.innerHTML='<div class=step-flow><div class=tile>m · '+s+' MB</div><div class=arrow>copy × 4</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(s*4)+' MB copied<br>'+(ok?'candidate':'memory risk')+'</div></div>';};dbJoinSize.onchange=paintDbJoin;paintDbJoin();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: inspect the managed plan; DIRECTED controls scan order, not broadcast",
+        "minutes": 9,
+        "html": "<p><strong>Predict first.</strong> Snowflake does not expose Databricks' <code>BROADCAST</code> hint. Its optimizer chooses distribution.</p><pre><code><span>-- sourced SQL sketch; not executed in Snowflake</span><span>SELECT p.payment_id, m.risk_band</span><span>FROM payments p JOIN merchant_risk m</span><span>  ON p.merchant_id = m.merchant_id;</span></code></pre><p>Use Query Profile to inspect operator row counts, time, and data movement. Snowflake's <code>DIRECTED</code> syntax can constrain join/scan order; it is not a command to replicate a small table. Improve pruning, query shape, and warehouse fit only after plan evidence identifies the bottleneck.</p><label>Observed join output <input id=\"sfJoinRows\" type=\"range\" min=\"1\" max=\"20\" value=\"10\"></label><div id=\"sfJoinWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL not run in Snowflake. The browser model does not reproduce Snowflake's optimizer.</p>",
+        "markdown": "Snowflake manages join distribution. Inspect Query Profile; `DIRECTED` is scan/join-order control, not broadcast. SQL not run in Snowflake.",
+        "javascript": "const sfJoinRows=$('sfJoinRows'),sfJoinWorld=$('sfJoinWorld');function paintSfJoin(){const r=+sfJoinRows.value;sfJoinWorld.innerHTML='<div class=step-flow><div class=tile>table scans</div><div class=arrow>→</div><div class=tile>managed join operator<br>'+r+'M output rows</div><div class=arrow>→</div><div class=tile>Query Profile evidence</div></div><p>Change the row count to see the evidence label—not a fabricated distribution choice.</p>';};sfJoinRows.oninput=paintSfJoin;paintSfJoin();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Decision</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Small-side distribution</td><td>BROADCAST hint plus optimizer/AQE</td><td>Managed by optimizer; no broadcast hint</td></tr><tr><td>Evidence</td><td>Executed physical plan and runtime statistics</td><td>Query Profile operators and row movement</td></tr><tr><td>Join-order control</td><td>Statistics and join hints</td><td>DIRECTED can constrain order; it does not broadcast</td></tr><tr><td>Shared rule</td><td colspan=2>Measure the small side and verify the chosen plan before tuning</td></tr></tbody></table>",
+      "markdown": "| Decision | Databricks | Snowflake |\n|---|---|---|\n| Small-side distribution | `BROADCAST` hint plus optimizer/AQE | Managed; no broadcast hint |\n| Evidence | Executed physical plan | Query Profile |\n| Order control | Statistics and hints | `DIRECTED` is order, not broadcast |"
+    },
+    "product_questions": [
+      [
+        "Which Databricks alias should receive BROADCAST?",
+        [
+          "The measured small build-side alias",
+          "The largest fact alias",
+          "Every table"
+        ],
+        0,
+        "Broadcast the genuinely small side, subject to join support and memory."
+      ],
+      [
+        "What does Snowflake DIRECTED not promise?",
+        [
+          "Replication of the small table to every worker",
+          "A constrained scan/join order",
+          "The same relational result"
+        ],
+        0,
+        "DIRECTED is not a Databricks-style broadcast hint."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks SQL hints",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-qry-select-hints",
+        "Official Databricks documentation; checked November 6, 2026"
+      ],
+      [
+        "Databricks adaptive query execution",
+        "https://docs.databricks.com/aws/en/optimizations/aqe",
+        "Official Databricks documentation; checked November 6, 2026"
+      ],
+      [
+        "Snowflake JOIN",
+        "https://docs.snowflake.com/en/sql-reference/constructs/join",
+        "Official Snowflake SQL reference; checked November 6, 2026"
+      ],
+      [
+        "Snowflake Query Profile",
+        "https://docs.snowflake.com/en/user-guide/ui-snowsight-activity",
+        "Official Snowflake documentation; checked November 6, 2026"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-06",
+      "session_type": "focused",
+      "cycle_position": 3,
+      "cycle_origin": "Day45",
+      "databricks": {
+        "scope": "Data Transformation and Modeling plus Troubleshooting and Optimization: broadcast join selection, memory tradeoffs, AQE, and physical-plan evidence."
+      },
+      "snowflake": {
+        "scope": "Performance plus Architecture and Connectivity planning groups: managed join planning, Query Profile evidence, and the precise limit of DIRECTED. Planning groups only; no complete COF-C03 map claimed."
+      },
+      "product_lab_execution": "not_run; browser models are local JavaScript and the recorded example is local Python"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "A ConcurrentHashMap scan is a moving view—not a snapshot",
+    "goal": "Use weakly consistent traversal safely and know when a stable snapshot is required.",
+    "tag": "Software engineering · Java concurrent collections",
+    "concept": "<p>A stock clerk walks the aisles while cashiers keep selling items. The clerk can finish the walk without locking the store, but the list may mix moments in time.</p><p><code>ConcurrentHashMap</code> views are weakly consistent. Their iterators do not fail just because updates occur, but a traversal is not an atomic snapshot. It may reflect some concurrent changes and not others.</p>",
+    "example": "<p>The map starts with A=5 and B=7. While a report traverses, a writer changes A to 4 and adds C=9. The report may show A=5, B=7, C=9: a valid moving view, but not inventory at one instant. That is fine for telemetry; it is unsafe for an exact financial close.</p>",
+    "use_case": {
+      "when": "Use weakly consistent traversal for monitoring, diagnostics, caches, and approximate aggregate work that must not stop concurrent writers.",
+      "example": "A service exports current per-tenant queue depths while workers add and remove tenants.",
+      "decision": "If the consumer needs one instant, copy under an application-level coordination rule or read from a versioned database snapshot. Do not infer snapshot isolation from the absence of ConcurrentModificationException."
+    },
+    "practice": "Move the writer before or after each read and watch which versions the report can contain.",
+    "boundary": "The browser and Java trace use a scripted interleaving, not real threads or a complete set of legal outcomes. They omit memory-model details, resize behavior, bulk operations, contention, null restrictions, ordering, and snapshot implementation costs.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Writer timing <select id=\"mapTiming\"><option value=\"middle\">between A and B reads</option><option value=\"after\">after scan</option></select></label><div id=\"mapWorld\" class=\"world\"></div></div>",
+    "js": "function paintMap(){const mid=mapTiming.value==='middle';mapWorld.innerHTML='<p><strong>Question:</strong> Is this one instant?</p><div class=step-flow><div class=tile>read A<br>A=5</div><div class=\"tile '+(mid?'active':'')+'\">writer<br>'+(mid?'A=4, add C=9':'waits')+'</div><div class=tile>read B<br>B=7</div><div class=tile>'+(mid?'possibly read C=9':'writer then changes map')+'</div></div><p>Report: <strong>'+(mid?'A=5, B=7, C=9':'A=5, B=7')+'</strong>. '+(mid?'It mixes versions.':'It describes the pre-update scan in this script.')+'</p>';};mapTiming.onchange=paintMap;paintMap();",
+    "questions": [
+      [
+        "What does weakly consistent mean here?",
+        [
+          "Traversal can proceed during writes but is not one atomic snapshot",
+          "Every update is guaranteed visible",
+          "Iteration locks every key"
+        ],
+        0,
+        "Concurrent progress is allowed; exact point-in-time visibility is not promised."
+      ],
+      [
+        "Why can the report contain old A and new C?",
+        [
+          "Reads occur at different moments while writers continue",
+          "The map is corrupt",
+          "Keys are sorted"
+        ],
+        0,
+        "A moving traversal can observe different entries around concurrent updates."
+      ],
+      [
+        "When should you add stronger coordination?",
+        [
+          "When a business invariant requires one stable instant",
+          "For every metric scrape",
+          "Only when the map is empty"
+        ],
+        0,
+        "Exact reconciliation needs snapshot semantics outside this traversal guarantee."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "java.util.concurrent.ConcurrentHashMap<String,Integer> m=new java.util.concurrent.ConcurrentHashMap<>(); m.put(\"A\",5); m.put(\"B\",7);",
+          "note": "Create the pre-scan state."
+        },
+        {
+          "code": "int seenA=m.get(\"A\");",
+          "note": "The report sees A before the writer."
+        },
+        {
+          "code": "m.put(\"A\",4); m.put(\"C\",9);",
+          "note": "A writer changes the live map during the report."
+        },
+        {
+          "code": "int seenB=m.get(\"B\"); int seenC=m.get(\"C\"); String report=\"A=\"+seenA+\", B=\"+seenB+\", C=\"+seenC;",
+          "note": "The report mixes an older A with a newer C."
+        }
+      ],
+      "expect": {
+        "seenA": "5",
+        "seenB": "7",
+        "seenC": "9",
+        "report": "A=5, B=7, C=9"
+      },
+      "limit": "The browser and Java trace use a scripted interleaving, not real threads or a complete set of legal outcomes. They omit memory-model details, resize behavior, bulk operations, contention, null restrictions, ordering, and snapshot implementation costs.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {
+            "seenA": "5"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "seenA": "5"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "seenA": "5",
+            "seenB": "7",
+            "seenC": "9",
+            "report": "A=5, B=7, C=9"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "ConcurrentHashMap (Java SE 25)",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html",
+        "Official Oracle Java API; checked November 6, 2026"
+      ],
+      [
+        "Iterator (Java SE 25)",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/Iterator.html",
+        "Official Oracle Java API; checked November 6, 2026"
+      ]
+    ],
+    "visual_explanation": "A time-ordered scan interleaves the writer between entry reads, so the mixed-version report is visible as an execution sequence rather than an abstract warning.",
+    "written_questions": [
+      "Which current scan in your services is approximate by design?",
+      "Which downstream decision would be unsafe if the scan mixed versions?"
+    ],
+    "source_checked_on": "2026-11-06"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Shorten the longest dependency chain—not the pile of parallel work",
+    "goal": "Find the delivery critical path and invest in the work that actually moves the finish date.",
+    "tag": "Distinguished Engineer · delivery-system judgment",
+    "concept": "<p>Four checkout lines can finish early while one passport desk keeps the whole trip waiting. Completing more work is not the same as moving the final date.</p><p>The critical path is the longest chain of dependent work. A task on that chain has zero schedule slack in this toy. Speeding a parallel task with slack looks productive but does not shorten delivery.</p>",
+    "example": "<p>A platform launch has schema design (3 days), migration (5), and consumer cutover (4): 12 days. In parallel, dashboard work takes 6 days. Saving two days on dashboards still leaves a 12-day launch. Saving two days on migration makes the launch 10 days—if no other path becomes longer.</p>",
+    "use_case": {
+      "when": "Use critical-path analysis when multiple teams are busy but the release date keeps moving or an executive asks where one senior engineer can change the outcome.",
+      "example": "A lakehouse migration has schema, backfill, and consumer validation dependencies plus parallel observability and training work.",
+      "decision": "Map real predecessor evidence, include approval and queue time, and recalculate after changes. Do not starve reliability work merely because it has slack; use the model to sequence help, not to declare other work unimportant."
+    },
+    "practice": "Move two engineering days between migration and dashboard work. Predict the release date and which path becomes critical.",
+    "boundary": "The model has two deterministic paths and unlimited staffing. Real programs have resource contention, uncertain estimates, rework, cross-path coupling, risk, learning, policy gates, and work that is valuable even when not schedule-critical.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Days saved on migration <input id=\"saveMigration\" type=\"range\" min=\"0\" max=\"3\" value=\"0\"></label><label>Days saved on dashboards <input id=\"saveDashboard\" type=\"range\" min=\"0\" max=\"3\" value=\"2\"></label><div id=\"pathWorld\" class=\"world\"></div></div>",
+    "js": "function paintPath(){const m=+saveMigration.value,d=+saveDashboard.value,core=3+(5-m)+4,dash=6-d,finish=Math.max(core,dash);pathWorld.innerHTML='<p><strong>Question:</strong> Which investment moves launch?</p><div class=stack><div class=bar style=\"width:'+(core/12*100)+'%;background:#ffbf69\">schema 3 → migration '+(5-m)+' → cutover 4 = '+core+'d</div><div class=bar style=\"width:'+(dash/12*100)+'%;background:#93c5fd\">dashboards = '+dash+'d</div></div><p>Launch when both finish: <strong>day '+finish+'</strong>. '+(core>=dash?'Dependency chain controls the date.':'Dashboard path now controls the date.')+'</p>';};saveMigration.oninput=paintPath;saveDashboard.oninput=paintPath;paintPath();",
+    "questions": [
+      [
+        "Core chain is 12 days and dashboard path is 6. Saving two dashboard days changes launch to?",
+        [
+          "Still day 12",
+          "Day 10",
+          "Day 4"
+        ],
+        0,
+        "The 12-day dependency chain still controls the finish."
+      ],
+      [
+        "Where does a senior engineer have schedule leverage?",
+        [
+          "On a current critical-path constraint or dependency",
+          "On the task with the most status updates",
+          "Only on the cheapest task"
+        ],
+        0,
+        "Removing time from the longest chain can move the system outcome."
+      ],
+      [
+        "What is an important boundary?",
+        [
+          "Estimates, resources, and dependencies change, so recalculate",
+          "Noncritical work has no value",
+          "Critical paths never change"
+        ],
+        0,
+        "The model is a decision aid, not a permanent ranking of teams."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "core=[('schema',3),('migration',5),('cutover',4)]; parallel=[('dashboards',6)]",
+          "note": "Represent two launch paths."
+        },
+        {
+          "code": "core_days=sum(days for _,days in core); parallel_days=sum(days for _,days in parallel)",
+          "note": "The dependent core chain totals 12 days."
+        },
+        {
+          "code": "baseline=max(core_days,parallel_days); dashboard_saved=max(core_days,parallel_days-2)",
+          "note": "Two dashboard days do not move the longest path."
+        },
+        {
+          "code": "migration_saved=max(core_days-2,parallel_days); leverage=baseline-migration_saved",
+          "note": "Two migration days move launch by two days in this model."
+        }
+      ],
+      "expect": {
+        "core": [
+          [
+            "schema",
+            3
+          ],
+          [
+            "migration",
+            5
+          ],
+          [
+            "cutover",
+            4
+          ]
+        ],
+        "parallel": [
+          [
+            "dashboards",
+            6
+          ]
+        ],
+        "core_days": 12,
+        "parallel_days": 6,
+        "baseline": 12,
+        "dashboard_saved": 12,
+        "migration_saved": 10,
+        "leverage": 2
+      },
+      "limit": "The model has two deterministic paths and unlimited staffing. Real programs have resource contention, uncertain estimates, rework, cross-path coupling, risk, learning, policy gates, and work that is valuable even when not schedule-critical.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "core": [
+              [
+                "schema",
+                3
+              ],
+              [
+                "migration",
+                5
+              ],
+              [
+                "cutover",
+                4
+              ]
+            ],
+            "parallel": [
+              [
+                "dashboards",
+                6
+              ]
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "core": [
+              [
+                "schema",
+                3
+              ],
+              [
+                "migration",
+                5
+              ],
+              [
+                "cutover",
+                4
+              ]
+            ],
+            "parallel": [
+              [
+                "dashboards",
+                6
+              ]
+            ],
+            "core_days": 12,
+            "parallel_days": 6
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "core": [
+              [
+                "schema",
+                3
+              ],
+              [
+                "migration",
+                5
+              ],
+              [
+                "cutover",
+                4
+              ]
+            ],
+            "parallel": [
+              [
+                "dashboards",
+                6
+              ]
+            ],
+            "core_days": 12,
+            "parallel_days": 6,
+            "baseline": 12,
+            "dashboard_saved": 12
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "core": [
+              [
+                "schema",
+                3
+              ],
+              [
+                "migration",
+                5
+              ],
+              [
+                "cutover",
+                4
+              ]
+            ],
+            "parallel": [
+              [
+                "dashboards",
+                6
+              ]
+            ],
+            "core_days": 12,
+            "parallel_days": 6,
+            "baseline": 12,
+            "dashboard_saved": 12,
+            "migration_saved": 10,
+            "leverage": 2
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Google SRE: operational simplicity",
+        "https://sre.google/sre-book/simplicity/",
+        "Official Google SRE guidance; checked November 6, 2026"
+      ],
+      [
+        "AWS DevOps guidance",
+        "https://docs.aws.amazon.com/wellarchitected/latest/devops-guidance/welcome.html",
+        "Official AWS Well-Architected guidance; checked November 6, 2026"
+      ]
+    ],
+    "visual_explanation": "Two bars share one day scale, so reducing a shorter path visibly leaves the finish unchanged while reducing the longest dependency chain moves the launch marker.",
+    "written_questions": [
+      "What is the longest evidence-backed dependency chain in your current program?",
+      "Which queue, approval, or handoff time is missing from its estimates?"
+    ],
+    "source_checked_on": "2026-11-06"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Discover MCP capabilities before choosing the modern protocol path",
+    "goal": "Use server discovery and per-request metadata without assuming every MCP server supports the same protocol era.",
+    "tag": "GenAI engineering · harness compatibility · MCP 2026-07-28",
+    "concept": "<p>A universal travel adapter checks the outlet before sending power. It does not push one plug into every wall.</p><p>In MCP 2026-07-28, a client may call <code>server/discover</code> to learn supported versions and capabilities. The modern core is stateless: version and client capabilities travel in request <code>_meta</code>. Discovery is optional, so a harness still needs an explicit compatibility policy for older servers.</p>",
+    "example": "<p>The harness prefers 2026-07-28 and needs tools plus tasks. Server A advertises 2026-07-28 and tools, but Tasks are an extension it lacks. The harness can use tools and disable background-task UX. Server B supports the legacy initialization era, so an SDK may fall back if policy permits; a pinned-modern client should fail clearly.</p>",
+    "use_case": {
+      "when": "Use discovery when one harness connects to independently upgraded MCP servers or needs to choose modern stateless behavior before ordinary calls.",
+      "example": "An enterprise agent connects to catalog, ticketing, and code servers maintained by different teams.",
+      "decision": "Pin when compatibility and auditability outweigh reach. Allow an SDK-managed fallback only with tests and telemetry. Always gate optional features on advertised capability and enforced policy, not on a server name."
+    },
+    "practice": "Switch advertised versions and task support. Watch the harness choose modern, legacy, or fail-closed routes.",
+    "boundary": "The browser is a capability intersection model. It sends no JSON-RPC, authenticates no server, validates no schemas, implements no fallback transport, and does not prove an extension is safe or authorized.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Server era <select id=\"mcpEra\"><option value=\"modern\">modern 2026-07-28</option><option value=\"legacy\">legacy only</option></select></label><label><input id=\"taskCap\" type=\"checkbox\"> Tasks extension advertised</label><label><input id=\"allowFallback\" type=\"checkbox\" checked> allow legacy fallback</label><div id=\"mcpWorld\" class=\"world\"></div></div>",
+    "js": "function paintMcp(){const modern=mcpEra.value==='modern',fallback=allowFallback.checked,tasks=taskCap.checked,route=modern?'modern per-request _meta':fallback?'legacy initialize':'fail closed';mcpWorld.innerHTML='<p><strong>Question:</strong> Which route is actually supported?</p><div class=step-flow><div class=tile>client prefers<br>2026-07-28 + tools + tasks</div><div class=arrow>→ discover</div><div class=tile>server<br>'+(modern?'2026-07-28':'legacy era')+'<br>tasks '+(tasks?'yes':'no')+'</div><div class=arrow>→</div><div class=\"tile '+(route==='fail closed'?'fail':'ok')+'\">'+route+'<br>task UX '+(modern&&tasks?'enabled':'disabled')+'</div></div>';};[mcpEra,taskCap,allowFallback].forEach(x=>x.onchange=paintMcp);paintMcp();",
+    "questions": [
+      [
+        "What does server/discover provide?",
+        [
+          "Supported protocol versions, capabilities, and server information for path selection",
+          "Authorization to every tool",
+          "A durable session"
+        ],
+        0,
+        "Discovery informs compatibility; it does not grant effects."
+      ],
+      [
+        "A modern server lacks the Tasks extension. What should the harness do?",
+        [
+          "Use supported features and disable task-specific behavior",
+          "Pretend tasks exist",
+          "Call initialize repeatedly"
+        ],
+        0,
+        "Feature use must be the intersection of need, advertisement, and policy."
+      ],
+      [
+        "Why can pinning fail closed be useful?",
+        [
+          "It prevents silent downgrade when auditability requires one protocol era",
+          "It makes every server modern",
+          "It replaces authentication"
+        ],
+        0,
+        "Compatibility policy should be explicit and observable."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "client={'preferred':'2026-07-28','needs':['tasks','tools'],'fallback':True}",
+          "note": "State the harness preference and optional feature needs."
+        },
+        {
+          "code": "server={'versions':['2026-07-28'],'capabilities':['tools']}",
+          "note": "Discovery advertises modern tools but no tasks extension."
+        },
+        {
+          "code": "version=client['preferred'] if client['preferred'] in server['versions'] else 'legacy' if client['fallback'] else None",
+          "note": "Choose a protocol route under explicit fallback policy."
+        },
+        {
+          "code": "enabled=sorted(set(client['needs']) & set(server['capabilities'])); disabled=sorted(set(client['needs'])-set(enabled)); result={'version':version,'enabled':enabled,'disabled':disabled}",
+          "note": "Enable only the capability intersection."
+        }
+      ],
+      "expect": {
+        "client": {
+          "preferred": "2026-07-28",
+          "needs": [
+            "tasks",
+            "tools"
+          ],
+          "fallback": true
+        },
+        "server": {
+          "versions": [
+            "2026-07-28"
+          ],
+          "capabilities": [
+            "tools"
+          ]
+        },
+        "version": "2026-07-28",
+        "enabled": [
+          "tools"
+        ],
+        "disabled": [
+          "tasks"
+        ],
+        "result": {
+          "version": "2026-07-28",
+          "enabled": [
+            "tools"
+          ],
+          "disabled": [
+            "tasks"
+          ]
+        }
+      },
+      "limit": "The browser is a capability intersection model. It sends no JSON-RPC, authenticates no server, validates no schemas, implements no fallback transport, and does not prove an extension is safe or authorized.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "client": {
+              "preferred": "2026-07-28",
+              "needs": [
+                "tasks",
+                "tools"
+              ],
+              "fallback": true
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "client": {
+              "preferred": "2026-07-28",
+              "needs": [
+                "tasks",
+                "tools"
+              ],
+              "fallback": true
+            },
+            "server": {
+              "versions": [
+                "2026-07-28"
+              ],
+              "capabilities": [
+                "tools"
+              ]
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "client": {
+              "preferred": "2026-07-28",
+              "needs": [
+                "tasks",
+                "tools"
+              ],
+              "fallback": true
+            },
+            "server": {
+              "versions": [
+                "2026-07-28"
+              ],
+              "capabilities": [
+                "tools"
+              ]
+            },
+            "version": "2026-07-28"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "client": {
+              "preferred": "2026-07-28",
+              "needs": [
+                "tasks",
+                "tools"
+              ],
+              "fallback": true
+            },
+            "server": {
+              "versions": [
+                "2026-07-28"
+              ],
+              "capabilities": [
+                "tools"
+              ]
+            },
+            "version": "2026-07-28",
+            "enabled": [
+              "tools"
+            ],
+            "disabled": [
+              "tasks"
+            ],
+            "result": {
+              "version": "2026-07-28",
+              "enabled": [
+                "tools"
+              ],
+              "disabled": [
+                "tasks"
+              ]
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP 2026-07-28 specification announcement",
+        "https://blog.modelcontextprotocol.io/posts/2026-07-28/",
+        "Official MCP project post; published July 28, 2026; checked November 6, 2026"
+      ],
+      [
+        "MCP TypeScript SDK protocol versions",
+        "https://ts.sdk.modelcontextprotocol.io/v2/protocol-versions",
+        "Official MCP SDK documentation; checked November 6, 2026"
+      ],
+      [
+        "MCP roadmap",
+        "https://blog.modelcontextprotocol.io/posts/mcp-roadmap/",
+        "Official MCP project roadmap; published September 2026; checked November 6, 2026"
+      ]
+    ],
+    "visual_explanation": "A three-stage compatibility route shows desired features, advertised server support, and the resulting enabled intersection, with legacy fallback as a distinct policy branch.",
+    "written_questions": [
+      "Which MCP servers in your estate can be pinned to 2026-07-28 today?",
+      "What telemetry will reveal unintended fallback or capability loss?"
+    ],
+    "source_checked_on": "2026-11-06"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Let light write—and later read—the state of one photonic element",
+    "goal": "Understand what an all-optical thin-film lithium-niobate memristor demonstrates and what remains a research claim.",
+    "tag": "Technology breakthroughs · new peer-reviewed research · November 6, 2026",
+    "concept": "<p>A whiteboard remembers the last marker stroke without needing a powered screen. A memristive element similarly has a response that depends on prior stimulation.</p><p>A newly published Nature Photonics paper reports turning thin-film lithium niobate, an established photonic platform, into an all-optically controlled memristive material. Optical pulses change a state that later light can probe. The claimed integration advantage is avoiding a separate heterogeneous memory material.</p>",
+    "example": "<p>In the teaching model, three write pulses increase an optical state from 0.20 to 0.65. A later low-power read reports transmission linked to that retained state. The model only explains history dependence; it does not reproduce the paper's material physics, device metrics, wavelength behavior, or reservoir-computing experiment.</p>",
+    "use_case": {
+      "when": "Consider this research when studying integrated photonic memory or neuromorphic optical computing where moving state between electronic memory and an optical circuit is costly.",
+      "example": "A future photonic reservoir could encode history in waveguide-local elements before a readout stage.",
+      "decision": "Treat it as a research direction, not a production component. Evaluate endurance, retention, write/read energy, variability, fabrication yield, array control, and comparison with electronic or heterogeneous alternatives."
+    },
+    "practice": "Apply positive and negative optical pulses, then use a separate low-strength read and observe the retained state.",
+    "boundary": "This bounded scalar teaching model is not the experiment. It invents no device performance. It omits photorefractive dynamics, wavelength-dependent bidirectionality, noise, endurance, retention time, fabrication, speed, energy, arrays, and reservoir-computing accuracy.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Write pulse <select id=\"pulseDir\"><option value=\"up\">positive</option><option value=\"down\">negative</option></select></label><button id=\"applyPulse\">Apply optical pulse</button><button id=\"resetPhoton\">Reset model</button><div id=\"photonWorld\" class=\"world\"></div></div>",
+    "js": "let opticalState=.2;function paintPhoton(){const pct=Math.round(opticalState*100);photonWorld.innerHTML='<p><strong>Question:</strong> What does the next read remember?</p><div class=step-flow><div class=tile>write light<br>'+(pulseDir.value==='up'?'+0.15':'−0.15')+'</div><div class=tile><div class=meter><div style=\"width:'+pct+'%\"></div></div>retained state '+opticalState.toFixed(2)+'</div><div class=tile>read light<br>modeled transmission '+pct+'%</div></div><p>The read follows prior pulses. Values are teaching units, not reported measurements.</p>';};applyPulse.onclick=()=>{opticalState=Math.max(0,Math.min(1,opticalState+(pulseDir.value==='up'?.15:-.15)));paintPhoton();};resetPhoton.onclick=()=>{opticalState=.2;paintPhoton();};pulseDir.onchange=paintPhoton;paintPhoton();",
+    "questions": [
+      [
+        "What makes the element memristive in this lesson?",
+        [
+          "Its optical response depends on prior optical stimulation",
+          "It emits electricity forever",
+          "It guarantees digital bits"
+        ],
+        0,
+        "History-dependent retained state is the core idea."
+      ],
+      [
+        "What is the reported integration claim?",
+        [
+          "TFLN itself becomes the controlled memristive material, avoiding heterogeneous integration for this device",
+          "Every photonic chip is now a computer",
+          "No fabrication is needed"
+        ],
+        0,
+        "The paper targets direct fabrication on an established TFLN platform."
+      ],
+      [
+        "What remains necessary before production use?",
+        [
+          "Independent device engineering evidence such as endurance, retention, variability, yield, and system cost",
+          "Only a browser animation",
+          "A larger color palette"
+        ],
+        0,
+        "A research demonstration does not settle manufacturing and lifecycle constraints."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "state=0.20; pulses=[0.15,0.15,0.15]",
+          "note": "Begin with an arbitrary normalized teaching state."
+        },
+        {
+          "code": "history=[state]",
+          "note": "Keep the state history visible."
+        },
+        {
+          "code": "for pulse in pulses: state=min(1.0,max(0.0,state+pulse)); history.append(round(state,2))",
+          "note": "Each optical write changes the retained state."
+        },
+        {
+          "code": "readout=round(state,2); result={'history':history,'readout':readout}",
+          "note": "A later read reflects the pulse history in this model."
+        }
+      ],
+      "expect": {
+        "state": 0.65,
+        "pulses": [
+          0.15,
+          0.15,
+          0.15
+        ],
+        "history": [
+          0.2,
+          0.35,
+          0.5,
+          0.65
+        ],
+        "readout": 0.65,
+        "result": {
+          "history": [
+            0.2,
+            0.35,
+            0.5,
+            0.65
+          ],
+          "readout": 0.65
+        }
+      },
+      "limit": "This bounded scalar teaching model is not the experiment. It invents no device performance. It omits photorefractive dynamics, wavelength-dependent bidirectionality, noise, endurance, retention time, fabrication, speed, energy, arrays, and reservoir-computing accuracy.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "state": 0.2,
+            "pulses": [
+              0.15,
+              0.15,
+              0.15
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "state": 0.2,
+            "pulses": [
+              0.15,
+              0.15,
+              0.15
+            ],
+            "history": [
+              0.2
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "state": 0.65,
+            "pulses": [
+              0.15,
+              0.15,
+              0.15
+            ],
+            "history": [
+              0.2,
+              0.35,
+              0.5,
+              0.65
+            ],
+            "pulse": 0.15
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "state": 0.65,
+            "pulses": [
+              0.15,
+              0.15,
+              0.15
+            ],
+            "history": [
+              0.2,
+              0.35,
+              0.5,
+              0.65
+            ],
+            "pulse": 0.15,
+            "readout": 0.65,
+            "result": {
+              "history": [
+                0.2,
+                0.35,
+                0.5,
+                0.65
+              ],
+              "readout": 0.65
+            }
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Gao et al., All-optical thin-film lithium niobate memristor",
+        "https://www.nature.com/articles/s41566-026-02048-1",
+        "Nature Photonics research article; published November 6, 2026; checked November 6, 2026"
+      ],
+      [
+        "Nature Photonics research articles",
+        "https://www.nature.com/nphoton/research-articles",
+        "Publisher index confirming current research coverage; checked November 6, 2026"
+      ]
+    ],
+    "visual_explanation": "The write pulse, retained state meter, and separate readout form a causal loop. Repeated pulses visibly accumulate, making memory-by-history intuitive without pretending to simulate the device.",
+    "written_questions": [
+      "Which device metric would most strongly determine whether this helps a real photonic accelerator?",
+      "What competing integration approach should be the baseline comparison?"
+    ],
+    "source_checked_on": "2026-11-06"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A green workflow is not deployment evidence until the deployment status says so",
+    "goal": "Model release progress as deployment states tied to an immutable revision, not merely a successful workflow run.",
+    "tag": "CI/CD & GitHub Actions · pipeline observability",
+    "concept": "<p>A courier can finish the delivery route while the recipient still rejects the package. “Route completed” and “package accepted” are different facts.</p><p>A GitHub workflow run records automation execution. A deployment records a request for a specific ref, and deployment statuses describe its progress: queued, in progress, success, failure, or error. GitHub does not access your servers; the deployment integration must report the real outcome.</p>",
+    "example": "<p>Workflow run 812 builds SHA <code>a1b2</code> and exits zero after asking Argo CD to deploy. The cluster health gate fails five minutes later. If the pipeline marks only the workflow green, the dashboard lies. A deployment for SHA a1b2 should move queued → in_progress → failure with a log URL.</p>",
+    "use_case": {
+      "when": "Use deployment records and statuses when release completion is asynchronous or another system actually performs rollout and health checks.",
+      "example": "GitHub Actions submits an EKS deployment to Argo CD and waits for health evidence from the cluster.",
+      "decision": "Key every deployment to an immutable SHA or digest, publish transitions from the system that observes them, and include logs. A synchronous tiny deployment may report directly, but never equate dispatch success with production success."
+    },
+    "practice": "Change cluster health after workflow completion and compare workflow state with the deployment timeline.",
+    "boundary": "The model is an in-memory state machine. It does not call GitHub, Argo CD, EKS, protection rules, environments, webhooks, authentication, retention APIs, concurrency controls, or rollback automation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Cluster health after dispatch <select id=\"clusterHealth\"><option value=\"fail\">fails</option><option value=\"ok\">passes</option></select></label><div id=\"deployStatusWorld\" class=\"world\"></div></div>",
+    "js": "function paintDeployStatus(){const ok=clusterHealth.value==='ok';deployStatusWorld.innerHTML='<p><strong>Question:</strong> Which signal tells users the release result?</p><div class=step-flow><div class=tile>workflow run<br><strong>success</strong><br>dispatch accepted</div><div class=arrow>→</div><div class=tile>deployment a1b2<br>queued → in_progress</div><div class=arrow>→</div><div class=\"tile '+(ok?'ok':'fail')+'\">deployment_status<br><strong>'+(ok?'success':'failure')+'</strong><br>cluster health</div></div><p>Workflow remains green. Deployment truth is <strong>'+(ok?'success':'failure')+'</strong>.</p>';};clusterHealth.onchange=paintDeployStatus;paintDeployStatus();",
+    "questions": [
+      [
+        "The workflow exits zero after dispatch, but cluster health fails. What should deployment status be?",
+        [
+          "failure",
+          "success",
+          "queued forever"
+        ],
+        0,
+        "The deployment status should reflect the observed rollout outcome."
+      ],
+      [
+        "Why key a deployment to SHA a1b2?",
+        [
+          "To identify exactly what revision the status describes",
+          "To make logs unnecessary",
+          "To rewrite the branch"
+        ],
+        0,
+        "A mutable branch name cannot by itself identify the deployed bits."
+      ],
+      [
+        "What does GitHub not do for a deployment record?",
+        [
+          "Access and change your servers automatically",
+          "Store the requested ref",
+          "Dispatch deployment events"
+        ],
+        0,
+        "An integration performs rollout and reports evidence."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "workflow={'run':812,'sha':'a1b2','state':'success','meaning':'dispatch accepted'}",
+          "note": "The workflow completed its orchestration step."
+        },
+        {
+          "code": "deployment={'sha':'a1b2','statuses':['queued','in_progress']} ",
+          "note": "Track release state independently for the exact revision."
+        },
+        {
+          "code": "cluster_health='failed'; deployment['statuses'].append('failure')",
+          "note": "The system observing the cluster reports the real outcome."
+        },
+        {
+          "code": "current=deployment['statuses'][-1]; release_green=current=='success'",
+          "note": "Pipeline observability reads the latest deployment status."
+        }
+      ],
+      "expect": {
+        "workflow": {
+          "run": 812,
+          "sha": "a1b2",
+          "state": "success",
+          "meaning": "dispatch accepted"
+        },
+        "deployment": {
+          "sha": "a1b2",
+          "statuses": [
+            "queued",
+            "in_progress",
+            "failure"
+          ]
+        },
+        "cluster_health": "failed",
+        "current": "failure",
+        "release_green": false
+      },
+      "limit": "The model is an in-memory state machine. It does not call GitHub, Argo CD, EKS, protection rules, environments, webhooks, authentication, retention APIs, concurrency controls, or rollback automation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "workflow": {
+              "run": 812,
+              "sha": "a1b2",
+              "state": "success",
+              "meaning": "dispatch accepted"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "workflow": {
+              "run": 812,
+              "sha": "a1b2",
+              "state": "success",
+              "meaning": "dispatch accepted"
+            },
+            "deployment": {
+              "sha": "a1b2",
+              "statuses": [
+                "queued",
+                "in_progress"
+              ]
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "workflow": {
+              "run": 812,
+              "sha": "a1b2",
+              "state": "success",
+              "meaning": "dispatch accepted"
+            },
+            "deployment": {
+              "sha": "a1b2",
+              "statuses": [
+                "queued",
+                "in_progress",
+                "failure"
+              ]
+            },
+            "cluster_health": "failed"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "workflow": {
+              "run": 812,
+              "sha": "a1b2",
+              "state": "success",
+              "meaning": "dispatch accepted"
+            },
+            "deployment": {
+              "sha": "a1b2",
+              "statuses": [
+                "queued",
+                "in_progress",
+                "failure"
+              ]
+            },
+            "cluster_health": "failed",
+            "current": "failure",
+            "release_green": false
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub REST deployments",
+        "https://docs.github.com/en/rest/deployments/deployments",
+        "Official GitHub documentation; checked November 6, 2026"
+      ],
+      [
+        "GitHub REST deployment statuses",
+        "https://docs.github.com/en/rest/deployments/statuses",
+        "Official GitHub documentation; checked November 6, 2026"
+      ],
+      [
+        "GitHub deployment environments",
+        "https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments",
+        "Official GitHub documentation; checked November 6, 2026"
+      ]
+    ],
+    "visual_explanation": "Two timelines deliberately diverge after dispatch: the workflow stays green while the deployment status changes with cluster evidence, exposing the observability gap.",
+    "written_questions": [
+      "Which system currently knows whether your production rollout is healthy?",
+      "Where will SHA, environment, status, description, and log URL be joined for release reporting?"
+    ],
+    "source_checked_on": "2026-11-06"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "HTTP 425 says: do not replay this unsafe request in early data",
+    "goal": "Use 425 Too Early to prevent replay-prone early-data execution without treating every retry as safe.",
+    "tag": "APIs & Microservices · HTTP replay protection",
+    "concept": "<p>An express lane lets a known customer enter before the identity check finishes. That saves time, but a copied entry ticket could be replayed.</p><p>TLS early data can arrive before the full handshake completes and is vulnerable to replay. HTTP 425 Too Early tells the client the server refused to risk processing the request early. A user agent that retries should wait for the handshake and send it once normally.</p>",
+    "example": "<p>A client sends <code>POST /payments</code> as early data. The edge cannot guarantee replay safety, so it returns 425 before calling the payment service. After the handshake, the client retries normally with the same idempotency key. The payment service still needs atomic duplicate protection; 425 only protects this early-data boundary.</p>",
+    "use_case": {
+      "when": "Use 425 at an HTTP endpoint or intermediary that accepts TLS early data but cannot safely process a potentially replayed non-idempotent request.",
+      "example": "A global edge receives a payment POST in 0-RTT data before the TLS handshake is complete.",
+      "decision": "Disable early data for unsafe routes when possible. Otherwise reject early processing with 425 and retry only after handshake completion. Still enforce application idempotency for side effects; never loop-retry another 425 as early data."
+    },
+    "practice": "Switch between GET and payment POST, with or without early data, and observe whether the request is served, rejected, or needs application duplicate protection.",
+    "boundary": "The browser models three booleans, not TLS 1.3, a proxy, a real HTTP client, replay windows, caches, anti-replay infrastructure, or payment idempotency storage. Client behavior varies; test your stack.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Request <select id=\"earlyMethod\"><option value=\"POST\">POST /payments</option><option value=\"GET\">GET /catalog</option></select></label><label><input id=\"earlyData\" type=\"checkbox\" checked> sent as early data</label><label><input id=\"idemKey\" type=\"checkbox\" checked> stable idempotency key</label><div id=\"earlyWorld\" class=\"world\"></div></div>",
+    "js": "function paintEarly(){const post=earlyMethod.value==='POST',early=earlyData.checked,key=idemKey.checked,reject=post&&early;earlyWorld.innerHTML='<p><strong>Question:</strong> May the server execute the side effect now?</p><div class=step-flow><div class=tile>'+earlyMethod.value+'<br>'+(early?'0-RTT early data':'after handshake')+'</div><div class=arrow>→</div><div class=\"tile '+(reject?'fail':'ok')+'\">'+(reject?'425 Too Early':'process request')+'</div><div class=arrow>→</div><div class=tile>'+(reject?'retry after handshake':post?(key?'idempotency ledger checks key':'duplicate risk remains'):'safe read response')+'</div></div>';};[earlyMethod,earlyData,idemKey].forEach(x=>x.onchange=paintEarly);paintEarly();",
+    "questions": [
+      [
+        "Why return 425 for an early payment POST?",
+        [
+          "To avoid processing replay-prone early data before the handshake",
+          "To say the payment failed permanently",
+          "To speed up every retry"
+        ],
+        0,
+        "425 rejects the risky timing, not the business request forever."
+      ],
+      [
+        "How should the client retry?",
+        [
+          "After the handshake, not again as early data",
+          "Immediately as identical early data forever",
+          "With a different payment intent"
+        ],
+        0,
+        "The retry removes the early-data replay condition."
+      ],
+      [
+        "Why keep an idempotency key?",
+        [
+          "Other duplicate-delivery paths remain outside the 425 boundary",
+          "425 makes POST idempotent",
+          "TLS stores business results"
+        ],
+        0,
+        "Application duplicate protection covers retries and lost responses beyond TLS early data."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "request={'method':'POST','path':'/payments','early_data':True,'idempotency_key':'pay-77'}",
+          "note": "A side-effecting request arrives before handshake completion."
+        },
+        {
+          "code": "unsafe=request['method']=='POST'; status=425 if request['early_data'] and unsafe else 200",
+          "note": "Reject risky early execution before calling the payment service."
+        },
+        {
+          "code": "request['early_data']=False; retry_status=200",
+          "note": "Retry after the handshake using the same logical intent."
+        },
+        {
+          "code": "ledger={'pay-77':'payment-900'}; effect=ledger[request['idempotency_key']]",
+          "note": "Application idempotency remains the duplicate-effect boundary."
+        }
+      ],
+      "expect": {
+        "request": {
+          "method": "POST",
+          "path": "/payments",
+          "early_data": false,
+          "idempotency_key": "pay-77"
+        },
+        "unsafe": true,
+        "status": 425,
+        "retry_status": 200,
+        "ledger": {
+          "pay-77": "payment-900"
+        },
+        "effect": "payment-900"
+      },
+      "limit": "The browser models three booleans, not TLS 1.3, a proxy, a real HTTP client, replay windows, caches, anti-replay infrastructure, or payment idempotency storage. Client behavior varies; test your stack.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "request": {
+              "method": "POST",
+              "path": "/payments",
+              "early_data": true,
+              "idempotency_key": "pay-77"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "request": {
+              "method": "POST",
+              "path": "/payments",
+              "early_data": true,
+              "idempotency_key": "pay-77"
+            },
+            "unsafe": true,
+            "status": 425
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "request": {
+              "method": "POST",
+              "path": "/payments",
+              "early_data": false,
+              "idempotency_key": "pay-77"
+            },
+            "unsafe": true,
+            "status": 425,
+            "retry_status": 200
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "request": {
+              "method": "POST",
+              "path": "/payments",
+              "early_data": false,
+              "idempotency_key": "pay-77"
+            },
+            "unsafe": true,
+            "status": 425,
+            "retry_status": 200,
+            "ledger": {
+              "pay-77": "payment-900"
+            },
+            "effect": "payment-900"
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "RFC 8470: Using Early Data in HTTP",
+        "https://www.rfc-editor.org/rfc/rfc8470.html",
+        "IETF standards-track RFC; published September 2018; checked November 6, 2026"
+      ],
+      [
+        "RFC 9110: HTTP Semantics",
+        "https://www.rfc-editor.org/rfc/rfc9110.html",
+        "IETF standards-track RFC; published June 2022; checked November 6, 2026"
+      ]
+    ],
+    "visual_explanation": "The request route branches before the application: an unsafe early POST stops at 425, while the post-handshake retry reaches an idempotency ledger. The two protection boundaries remain distinct.",
+    "written_questions": [
+      "Which side-effecting routes at your edge can receive TLS early data today?",
+      "Where is the stable intent key atomically bound to the resulting effect?"
+    ],
+    "source_checked_on": "2026-11-06"
+  }
+]
