@@ -1,0 +1,1316 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Mask the value at query time—do not make a second, stale copy",
+    "goal": "Choose query-time column masking for governed access and compare how Databricks and Snowflake attach policy to a column.",
+    "tag": "Certification cycle 5 · focused lesson 4 · column-level governance",
+    "concept": "<p>A hotel receptionist may see the last four digits of a guest's card while the fraud team sees the full value. The row is the same; the visible value changes with the viewer.</p><p>Dynamic column masking evaluates a policy when a query reads the protected column. The stored value remains unchanged. That centralizes policy and avoids an independently refreshed “safe” copy, but every path must query through the governed object.</p>",
+    "example": "<p>The stored email is <code>alex@example.com</code>. A privileged incident responder sees the full value; an analyst sees <code>a***@example.com</code>. A policy bug that returns <code>NULL</code> for an unknown role can silently break joins, so the default branch must be deliberate and tests must cover every role class.</p>",
+    "use_case": {
+      "when": "Use dynamic masking when multiple roles need the same governed table but should see different representations of a sensitive column.",
+      "example": "A customer-360 table serves support, fraud, and analytics; only fraud may see full email and phone values.",
+      "decision": "Prefer one query-time policy when access is role- or attribute-dependent and all reads pass through the governed platform. Use irreversible tokenization or a physically separate dataset when data must remain protected outside that control plane."
+    },
+    "practice": "Switch roles and policy defaults. Predict the returned value before revealing which branch executed.",
+    "boundary": "The browser and Python trace are local policy models, not Databricks or Snowflake authorization engines. They omit privileges, group/role hierarchy, ABAC tags, view interactions, policy ownership, joins, optimizer behavior, external access, audit logs, editions, and performance.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Viewer <select id=\"maskRole\"><option value=\"analyst\">analyst</option><option value=\"fraud\">fraud responder</option><option value=\"unknown\">unknown role</option></select></label><label>Unknown-role default <select id=\"maskDefault\"><option value=\"deny\">fully mask</option><option value=\"null\">return NULL</option></select></label><div id=\"maskWorld\" class=\"world\" aria-live=\"polite\"></div></div>",
+    "js": "function paintMask(){const role=maskRole.value,def=maskDefault.value;let shown,branch;if(role==='fraud'){shown='alex@example.com';branch='privileged branch';}else if(role==='analyst'){shown='a***@example.com';branch='partial-mask branch';}else{shown=def==='deny'?'***':'NULL';branch='default branch';}maskWorld.innerHTML='<p><strong>Stored once:</strong> alex@example.com</p><div class=step-flow><div class=tile>query as<br><strong>'+role+'</strong></div><div class=arrow>→</div><div class=tile>'+branch+'</div><div class=arrow>→</div><div class=\"tile '+(role==='fraud'?'ok':'')+'\">returned<br><strong>'+shown+'</strong></div></div><p>The policy changes the query result, not the stored value.</p>';};maskRole.onchange=paintMask;maskDefault.onchange=paintMask;paintMask();",
+    "questions": [
+      [
+        "What does dynamic masking change?",
+        [
+          "The value returned at query time",
+          "The stored value for every user",
+          "The number of rows"
+        ],
+        0,
+        "Column masking transforms the visible value while preserving the stored data."
+      ],
+      [
+        "Why is an unknown-role default important?",
+        [
+          "A missing branch can expose data or break consumers",
+          "It changes physical partitioning",
+          "It creates a new table"
+        ],
+        0,
+        "Fail-closed behavior and explicit compatibility are part of policy design."
+      ],
+      [
+        "When is masking alone insufficient?",
+        [
+          "When data leaves the governed query boundary and must remain protected",
+          "When two roles share a table",
+          "When SQL contains a projection"
+        ],
+        0,
+        "Exported plaintext is no longer protected by a query-time policy."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "stored='alex@example.com'; roles=['fraud','analyst','unknown']",
+          "note": "Keep one stored value and three viewer classes."
+        },
+        {
+          "code": "def mask(role): return stored if role=='fraud' else 'a***@example.com' if role=='analyst' else '***'",
+          "note": "Apply a fail-closed policy branch at read time."
+        },
+        {
+          "code": "visible={role:mask(role) for role in roles}",
+          "note": "The same row produces role-specific query results."
+        },
+        {
+          "code": "result={'stored':stored,'visible':visible}",
+          "note": "The stored value remains unchanged."
+        }
+      ],
+      "expect": {
+        "stored": "alex@example.com",
+        "roles": [
+          "fraud",
+          "analyst",
+          "unknown"
+        ],
+        "visible": {
+          "fraud": "alex@example.com",
+          "analyst": "a***@example.com",
+          "unknown": "***"
+        },
+        "result": {
+          "stored": "alex@example.com",
+          "visible": {
+            "fraud": "alex@example.com",
+            "analyst": "a***@example.com",
+            "unknown": "***"
+          }
+        }
+      },
+      "limit": "The browser and Python trace are local policy models, not Databricks or Snowflake authorization engines. They omit privileges, group/role hierarchy, ABAC tags, view interactions, policy ownership, joins, optimizer behavior, external access, audit logs, editions, and performance.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "stored": "alex@example.com",
+            "roles": [
+              "fraud",
+              "analyst",
+              "unknown"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "stored": "alex@example.com",
+            "roles": [
+              "fraud",
+              "analyst",
+              "unknown"
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "stored": "alex@example.com",
+            "roles": [
+              "fraud",
+              "analyst",
+              "unknown"
+            ],
+            "visible": {
+              "fraud": "alex@example.com",
+              "analyst": "a***@example.com",
+              "unknown": "***"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "stored": "alex@example.com",
+            "roles": [
+              "fraud",
+              "analyst",
+              "unknown"
+            ],
+            "visible": {
+              "fraud": "alex@example.com",
+              "analyst": "a***@example.com",
+              "unknown": "***"
+            },
+            "result": {
+              "stored": "alex@example.com",
+              "visible": {
+                "fraud": "alex@example.com",
+                "analyst": "a***@example.com",
+                "unknown": "***"
+              }
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks row filters and column masks",
+        "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks",
+        "Official Databricks documentation; checked November 8, 2026"
+      ],
+      [
+        "Databricks manual column masks",
+        "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply",
+        "Official Databricks documentation; checked November 8, 2026"
+      ],
+      [
+        "Snowflake Dynamic Data Masking",
+        "https://docs.snowflake.com/en/user-guide/security-column-ddm-intro",
+        "Official Snowflake documentation; checked November 8, 2026"
+      ],
+      [
+        "Snowflake CREATE MASKING POLICY",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-masking-policy",
+        "Official Snowflake SQL reference; checked November 8, 2026"
+      ]
+    ],
+    "visual_explanation": "One stored value flows through visibly different policy branches into three role-specific results. The diagram makes the control boundary—and the default branch—concrete.",
+    "written_questions": [
+      "Which column in your platform needs role-dependent representation rather than row denial?",
+      "What is the safest default for a role the policy does not recognize?"
+    ],
+    "source_checked_on": "2026-11-08",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: a Unity Catalog SQL UDF becomes the column mask",
+        "minutes": 9,
+        "html": "<p><strong>Predict first.</strong> The function returns the original string only to the fraud group.</p><pre><code><span>-- sourced SQL sketch; not executed in Databricks</span><span>CREATE FUNCTION governance.mask_email(v STRING)</span><span>RETURN CASE WHEN is_account_group_member('fraud')</span><span>  THEN v ELSE regexp_replace(v, '(^.).*(@.*$)', '$1***$2') END;</span><span>ALTER TABLE main.crm.customers ALTER COLUMN email</span><span>SET MASK governance.mask_email;</span></code></pre><p>Table-level masks use a SQL UDF whose return type matches or can be cast to the protected column. Databricks recommends ABAC policies when the same governance rule must apply consistently across many tables; a table-level mask is attached to one column.</p><label>Account group <select id=\"dbMaskRole\"><option value=\"analyst\">analyst</option><option value=\"fraud\">fraud</option></select></label><div id=\"dbMaskWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL not run in Databricks. This browser runs a local JavaScript branch model; the recorded trace ran locally in Python.</p>",
+        "markdown": "Create a Unity Catalog SQL UDF and attach it with `ALTER COLUMN ... SET MASK`. Use ABAC when one policy must govern many tables. SQL not run in Databricks.",
+        "javascript": "const dbMaskRole=$('dbMaskRole'),dbMaskWorld=$('dbMaskWorld');function paintDbMask(){const full=dbMaskRole.value==='fraud';dbMaskWorld.innerHTML='<div class=step-flow><div class=tile>session group<br>'+dbMaskRole.value+'</div><div class=arrow>→ UDF</div><div class=\"tile '+(full?'ok':'')+'\">'+(full?'alex@example.com':'a***@example.com')+'</div></div>';};dbMaskRole.onchange=paintDbMask;paintDbMask();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: a schema-level masking policy is attached to a matching column type",
+        "minutes": 9,
+        "html": "<p><strong>Predict first.</strong> The policy is a reusable schema object; the column remains stored once.</p><pre><code><span>-- sourced SQL sketch; not executed in Snowflake</span><span>CREATE MASKING POLICY governance.mask_email AS (v STRING)</span><span>RETURNS STRING -&gt;</span><span>  CASE WHEN CURRENT_ROLE() = 'FRAUD' THEN v</span><span>       ELSE REGEXP_REPLACE(v, '(^.).*(@.*$)', '\\1***\\2') END;</span><span>ALTER TABLE crm.customers MODIFY COLUMN email</span><span>SET MASKING POLICY governance.mask_email;</span></code></pre><p>Snowflake Dynamic Data Masking is an Enterprise Edition feature. The policy is evaluated at query time wherever the protected column appears. Separate policy-management privileges support segregation of duties.</p><label>Current role <select id=\"sfMaskRole\"><option value=\"ANALYST\">ANALYST</option><option value=\"FRAUD\">FRAUD</option></select></label><div id=\"sfMaskWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL not run in Snowflake. The browser does not reproduce role hierarchy, policy privileges, or query rewriting.</p>",
+        "markdown": "Create a schema-level masking policy, then attach it to a matching table/view column. Dynamic Data Masking requires Enterprise Edition or higher. SQL not run in Snowflake.",
+        "javascript": "const sfMaskRole=$('sfMaskRole'),sfMaskWorld=$('sfMaskWorld');function paintSfMask(){const full=sfMaskRole.value==='FRAUD';sfMaskWorld.innerHTML='<div class=step-flow><div class=tile>CURRENT_ROLE()<br>'+sfMaskRole.value+'</div><div class=arrow>→ policy</div><div class=\"tile '+(full?'ok':'')+'\">'+(full?'alex@example.com':'a***@example.com')+'</div></div>';};sfMaskRole.onchange=paintSfMask;paintSfMask();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Policy object</td><td>Unity Catalog SQL UDF; table-level mask or ABAC policy</td><td>Schema-level masking policy</td></tr><tr><td>Attach</td><td>ALTER COLUMN ... SET MASK</td><td>SET MASKING POLICY</td></tr><tr><td>Viewer context</td><td>session_user / account group membership</td><td>role/context functions</td></tr><tr><td>Important limit</td><td>Query-time boundary; exported plaintext is outside it</td><td>Enterprise Edition feature; same boundary</td></tr></tbody></table>",
+      "markdown": "| Question | Databricks | Snowflake |\n|---|---|---|\n| Policy object | SQL UDF or ABAC | Schema-level masking policy |\n| Attach | `SET MASK` | `SET MASKING POLICY` |\n| Context | User/group | Role/context |\n| Limit | Query-time boundary | Enterprise feature; query-time boundary |"
+    },
+    "product_questions": [
+      [
+        "Which Databricks mechanism scales one mask rule across many tagged tables?",
+        [
+          "ABAC policy",
+          "A copied redacted table",
+          "A broadcast hint"
+        ],
+        0,
+        "Databricks recommends ABAC for consistent policy across many tables."
+      ],
+      [
+        "What does Snowflake masking preserve?",
+        [
+          "The stored value while rewriting query-visible values",
+          "Only masked values on disk",
+          "A second table for each role"
+        ],
+        0,
+        "Dynamic Data Masking evaluates policy at query runtime."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks row filters and column masks",
+        "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks",
+        "Official Databricks documentation; checked November 8, 2026"
+      ],
+      [
+        "Databricks manual column masks",
+        "https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/manually-apply",
+        "Official Databricks documentation; checked November 8, 2026"
+      ],
+      [
+        "Snowflake Dynamic Data Masking",
+        "https://docs.snowflake.com/en/user-guide/security-column-ddm-intro",
+        "Official Snowflake documentation; checked November 8, 2026"
+      ],
+      [
+        "Snowflake CREATE MASKING POLICY",
+        "https://docs.snowflake.com/en/sql-reference/sql/create-masking-policy",
+        "Official Snowflake SQL reference; checked November 8, 2026"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-08",
+      "session_type": "focused",
+      "cycle_position": 4,
+      "cycle_origin": "Day45",
+      "databricks": {
+        "scope": "Databricks Intelligence Platform and governance/security: Unity Catalog column masks, UDF attachment, ABAC scaling, role/group context, and query-boundary limits."
+      },
+      "snowflake": {
+        "scope": "Account Access and Security plus Data Protection and Data Sharing planning groups: dynamic masking policies, segregation of duties, role context, edition limit, and query-time enforcement. Planning groups only; no complete COF-C03 objective map claimed."
+      },
+      "product_lab_execution": "not_run; browser models are local JavaScript and the recorded example is local Python"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "JDK 24 removed one virtual-thread pinning trap—not every bottleneck",
+    "goal": "Explain what JEP 491 changed and avoid turning a JVM upgrade into an unlimited-concurrency claim.",
+    "tag": "Software engineering · Java virtual threads",
+    "concept": "<p>A hotel has many guests but only a few elevators. Before JDK 24, a virtual thread blocking inside <code>synchronized</code> could keep its carrier platform thread occupied—like a guest holding an elevator while waiting. JEP 491 changed monitor handling so that this synchronized-block case can unmount and free the carrier.</p><p>The change improves scalability; it does not make blocking work free. Native calls, CPU, downstream connection pools, rate limits, and memory remain real constraints.</p>",
+    "example": "<p>Two carrier threads serve 1,000 virtual requests. In the old teaching model, two requests sleep inside synchronized blocks and occupy both carriers, so other requests stall. In JDK 24+, those waits can release the carriers. The database still has only 20 connections, so admitting 1,000 queries simply moves the queue.</p>",
+    "use_case": {
+      "when": "Use this distinction when upgrading Java 21 services that use virtual threads around synchronized blocking I/O or when reviewing outdated pinning advice.",
+      "example": "A Spring service enters synchronized cache code and then waits on a remote metadata call.",
+      "decision": "Upgrade and remeasure before rewriting locks solely for monitor pinning. Keep explicit concurrency limits at scarce downstream resources, and investigate remaining native or foreign-function pinning with current JFR/JDK evidence."
+    },
+    "practice": "Change the JDK mode, carrier count, and database capacity. Predict whether the bottleneck is carrier pinning or the database permit pool.",
+    "boundary": "This is queue arithmetic, not a JVM scheduler benchmark. It omits monitor implementation, native frames, scheduler compensation, JFR events, CPU work, memory, connection-pool behavior, fairness, and application latency distributions.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Runtime <select id=\"vtJdk\"><option value=\"21\">JDK 21 model</option><option value=\"24\">JDK 24+ model</option></select></label><label>Database permits <input id=\"vtDb\" type=\"range\" min=\"2\" max=\"20\" value=\"8\"></label><div id=\"vtWorld\" class=\"world\"></div></div>",
+    "js": "function paintVt(){const modern=vtJdk.value==='24',db=+vtDb.value,carriers=2,admitted=20,carrierSlots=modern?admitted:carriers,throughput=Math.min(carrierSlots,db);vtWorld.innerHTML='<div class=step-flow><div class=tile>'+admitted+' virtual requests</div><div class=arrow>→</div><div class=\"tile '+(modern?'ok':'fail')+'\">carrier capacity '+carrierSlots+'<br>'+(modern?'monitor wait unmounts':'2 pinned carriers')+'</div><div class=arrow>→</div><div class=tile>DB permits '+db+'</div></div><p>Modeled concurrent progress: <strong>'+throughput+'</strong>. Bottleneck: <strong>'+(throughput===db?'database permits':'carrier pinning')+'</strong>.</p>';};vtJdk.onchange=paintVt;vtDb.oninput=paintVt;paintVt();",
+    "questions": [
+      [
+        "What did JEP 491 change?",
+        [
+          "Virtual threads blocking in synchronized constructs can release carrier threads",
+          "Every blocking call became nonblocking",
+          "Database pools became unnecessary"
+        ],
+        0,
+        "The targeted change removes monitor-related carrier pinning."
+      ],
+      [
+        "Why retain downstream permits?",
+        [
+          "Virtual threads do not increase database or API capacity",
+          "JEP 491 disables semaphores",
+          "Permits make CPU infinite"
+        ],
+        0,
+        "Concurrency still needs to respect scarce external resources."
+      ],
+      [
+        "What should an upgrade decision include?",
+        [
+          "Current-JDK measurements and remaining bottlenecks",
+          "Only Java 21 folklore",
+          "Replacing every synchronized block automatically"
+        ],
+        0,
+        "Upgrade evidence may remove the original reason for lock rewrites."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "int carriers=2; int requests=20; int dbPermits=8;",
+          "note": "Model many virtual requests over two carriers and one downstream pool."
+        },
+        {
+          "code": "int jdk21Progress=Math.min(carriers,dbPermits);",
+          "note": "Old monitor-pinning model caps progress at carriers."
+        },
+        {
+          "code": "int jdk24Progress=Math.min(requests,dbPermits);",
+          "note": "After the monitor fix, the database becomes the modeled limit."
+        },
+        {
+          "code": "String result=\"JDK21=\"+jdk21Progress+\", JDK24=\"+jdk24Progress;",
+          "note": "The bottleneck moves; capacity is not created."
+        }
+      ],
+      "expect": {
+        "carriers": "2",
+        "requests": "20",
+        "dbPermits": "8",
+        "jdk21Progress": "2",
+        "jdk24Progress": "8",
+        "result": "JDK21=2, JDK24=8"
+      },
+      "limit": "This is queue arithmetic, not a JVM scheduler benchmark. It omits monitor implementation, native frames, scheduler compensation, JFR events, CPU work, memory, connection-pool behavior, fairness, and application latency distributions.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "carriers": "2",
+            "requests": "20",
+            "dbPermits": "8"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "carriers": "2",
+            "requests": "20",
+            "dbPermits": "8",
+            "jdk21Progress": "2"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "carriers": "2",
+            "requests": "20",
+            "dbPermits": "8",
+            "jdk21Progress": "2",
+            "jdk24Progress": "8"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "carriers": "2",
+            "requests": "20",
+            "dbPermits": "8",
+            "jdk21Progress": "2",
+            "jdk24Progress": "8",
+            "result": "JDK21=2, JDK24=8"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "JEP 491: Synchronize Virtual Threads without Pinning",
+        "https://openjdk.org/jeps/491",
+        "Official OpenJDK enhancement; delivered in JDK 24; checked November 8, 2026"
+      ],
+      [
+        "Oracle JDK 24 significant changes",
+        "https://docs.oracle.com/en/java/javase/25/migrate/significant-changes-jdk-24.html",
+        "Official Oracle migration documentation; checked November 8, 2026"
+      ],
+      [
+        "Oracle Java SE 25 virtual threads",
+        "https://docs.oracle.com/en/java/javase/25/core/virtual-threads.html",
+        "Official Oracle documentation; checked November 8, 2026"
+      ]
+    ],
+    "visual_explanation": "Two bottleneck gates are shown in sequence. Switching JDK mode expands the carrier gate but leaves the database gate unchanged, so the model teaches bottleneck movement rather than magic speed.",
+    "written_questions": [
+      "Which service still carries a Java 21-era virtual-thread workaround?",
+      "What scarce downstream resource becomes the next queue after the upgrade?"
+    ],
+    "source_checked_on": "2026-11-08"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Measure decision wait separately from engineering work",
+    "goal": "Expose decision latency so adding engineers does not hide an authorization or governance queue.",
+    "tag": "Distinguished Engineer · organizational flow",
+    "concept": "<p>A mechanic needs two hours to repair a car but waits five days for the insurer's approval. Hiring a second mechanic does not shorten this repair.</p><p>Decision latency is elapsed time from a decision request to an authorized choice. Separate it from active analysis and implementation. Long wait often signals unclear decision rights, missing evidence, an oversized approval forum, or no escalation path.</p>",
+    "example": "<p>A schema exception takes 30 minutes to analyze, 72 hours waiting for the architecture council, and two hours to implement. The lead time is 74.5 hours; 96% is decision wait. A pre-authorized rule for reversible changes can remove most of that wait without weakening governance for high-blast-radius decisions.</p>",
+    "use_case": {
+      "when": "Use a decision-latency measure when cross-team delivery repeatedly waits for approvals, architecture calls, security exceptions, or ownership clarification.",
+      "example": "A data contract change is ready Tuesday but waits until the next weekly council despite being backward compatible and reversible.",
+      "decision": "Classify by reversibility and blast radius, define the authorized decider and evidence needed, set an escalation timer, and preserve a slower path for irreversible or regulated decisions."
+    },
+    "practice": "Move hours between analysis, decision wait, and implementation; see which improvement changes end-to-end lead time most.",
+    "boundary": "The model uses three deterministic intervals. It does not measure decision quality, regulatory obligations, rework, parallel work, uncertainty, stakeholder discovery, or the value of deliberate review.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Decision wait hours <input id=\"decisionWait\" type=\"range\" min=\"0\" max=\"120\" value=\"72\"></label><label>Implementation hours <input id=\"implHours\" type=\"range\" min=\"1\" max=\"16\" value=\"2\"></label><div id=\"decisionWorld\" class=\"world\"></div></div>",
+    "js": "function paintDecision(){const analysis=.5,wait=+decisionWait.value,impl=+implHours.value,total=analysis+wait+impl,pct=Math.round(wait/total*100);decisionWorld.innerHTML='<div class=stack><div class=bar style=\"width:'+Math.max(4,analysis/total*100)+'%;background:#93c5fd\">analysis '+analysis+'h</div><div class=bar style=\"width:'+Math.max(4,wait/total*100)+'%;background:#fca5a5\">decision wait '+wait+'h</div><div class=bar style=\"width:'+Math.max(4,impl/total*100)+'%;background:#86efac\">implementation '+impl+'h</div></div><p>Total <strong>'+total.toFixed(1)+'h</strong>; decision wait is <strong>'+pct+'%</strong>. '+(pct>50?'Clarify rights/evidence/escalation before adding delivery capacity.':'Work is now the larger component.')+'</p>';};decisionWait.oninput=paintDecision;implHours.oninput=paintDecision;paintDecision();",
+    "questions": [
+      [
+        "Why measure decision wait separately?",
+        [
+          "It identifies a governance queue that more implementers may not change",
+          "It proves every review is waste",
+          "It replaces decision quality"
+        ],
+        0,
+        "Separate components make the actual delay visible."
+      ],
+      [
+        "Which decision can use a faster path?",
+        [
+          "A reversible, low-blast-radius change with predefined evidence",
+          "Every regulated irreversible change",
+          "A choice with no owner"
+        ],
+        0,
+        "Decision process should match risk and reversibility."
+      ],
+      [
+        "What must a fast path retain?",
+        [
+          "Authorized decision rights, evidence, and escalation",
+          "Anonymous approval",
+          "No audit trail"
+        ],
+        0,
+        "Speed comes from predefinition, not from removing accountability."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "analysis=.5; decision_wait=72; implementation=2",
+          "note": "Separate active work from waiting."
+        },
+        {
+          "code": "lead_time=analysis+decision_wait+implementation",
+          "note": "Calculate end-to-end elapsed time."
+        },
+        {
+          "code": "wait_share=round(decision_wait/lead_time,3)",
+          "note": "Find the dominant component."
+        },
+        {
+          "code": "result={'lead_time_hours':lead_time,'decision_wait_share':wait_share}",
+          "note": "Target the queue supported by evidence."
+        }
+      ],
+      "expect": {
+        "analysis": 0.5,
+        "decision_wait": 72,
+        "implementation": 2,
+        "lead_time": 74.5,
+        "wait_share": 0.966,
+        "result": {
+          "lead_time_hours": 74.5,
+          "decision_wait_share": 0.966
+        }
+      },
+      "limit": "The model uses three deterministic intervals. It does not measure decision quality, regulatory obligations, rework, parallel work, uncertainty, stakeholder discovery, or the value of deliberate review.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "analysis": 0.5,
+            "decision_wait": 72,
+            "implementation": 2
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "analysis": 0.5,
+            "decision_wait": 72,
+            "implementation": 2,
+            "lead_time": 74.5
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "analysis": 0.5,
+            "decision_wait": 72,
+            "implementation": 2,
+            "lead_time": 74.5,
+            "wait_share": 0.966
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "analysis": 0.5,
+            "decision_wait": 72,
+            "implementation": 2,
+            "lead_time": 74.5,
+            "wait_share": 0.966,
+            "result": {
+              "lead_time_hours": 74.5,
+              "decision_wait_share": 0.966
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Well-Architected: evaluate tradeoffs",
+        "https://docs.aws.amazon.com/wellarchitected/2025-02-25/framework/ops_priorities_eval_tradeoffs.html",
+        "Official AWS guidance on decision governance and burdensome processes; checked November 8, 2026"
+      ],
+      [
+        "AWS architectural decision records guidance",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/architectural-decision-records/",
+        "Official AWS Prescriptive Guidance; checked November 8, 2026"
+      ],
+      [
+        "AWS program governance",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/oca-framework-mobilize-team/program-governance.html",
+        "Official AWS guidance on decision rights and escalation; checked November 8, 2026"
+      ]
+    ],
+    "visual_explanation": "A proportional timeline makes a 72-hour authorization queue dwarf 2.5 hours of work. Moving either slider shows which intervention actually changes lead time.",
+    "written_questions": [
+      "Which recurring decision in your organization spends more time waiting than being analyzed?",
+      "What evidence and decision right would make a safe fast path possible?"
+    ],
+    "source_checked_on": "2026-11-08"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "MCP cache scope is a tenant boundary—not a performance decoration",
+    "goal": "Apply 2026-07-28 MCP cache hints without serving one user's discovery result to another.",
+    "tag": "GenAI harness engineering · MCP 2026-07-28 caching",
+    "concept": "<p>A café may reuse the public menu for every customer, but it must not hand one customer's allergy note to the next table. Cache freshness and cache sharing answer different questions.</p><p>In MCP 2026-07-28, cacheable discovery/read results carry <code>ttlMs</code> and <code>cacheScope</code>. TTL says how long a result may be treated as fresh. <code>private</code> says a shared intermediary must not serve it across users. A notification can invalidate a still-live entry.</p>",
+    "example": "<p>A tools list is stable for 60 seconds. For a public, identical list, a gateway may reuse it across tenants. If enabled tools depend on authorization, the server must mark the result private and the client cache key must include the authorization context. Otherwise tenant B can receive tenant A's tool surface.</p>",
+    "use_case": {
+      "when": "Use cache hints when MCP discovery or resource reads are repeated enough to add latency, especially through a shared multi-tenant gateway.",
+      "example": "An agent harness calls <code>tools/list</code> before every turn while entitlements differ by tenant.",
+      "decision": "Default to zero TTL and private scope until sameness is proven. Key private entries by authorization context, honor invalidation notifications, and treat TTL as a freshness hint—not an authorization decision or polling interval."
+    },
+    "practice": "Change scope, tenant, TTL, and invalidation. Predict cache hit, miss, or isolation violation.",
+    "boundary": "The model is a dictionary with a clock. It does not implement an MCP SDK, transport, protocol negotiation, distributed invalidation, clock skew, eviction, authorization, encryption, stale-on-error policy, or a gateway.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Scope <select id=\"cacheScope\"><option value=\"private\">private</option><option value=\"public\">public</option></select></label><label>Second request <select id=\"cacheTenant\"><option value=\"A\">tenant A</option><option value=\"B\">tenant B</option></select></label><label><input id=\"cacheInvalidated\" type=\"checkbox\"> notification invalidates</label><div id=\"cacheWorld\" class=\"world\"></div></div>",
+    "js": "function paintCache(){const scope=cacheScope.value,tenant=cacheTenant.value,invalid=cacheInvalidated.checked,key=scope==='public'?'shared':'tenant:A',requestKey=scope==='public'?'shared':'tenant:'+tenant,hit=!invalid&&key===requestKey,leak=scope==='public'&&tenant==='B';cacheWorld.innerHTML='<div class=step-flow><div class=tile>cached for tenant A<br>TTL 60s · '+scope+'</div><div class=arrow>→</div><div class=tile>request by tenant '+tenant+'</div><div class=arrow>→</div><div class=\"tile '+(leak?'fail':hit?'ok':'')+'\">'+(invalid?'MISS · invalidated':hit?'HIT':'MISS · isolated')+'</div></div><p>'+(leak?'Safe only if the result is truly identical and contains no authorization-specific surface.':'Private cache keys preserve tenant context.')+'</p>';};[cacheScope,cacheTenant,cacheInvalidated].forEach(x=>x.onchange=paintCache);paintCache();",
+    "questions": [
+      [
+        "What does ttlMs authorize?",
+        [
+          "Nothing; it is a freshness hint",
+          "Cross-tenant sharing",
+          "Tool execution"
+        ],
+        0,
+        "Freshness and authorization are separate controls."
+      ],
+      [
+        "When may a shared gateway reuse a public result for tenant B?",
+        [
+          "Only when the result is genuinely identical and safe across users",
+          "Whenever TTL is positive",
+          "Whenever tenant A requested it first"
+        ],
+        0,
+        "Public scope is a strong statement about shareability."
+      ],
+      [
+        "What does a relevant list-changed notification do?",
+        [
+          "Invalidates the cached result even before TTL expiry",
+          "Extends the TTL",
+          "Changes private to public"
+        ],
+        0,
+        "Notification and TTL coexist; invalidation wins."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "cache={'scope':'private','tenant':'A','value':['search'],'expires_at':60}",
+          "note": "Store an authorization-dependent discovery result privately."
+        },
+        {
+          "code": "request={'tenant':'B','now':10}",
+          "note": "A second tenant asks while the TTL is still live."
+        },
+        {
+          "code": "fresh=request['now'] < cache['expires_at']",
+          "note": "The value is fresh but may still be ineligible for this requester."
+        },
+        {
+          "code": "shareable=cache['scope']=='public' or cache['tenant']==request['tenant']; result={'fresh':fresh,'serve':fresh and shareable}",
+          "note": "Scope is enforced independently of freshness."
+        }
+      ],
+      "expect": {
+        "cache": {
+          "scope": "private",
+          "tenant": "A",
+          "value": [
+            "search"
+          ],
+          "expires_at": 60
+        },
+        "request": {
+          "tenant": "B",
+          "now": 10
+        },
+        "fresh": true,
+        "shareable": false,
+        "result": {
+          "fresh": true,
+          "serve": false
+        }
+      },
+      "limit": "The model is a dictionary with a clock. It does not implement an MCP SDK, transport, protocol negotiation, distributed invalidation, clock skew, eviction, authorization, encryption, stale-on-error policy, or a gateway.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "cache": {
+              "scope": "private",
+              "tenant": "A",
+              "value": [
+                "search"
+              ],
+              "expires_at": 60
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "cache": {
+              "scope": "private",
+              "tenant": "A",
+              "value": [
+                "search"
+              ],
+              "expires_at": 60
+            },
+            "request": {
+              "tenant": "B",
+              "now": 10
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "cache": {
+              "scope": "private",
+              "tenant": "A",
+              "value": [
+                "search"
+              ],
+              "expires_at": 60
+            },
+            "request": {
+              "tenant": "B",
+              "now": 10
+            },
+            "fresh": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "cache": {
+              "scope": "private",
+              "tenant": "A",
+              "value": [
+                "search"
+              ],
+              "expires_at": 60
+            },
+            "request": {
+              "tenant": "B",
+              "now": 10
+            },
+            "fresh": true,
+            "shareable": false,
+            "result": {
+              "fresh": true,
+              "serve": false
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP 2026-07-28 changelog",
+        "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/changelog.mdx",
+        "Official MCP specification repository; checked November 8, 2026"
+      ],
+      [
+        "MCP Python SDK caching hints",
+        "https://github.com/modelcontextprotocol/python-sdk/blob/main/docs/client/caching.md",
+        "Official MCP Python SDK documentation; checked November 8, 2026"
+      ],
+      [
+        "MCP SEP-2549 TTL for list results",
+        "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/seps/2549-TTL-for-list-results.md",
+        "Official MCP enhancement proposal; checked November 8, 2026"
+      ]
+    ],
+    "visual_explanation": "Freshness and tenant eligibility are separate gates. The cache can be fresh yet correctly miss for tenant B, making the isolation boundary visible.",
+    "written_questions": [
+      "Which MCP results in your harness vary by authorization context?",
+      "What invalidation signal and cache key would keep them safe?"
+    ],
+    "source_checked_on": "2026-11-08"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "A peptide can turn carbon dioxide flow into a reversible material response",
+    "goal": "Understand the reported CO₂-responsive peptide material and separate demonstrated behavior from future application claims.",
+    "tag": "Technology breakthroughs · new peer-reviewed research · November 7, 2026",
+    "concept": "<p>A pine cone opens and closes as humidity changes. Researchers now report peptide-directed nanoparticles and hydrogels that reversibly respond to carbon dioxide gas.</p><p>The paper says peptide sequence controls sensitivity, and its model links aggregation rate to CO₂ flow rate rather than cumulative dose. The team translates the response from nanoparticles to centimeter-scale, color-changing hydrogels and demonstrates spatial patterning through a gas-permeable mask.</p>",
+    "example": "<p>In the teaching model, low flow produces a slow aggregation-rate bar; higher flow makes the rate rise immediately. Turning flow off lets a reversible response relax. These are normalized values only—not the paper's chemistry, measurements, time constants, or design principles.</p>",
+    "use_case": {
+      "when": "Study this result when exploring gas-responsive sensing, adaptive soft materials, or gas-directed patterning at nano- and centimeter scales.",
+      "example": "A future packaging indicator might change color with a CO₂ environment, or a fabrication process might pattern a hydrogel through a gas-permeable mask.",
+      "decision": "Treat these as potential applications. Before deployment, verify selectivity against other gases, cycling, humidity and temperature effects, response time, calibration, biocompatibility, manufacturing, and long-term stability."
+    },
+    "practice": "Change gas flow and reversibility. Predict rate versus accumulated exposure before reading the model output.",
+    "boundary": "This normalized first-order animation is not the experiment. It omits peptide structure, pH chemistry, gas transfer, nanoparticle interactions, six reported design principles, hydrogel mechanics, selectivity, quantitative calibration, and all device engineering.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>CO₂ flow <input id=\"co2Flow\" type=\"range\" min=\"0\" max=\"10\" value=\"3\"></label><label><input id=\"co2Reversible\" type=\"checkbox\" checked> reversible material</label><button id=\"co2Step\">Advance one interval</button><button id=\"co2Reset\">Reset</button><div id=\"co2World\" class=\"world\"></div></div>",
+    "js": "let co2State=0;function paintCo2(){const flow=+co2Flow.value,rev=co2Reversible.checked,rate=flow/10;co2World.innerHTML='<p><strong>Question:</strong> Does response follow current flow or dose alone?</p><div class=step-flow><div class=tile>CO₂ flow<br>'+flow+' units</div><div class=arrow>→</div><div class=tile>modeled rate<br>'+rate.toFixed(1)+'</div><div class=arrow>→</div><div class=tile><div class=meter><div style=\"width:'+Math.round(co2State*100)+'%\"></div></div>response '+co2State.toFixed(2)+'</div></div><p>Normalized teaching values; not article measurements.</p>';};co2Step.onclick=()=>{const flow=+co2Flow.value,target=flow/10;if(target>co2State)co2State=Math.min(1,co2State+.2*target);else if(co2Reversible.checked)co2State=Math.max(0,co2State-.15);paintCo2();};co2Reset.onclick=()=>{co2State=0;paintCo2();};co2Flow.oninput=paintCo2;co2Reversible.onchange=paintCo2;paintCo2();",
+    "questions": [
+      [
+        "What variable did the paper's quantitative model connect to aggregation rate?",
+        [
+          "CO₂ flow rate",
+          "Only cumulative dose",
+          "Electrical voltage"
+        ],
+        0,
+        "The abstract distinguishes rate dependence on flow from cumulative dose."
+      ],
+      [
+        "What scale translation was demonstrated?",
+        [
+          "From nanoparticles to centimeter-scale responsive hydrogels",
+          "From browser pixels to satellites",
+          "From gas to a commercial sensor"
+        ],
+        0,
+        "The reported work spans nano- and macroscopic material behavior."
+      ],
+      [
+        "What remains before a product claim?",
+        [
+          "Selectivity, cycling, environmental robustness, calibration, and manufacturing evidence",
+          "Only a larger animation",
+          "No further evidence"
+        ],
+        0,
+        "Peer-reviewed material behavior is not the same as a qualified product."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "flows=[1,3,6]; state=0.0",
+          "note": "Use normalized flow settings, not reported measurements."
+        },
+        {
+          "code": "rates=[round(f/10,1) for f in flows]",
+          "note": "Model response rate as dependent on current flow."
+        },
+        {
+          "code": "for rate in rates: state=round(min(1.0,state+0.2*rate),2)",
+          "note": "Accumulate a reversible teaching response."
+        },
+        {
+          "code": "result={'flows':flows,'rates':rates,'state':state}",
+          "note": "Keep rate and accumulated state distinct."
+        }
+      ],
+      "expect": {
+        "flows": [
+          1,
+          3,
+          6
+        ],
+        "state": 0.2,
+        "rates": [
+          0.1,
+          0.3,
+          0.6
+        ],
+        "rate": 0.6,
+        "result": {
+          "flows": [
+            1,
+            3,
+            6
+          ],
+          "rates": [
+            0.1,
+            0.3,
+            0.6
+          ],
+          "state": 0.2
+        }
+      },
+      "limit": "This normalized first-order animation is not the experiment. It omits peptide structure, pH chemistry, gas transfer, nanoparticle interactions, six reported design principles, hydrogel mechanics, selectivity, quantitative calibration, and all device engineering.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "flows": [
+              1,
+              3,
+              6
+            ],
+            "state": 0.0
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "flows": [
+              1,
+              3,
+              6
+            ],
+            "state": 0.0,
+            "rates": [
+              0.1,
+              0.3,
+              0.6
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "flows": [
+              1,
+              3,
+              6
+            ],
+            "state": 0.2,
+            "rates": [
+              0.1,
+              0.3,
+              0.6
+            ],
+            "rate": 0.6
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "flows": [
+              1,
+              3,
+              6
+            ],
+            "state": 0.2,
+            "rates": [
+              0.1,
+              0.3,
+              0.6
+            ],
+            "rate": 0.6,
+            "result": {
+              "flows": [
+                1,
+                3,
+                6
+              ],
+              "rates": [
+                0.1,
+                0.3,
+                0.6
+              ],
+              "state": 0.2
+            }
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Farrokhi et al., CO₂ responsive materials directed by peptides",
+        "https://www.nature.com/articles/s41467-026-79006-6",
+        "Nature Communications research article; published November 7, 2026; checked November 8, 2026"
+      ]
+    ],
+    "visual_explanation": "Current gas flow drives a rate stage before the response meter, so learners can see why flow rate and accumulated material state are different quantities.",
+    "written_questions": [
+      "Which confounder would you test first before interpreting this material as a CO₂ sensor?",
+      "What application metric would turn the paper's response into a decision-grade benchmark?"
+    ],
+    "source_checked_on": "2026-11-08"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A tolerated failure has outcome=failure and conclusion=success",
+    "goal": "Preserve raw GitHub Actions evidence when continue-on-error deliberately normalizes a step.",
+    "tag": "CI/CD & GitHub Actions · testing and observability",
+    "concept": "<p>A smoke alarm can fire while the building remains open because the test is advisory. “Alarm fired” and “building decision” are both true.</p><p>For a step with <code>continue-on-error</code>, GitHub exposes <code>steps.&lt;id&gt;.outcome</code> before normalization and <code>conclusion</code> after it. A failing advisory step can therefore have outcome <code>failure</code> and conclusion <code>success</code>.</p>",
+    "example": "<p>A preview-environment probe exits 1 but is temporarily advisory. The job continues. A summary that reads only conclusion reports success and hides the degradation. Reading the raw outcome lets the pipeline emit a warning, count debt, or block promotion under a separate policy.</p>",
+    "use_case": {
+      "when": "Use outcome versus conclusion when a workflow intentionally tolerates an experimental, flaky, or non-blocking step but still needs truthful telemetry.",
+      "example": "A new integration-test shard is advisory for one week while failure rate is measured.",
+      "decision": "Give the step an id, inspect its raw outcome explicitly, and attach an owner and expiry to tolerance. Do not use continue-on-error for mandatory security, release, or data-integrity gates."
+    },
+    "practice": "Toggle raw result and tolerance. Predict outcome, conclusion, downstream condition, and job truth.",
+    "boundary": "The model covers one step. It omits job-level continue-on-error, implicit success() conditions, matrices, cancellation, composite actions, retries, annotations, required checks, shell behavior, and real workflow execution.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Command result <select id=\"ghaRaw\"><option value=\"failure\">failure</option><option value=\"success\">success</option></select></label><label><input id=\"ghaTolerate\" type=\"checkbox\" checked> continue-on-error</label><div id=\"ghaWorld\" class=\"world\"></div></div>",
+    "js": "function paintGha(){const outcome=ghaRaw.value,tol=ghaTolerate.checked,conclusion=outcome==='failure'&&tol?'success':outcome;ghaWorld.innerHTML='<div class=step-flow><div class=\"tile '+(outcome==='failure'?'fail':'ok')+'\">raw command<br>outcome='+outcome+'</div><div class=arrow>→ '+(tol?'tolerate':'enforce')+'</div><div class=\"tile '+(conclusion==='success'?'ok':'fail')+'\">conclusion='+conclusion+'</div></div><p>Telemetry should keep <strong>outcome='+outcome+'</strong>; control flow sees <strong>conclusion='+conclusion+'</strong>.</p>';};ghaRaw.onchange=paintGha;ghaTolerate.onchange=paintGha;paintGha();",
+    "questions": [
+      [
+        "A tolerated step exits 1. What are its values?",
+        [
+          "outcome=failure, conclusion=success",
+          "outcome=success, conclusion=failure",
+          "both skipped"
+        ],
+        0,
+        "Outcome is pre-normalization; conclusion is post-normalization."
+      ],
+      [
+        "Why inspect outcome?",
+        [
+          "To preserve the raw failure signal",
+          "To make the command pass retroactively",
+          "To expose secrets"
+        ],
+        0,
+        "Tolerance should not erase evidence."
+      ],
+      [
+        "Which gate should not be merely tolerated?",
+        [
+          "A mandatory security or release-integrity gate",
+          "A time-boxed experimental check",
+          "A diagnostic probe with an owner"
+        ],
+        0,
+        "Mandatory controls must fail the promotion path."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "raw_exit=1; continue_on_error=True",
+          "note": "Run an advisory check that fails."
+        },
+        {
+          "code": "outcome='failure' if raw_exit else 'success'",
+          "note": "Capture the result before tolerance is applied."
+        },
+        {
+          "code": "conclusion='success' if outcome=='failure' and continue_on_error else outcome",
+          "note": "Normalize control flow while preserving raw evidence."
+        },
+        {
+          "code": "result={'outcome':outcome,'conclusion':conclusion,'warn':outcome=='failure'}",
+          "note": "Telemetry can warn even though the job continues."
+        }
+      ],
+      "expect": {
+        "raw_exit": 1,
+        "continue_on_error": true,
+        "outcome": "failure",
+        "conclusion": "success",
+        "result": {
+          "outcome": "failure",
+          "conclusion": "success",
+          "warn": true
+        }
+      },
+      "limit": "The model covers one step. It omits job-level continue-on-error, implicit success() conditions, matrices, cancellation, composite actions, retries, annotations, required checks, shell behavior, and real workflow execution.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "raw_exit": 1,
+            "continue_on_error": true
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "raw_exit": 1,
+            "continue_on_error": true,
+            "outcome": "failure"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "raw_exit": 1,
+            "continue_on_error": true,
+            "outcome": "failure",
+            "conclusion": "success"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "raw_exit": 1,
+            "continue_on_error": true,
+            "outcome": "failure",
+            "conclusion": "success",
+            "result": {
+              "outcome": "failure",
+              "conclusion": "success",
+              "warn": true
+            }
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions contexts reference",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/contexts",
+        "Official GitHub documentation; checked November 8, 2026"
+      ],
+      [
+        "GitHub workflow syntax: continue-on-error",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax",
+        "Official GitHub documentation; checked November 8, 2026"
+      ]
+    ],
+    "visual_explanation": "One failing signal splits into two labeled facts: raw outcome and normalized conclusion. The divergence is the concept, not decorative pipeline boxes.",
+    "written_questions": [
+      "Which tolerated step in your workflows currently disappears from dashboards?",
+      "What owner, metric, and expiry would make that tolerance temporary?"
+    ],
+    "source_checked_on": "2026-11-08"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "gRPC metadata rides beside the messages—not inside the protobuf contract",
+    "goal": "Place call-wide authentication and tracing in metadata while keeping business data in typed messages.",
+    "tag": "APIs & Microservices · gRPC metadata",
+    "concept": "<p>A shipping box contains the product; labels on the outside carry routing and handling information. gRPC metadata is a call-associated side channel implemented with HTTP/2 headers and trailers.</p><p>Client metadata and initial server headers arrive before messages. Server trailers close the RPC and can carry call-wide facts. Business fields that must be typed, versioned, stored, or processed per message belong in protobuf messages instead.</p>",
+    "example": "<p>A streaming ingestion RPC sends an authorization credential and trace context before the first record. Ten typed <code>Event</code> messages follow. The server closes with status and a trailer containing modeled query cost. Putting customer_id only in metadata would hide a business invariant from the message schema.</p>",
+    "use_case": {
+      "when": "Use metadata for call-wide cross-cutting context such as authentication credentials, tracing, routing hints, or final diagnostic facts.",
+      "example": "A Kafka bridge opens one gRPC stream with trace context in headers and receives final server utilization in trailers.",
+      "decision": "Keep values small, non-secret in logs, and call-scoped. Use protobuf fields when each message owns the value, consumers need typed evolution, or the value affects business semantics."
+    },
+    "practice": "Move a candidate field among initial metadata, message, and trailing metadata; predict its availability over the RPC timeline.",
+    "boundary": "The browser models ordering only. It does not open HTTP/2, encode HPACK, enforce the suggested 8 KiB request-header limit, implement interceptors, binary metadata, deadlines, status details, proxies, or language-specific APIs.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>Field to place <select id=\"grpcField\"><option value=\"trace\">traceparent</option><option value=\"customer\">customer_id per event</option><option value=\"cost\">final query cost</option></select></label><div id=\"grpcWorld\" class=\"world\"></div></div>",
+    "js": "function paintGrpc(){const f=grpcField.value,label=f==='trace'?'traceparent':f==='customer'?'customer_id':'query cost',place=f==='trace'?'initial metadata':f==='customer'?'protobuf message':'trailing metadata',why=f==='trace'?'available before first message':f==='customer'?'typed per event':'known when server closes';grpcWorld.innerHTML='<div class=step-flow><div class=tile>initial metadata<br>'+(place==='initial metadata'?'● '+label:'')+'</div><div class=arrow>→</div><div class=tile>message stream<br>'+(place==='protobuf message'?'● '+label:'Event × N')+'</div><div class=arrow>→</div><div class=tile>trailers + status<br>'+(place==='trailing metadata'?'● '+label:'')+'</div></div><p><strong>'+place+'</strong>: '+why+'.</p>';};grpcField.onchange=paintGrpc;paintGrpc();",
+    "questions": [
+      [
+        "Where should per-event customer_id live?",
+        [
+          "In each typed protobuf message",
+          "Only in final trailers",
+          "Only in server logs"
+        ],
+        0,
+        "It is business data owned by each event."
+      ],
+      [
+        "When do server trailers arrive?",
+        [
+          "When the server closes the RPC, after message data",
+          "Before the client request",
+          "Inside every protobuf field"
+        ],
+        0,
+        "Trailers communicate final call information and status."
+      ],
+      [
+        "What is metadata best for?",
+        [
+          "Small call-wide cross-cutting context",
+          "Large business payloads",
+          "Replacing protobuf evolution"
+        ],
+        0,
+        "Metadata accompanies the call; it is not the application schema."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "timeline=[]; timeline.append(('initial_metadata',{'traceparent':'00-abc-def-01'}))",
+          "note": "Send call-wide trace context before request data."
+        },
+        {
+          "code": "timeline.append(('messages',[{'event_id':1},{'event_id':2}]))",
+          "note": "Keep per-event business facts in typed messages."
+        },
+        {
+          "code": "timeline.append(('trailers',{'query-cost':'7','grpc-status':'0'}))",
+          "note": "Return final call facts when the server closes."
+        },
+        {
+          "code": "result={'order':[stage for stage,_ in timeline]}",
+          "note": "The ordered stages make availability explicit."
+        }
+      ],
+      "expect": {
+        "timeline": [
+          [
+            "initial_metadata",
+            {
+              "traceparent": "00-abc-def-01"
+            }
+          ],
+          [
+            "messages",
+            [
+              {
+                "event_id": 1
+              },
+              {
+                "event_id": 2
+              }
+            ]
+          ],
+          [
+            "trailers",
+            {
+              "query-cost": "7",
+              "grpc-status": "0"
+            }
+          ]
+        ],
+        "result": {
+          "order": [
+            "initial_metadata",
+            "messages",
+            "trailers"
+          ]
+        }
+      },
+      "limit": "The browser models ordering only. It does not open HTTP/2, encode HPACK, enforce the suggested 8 KiB request-header limit, implement interceptors, binary metadata, deadlines, status details, proxies, or language-specific APIs.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "timeline": [
+              [
+                "initial_metadata",
+                {
+                  "traceparent": "00-abc-def-01"
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "timeline": [
+              [
+                "initial_metadata",
+                {
+                  "traceparent": "00-abc-def-01"
+                }
+              ],
+              [
+                "messages",
+                [
+                  {
+                    "event_id": 1
+                  },
+                  {
+                    "event_id": 2
+                  }
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "timeline": [
+              [
+                "initial_metadata",
+                {
+                  "traceparent": "00-abc-def-01"
+                }
+              ],
+              [
+                "messages",
+                [
+                  {
+                    "event_id": 1
+                  },
+                  {
+                    "event_id": 2
+                  }
+                ]
+              ],
+              [
+                "trailers",
+                {
+                  "query-cost": "7",
+                  "grpc-status": "0"
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "timeline": [
+              [
+                "initial_metadata",
+                {
+                  "traceparent": "00-abc-def-01"
+                }
+              ],
+              [
+                "messages",
+                [
+                  {
+                    "event_id": 1
+                  },
+                  {
+                    "event_id": 2
+                  }
+                ]
+              ],
+              [
+                "trailers",
+                {
+                  "query-cost": "7",
+                  "grpc-status": "0"
+                }
+              ]
+            ],
+            "result": {
+              "order": [
+                "initial_metadata",
+                "messages",
+                "trailers"
+              ]
+            }
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "gRPC metadata guide",
+        "https://grpc.io/docs/guides/metadata/",
+        "Official gRPC documentation; checked November 8, 2026"
+      ],
+      [
+        "gRPC HTTP/2 protocol",
+        "https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md",
+        "Official gRPC protocol documentation; checked November 8, 2026"
+      ]
+    ],
+    "visual_explanation": "A three-stage RPC timeline places initial metadata before messages and trailers after them. Moving candidate fields teaches availability and schema ownership.",
+    "written_questions": [
+      "Which field in your APIs is currently metadata but really belongs to the business message?",
+      "Which trailer would improve diagnostics without becoming a hidden contract?"
+    ],
+    "source_checked_on": "2026-11-08"
+  }
+]
