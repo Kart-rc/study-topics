@@ -86,7 +86,7 @@ Day17 adds product recovery on **2026-10-08** while preserving its original deli
 Checked **2026-10-08**. Recheck the guides weekly and again before booking; exam scope can change.
 
 - [Databricks certification overview](https://www.databricks.com/learn/certification/data-engineer-associate)
-- [Current linked Databricks exam guide — May 4, 2026 version](https://www.databricks.com/sites/default/files/2026-05/databricks-certified-data-engineer-associate-exam-guide-may-2026-000.pdf)
+- [Current linked Databricks exam guide — May 4, 2026 version](https://www.databricks.com/sites/default/files/2026-03/databricks-certified-data-engineer-associate-exam-guide-may-4-2026.pdf)
 - [SnowPro Core COF-C03 overview and study-guide entry](https://learn.snowflake.com/en/certifications/snowpro-core-c03/)
 - [Snowflake certification catalog and practice-exam entry](https://learn.snowflake.com/en/certifications/)
 - [Snowflake official hands-on learning paths](https://www.snowflake.com/en/developers/northstar/)

@@ -1,0 +1,1582 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "One governed order pipeline must pass every gate—not five isolated demos",
+    "goal": "Consolidate ingestion rescue, array expansion, join planning, masking, and workload identity into one auditable Databricks/Snowflake delivery path.",
+    "tag": "Certification cycle 6 · consolidation case · Days45–49",
+    "concept": "<p>A restaurant does not call dinner successful because the ingredients arrived. The order must pass receiving, preparation, assembly, privacy, and delivery.</p><p>Our synthetic order pipeline has the same chain: a secretless EKS workload authenticates; malformed rows remain inspectable; valid orders expand into item rows; a small product lookup enriches them; customer email is masked for analysts. Every gate must preserve evidence for the next one.</p>",
+    "example": "<p>File <code>orders-50.json</code> contains order <code>o-50</code> with two items and one malformed record. The pipeline should publish two enriched item rows, retain one error record, and show <code>***@example.com</code> to the analyst. A valid identity without table grants must still stop before ingestion.</p>",
+    "use_case": {
+      "when": "Use an end-to-end consolidation case when individual features work but you need evidence that their boundaries compose safely.",
+      "example": "An EKS order service loads semi-structured files, preserves errors, explodes items, enriches from a 12 MB product table, and publishes an analyst-safe view.",
+      "decision": "Run the smallest representative case that crosses identity, data quality, transformation, performance, and governance. A unit demo is simpler when only one boundary changed."
+    },
+    "practice": "Toggle identity, malformed-row handling, lookup size, and analyst role. Predict the first failed gate and the surviving evidence.",
+    "boundary": "The local Python and JavaScript models use three synthetic rows and arithmetic rules. They do not execute Databricks or Snowflake SQL, verify tokens, reproduce optimizer plans, catalog privileges, copy history, costs, cloud storage, encryption, concurrency, lineage, or recovery behavior.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"caseId\" type=\"checkbox\" checked> identity + grants valid</label><label><input id=\"caseRescue\" type=\"checkbox\" checked> preserve malformed row</label><label>lookup size <select id=\"caseLookup\"><option value=\"12\">12 MB</option><option value=\"80\">80 MB</option></select></label><label>viewer <select id=\"caseViewer\"><option value=\"analyst\">analyst</option><option value=\"auditor\">auditor</option></select></label><div id=\"caseWorld\" class=\"world\"></div></div>",
+    "js": "function paintCase(){const id=caseId.checked,res=caseRescue.checked,small=+caseLookup.value<=30,aud=caseViewer.value==='auditor';let stages=id?['2 valid + 1 error',res?'error retained':'error dropped','2 item rows',small?'broadcast candidate':'managed/partitioned join',aud?'email visible':'email masked']:['DENY before read'];caseWorld.innerHTML='<p><strong>Question:</strong> where does evidence stop?</p><div class=step-flow>'+stages.map((s,i)=>'<div class=\"tile '+((!id||(!res&&i===1))?'fail':'ok')+'\">'+(i+1)+'. '+s+'</div>').join('<div class=arrow>→</div>')+'</div><p>'+(id?'Published item rows: 2; inspectable errors: '+(res?1:0)+'.':'No source bytes were read.')+'</p>';};caseId.onchange=paintCase;caseRescue.onchange=paintCase;caseLookup.onchange=paintCase;caseViewer.onchange=paintCase;paintCase();",
+    "questions": [
+      [
+        "Identity and grants pass; one record is malformed and rescue is enabled. What survives?",
+        [
+          "Two valid orders continue and one error remains inspectable",
+          "All rows disappear",
+          "The malformed row becomes valid"
+        ],
+        0,
+        "Rescue separates usability from error evidence."
+      ],
+      [
+        "Why carry the same order through all five mechanisms?",
+        [
+          "To test composition and hand-off evidence, not isolated feature recall",
+          "To make products identical",
+          "To guarantee production readiness"
+        ],
+        0,
+        "The case exposes boundaries between controls."
+      ],
+      [
+        "What still prevents a readiness claim?",
+        [
+          "No authorized vendor execution, plan evidence, or fresh assessment",
+          "The example has two items",
+          "The email is synthetic"
+        ],
+        0,
+        "Delivered coverage is not observed platform skill or mastery."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "raw=[{'id':'o-50','email':'ana@example.com','items':[{'sku':'A','qty':1},{'sku':'B','qty':2}]},{'id':None,'raw':'{bad'}]",
+          "note": "Receive one valid order and one malformed synthetic record."
+        },
+        {
+          "code": "good=[r for r in raw if r.get('id')]; errors=[r for r in raw if not r.get('id')]",
+          "note": "Keep usable and inspectable paths separate."
+        },
+        {
+          "code": "items=[{'order_id':r['id'],'email':r['email'],'pos':i,'sku':x['sku'],'qty':x['qty']} for r in good for i,x in enumerate(r['items'])]",
+          "note": "Expand items while preserving order id and position."
+        },
+        {
+          "code": "products={'A':'adapter','B':'battery'}; published=[{**x,'product':products[x['sku']],'email':'***@example.com'} for x in items]; result={'good':len(good),'errors':len(errors),'published':len(published),'positions':[x['pos'] for x in published]}",
+          "note": "Join the small lookup and apply the analyst-facing mask."
+        }
+      ],
+      "expect": {
+        "result": {
+          "good": 1,
+          "errors": 1,
+          "published": 2,
+          "positions": [
+            0,
+            1
+          ]
+        }
+      },
+      "limit": "The local Python and JavaScript models use three synthetic rows and arithmetic rules. They do not execute Databricks or Snowflake SQL, verify tokens, reproduce optimizer plans, catalog privileges, copy history, costs, cloud storage, encryption, concurrency, lineage, or recovery behavior.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "raw": [
+              {
+                "id": "o-50",
+                "email": "ana@example.com",
+                "items": [
+                  {
+                    "sku": "A",
+                    "qty": 1
+                  },
+                  {
+                    "sku": "B",
+                    "qty": 2
+                  }
+                ]
+              },
+              {
+                "id": null,
+                "raw": "{bad"
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "raw": [
+              {
+                "id": "o-50",
+                "email": "ana@example.com",
+                "items": [
+                  {
+                    "sku": "A",
+                    "qty": 1
+                  },
+                  {
+                    "sku": "B",
+                    "qty": 2
+                  }
+                ]
+              },
+              {
+                "id": null,
+                "raw": "{bad"
+              }
+            ],
+            "good": [
+              {
+                "id": "o-50",
+                "email": "ana@example.com",
+                "items": [
+                  {
+                    "sku": "A",
+                    "qty": 1
+                  },
+                  {
+                    "sku": "B",
+                    "qty": 2
+                  }
+                ]
+              }
+            ],
+            "errors": [
+              {
+                "id": null,
+                "raw": "{bad"
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "raw": [
+              {
+                "id": "o-50",
+                "email": "ana@example.com",
+                "items": [
+                  {
+                    "sku": "A",
+                    "qty": 1
+                  },
+                  {
+                    "sku": "B",
+                    "qty": 2
+                  }
+                ]
+              },
+              {
+                "id": null,
+                "raw": "{bad"
+              }
+            ],
+            "good": [
+              {
+                "id": "o-50",
+                "email": "ana@example.com",
+                "items": [
+                  {
+                    "sku": "A",
+                    "qty": 1
+                  },
+                  {
+                    "sku": "B",
+                    "qty": 2
+                  }
+                ]
+              }
+            ],
+            "errors": [
+              {
+                "id": null,
+                "raw": "{bad"
+              }
+            ],
+            "items": [
+              {
+                "order_id": "o-50",
+                "email": "ana@example.com",
+                "pos": 0,
+                "sku": "A",
+                "qty": 1
+              },
+              {
+                "order_id": "o-50",
+                "email": "ana@example.com",
+                "pos": 1,
+                "sku": "B",
+                "qty": 2
+              }
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "raw": [
+              {
+                "id": "o-50",
+                "email": "ana@example.com",
+                "items": [
+                  {
+                    "sku": "A",
+                    "qty": 1
+                  },
+                  {
+                    "sku": "B",
+                    "qty": 2
+                  }
+                ]
+              },
+              {
+                "id": null,
+                "raw": "{bad"
+              }
+            ],
+            "good": [
+              {
+                "id": "o-50",
+                "email": "ana@example.com",
+                "items": [
+                  {
+                    "sku": "A",
+                    "qty": 1
+                  },
+                  {
+                    "sku": "B",
+                    "qty": 2
+                  }
+                ]
+              }
+            ],
+            "errors": [
+              {
+                "id": null,
+                "raw": "{bad"
+              }
+            ],
+            "items": [
+              {
+                "order_id": "o-50",
+                "email": "ana@example.com",
+                "pos": 0,
+                "sku": "A",
+                "qty": 1
+              },
+              {
+                "order_id": "o-50",
+                "email": "ana@example.com",
+                "pos": 1,
+                "sku": "B",
+                "qty": 2
+              }
+            ],
+            "products": {
+              "A": "adapter",
+              "B": "battery"
+            },
+            "published": [
+              {
+                "order_id": "o-50",
+                "email": "***@example.com",
+                "pos": 0,
+                "sku": "A",
+                "qty": 1,
+                "product": "adapter"
+              },
+              {
+                "order_id": "o-50",
+                "email": "***@example.com",
+                "pos": 1,
+                "sku": "B",
+                "qty": 2,
+                "product": "battery"
+              }
+            ],
+            "result": {
+              "good": 1,
+              "errors": 1,
+              "published": 2,
+              "positions": [
+                0,
+                1
+              ]
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks Auto Loader schema and rescued data",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema",
+        "Official Databricks documentation; updated September 11, 2026"
+      ],
+      [
+        "Databricks AQE broadcast joins",
+        "https://docs.databricks.com/aws/en/optimizations/aqe",
+        "Official Databricks documentation; checked November 10, 2026"
+      ],
+      [
+        "Databricks column masks",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-column-mask",
+        "Official Databricks SQL reference; checked November 10, 2026"
+      ],
+      [
+        "Databricks AWS workload identity",
+        "https://docs.databricks.com/aws/en/dev-tools/auth/provider-aws-iam",
+        "Official Databricks documentation; checked November 10, 2026"
+      ],
+      [
+        "Snowflake COPY INTO table",
+        "https://docs.snowflake.com/en/sql-reference/sql/copy-into-table",
+        "Official Snowflake reference; checked November 10, 2026"
+      ],
+      [
+        "Snowflake FLATTEN",
+        "https://docs.snowflake.com/en/sql-reference/functions/flatten",
+        "Official Snowflake reference; checked November 10, 2026"
+      ],
+      [
+        "Snowflake Dynamic Data Masking",
+        "https://docs.snowflake.com/en/user-guide/security-column-ddm-intro",
+        "Official Snowflake documentation; checked November 10, 2026"
+      ],
+      [
+        "Snowflake workload identity federation",
+        "https://docs.snowflake.com/en/user-guide/workload-identity-federation",
+        "Official Snowflake documentation; checked November 10, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-03/databricks-certified-data-engineer-associate-exam-guide-may-4-2026.pdf",
+        "Official guide; May 4, 2026 version"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official current overview; full IDs and weights remain unverified"
+      ]
+    ],
+    "visual_explanation": "A five-gate pipeline shows the first failed control and the evidence that survives at each stage.",
+    "written_questions": [
+      "Which hand-off in your real pipeline has the weakest evidence?",
+      "What vendor-side observation would turn this case from delivered coverage into practice evidence?"
+    ],
+    "source_checked_on": "2026-11-10",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: secretless Auto Loader to a masked Unity Catalog view",
+        "minutes": 9,
+        "html": "<p><strong>Recall:</strong> identity proves the service principal; Unity Catalog grants authorize it. Auto Loader rescues unexpected fields. <code>posexplode_outer</code> keeps item position and empty parents. A broadcast hint is a request whose plan must be inspected. A column mask runs at query time.</p><pre><code><span>-- SQL-first sketch; not executed in Databricks</span><span>SELECT order_id, pos, item.sku, item.qty</span><span>FROM bronze_orders LATERAL VIEW posexplode_outer(items) p AS pos,item;</span><span>SELECT /*+ BROADCAST(p) */ o.*, p.name FROM order_items o JOIN products p USING (sku);</span><span>ALTER TABLE order_fact ALTER COLUMN email SET MASK email_mask;</span></code></pre><label>Gate <select id=\"dbCaseGate\"><option value=\"all\">all pass</option><option value=\"grant\">missing UC grant</option><option value=\"schema\">new field rescued</option><option value=\"large\">lookup is 80 MB</option></select></label><div id=\"dbCaseWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL, Auto Loader, federation, and plan inspection were not run in Databricks. The browser is a local teaching model.</p>",
+        "markdown": "Federate the EKS role to a service principal, grant the catalog path, rescue schema surprises, expand items with position, inspect the join plan, and attach a query-time mask. Vendor code not executed.",
+        "javascript": "const dbCaseGate=$('dbCaseGate'),dbCaseWorld=$('dbCaseWorld');function paintDbCase(){const g=dbCaseGate.value;let a=g==='grant'?['DENY: no UC grant']:['bronze: 1 good + '+(g==='schema'?'1 rescued':'0 rescued'),'items: positions 0,1',g==='large'?'join: do not assume broadcast':'join: verify BroadcastHashJoin','analyst: masked email'];dbCaseWorld.innerHTML='<div class=step-flow>'+a.map((x,i)=>'<div class=\"tile '+(g==='grant'?'fail':'ok')+'\">'+x+'</div>').join('<div class=arrow>→</div>')+'</div>';};dbCaseGate.onchange=paintDbCase;paintDbCase();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: WIF service user to validated COPY, FLATTEN, managed join, and masking policy",
+        "minutes": 9,
+        "html": "<p><strong>Recall:</strong> a WIF <code>TYPE=SERVICE</code> user still needs role, warehouse, and object privileges. <code>VALIDATION_MODE</code> checks instead of loading and cannot be combined with load transformations. <code>FLATTEN</code> emits array indexes. Snowflake chooses the join plan; there is no Databricks broadcast-hint equivalent. A masking policy transforms the column at query time.</p><pre><code><span>-- SQL-first sketch; not executed in Snowflake</span><span>COPY INTO raw_orders FROM @orders VALIDATION_MODE='RETURN_ALL_ERRORS';</span><span>SELECT r.order_id, f.index AS pos, f.value:sku::string AS sku</span><span>FROM raw_orders r, LATERAL FLATTEN(input=&gt;r.payload:items, outer=&gt;true) f;</span><span>ALTER TABLE order_fact MODIFY COLUMN email SET MASKING POLICY email_mask;</span></code></pre><label>Gate <select id=\"sfCaseGate\"><option value=\"all\">all pass</option><option value=\"role\">missing warehouse grant</option><option value=\"transform\">validation + transform combined</option><option value=\"mask\">analyst role</option></select></label><div id=\"sfCaseWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL, WIF, COPY, Query Profile, and masking were not run in Snowflake.</p>",
+        "markdown": "Bind WIF to a service user, authorize its role, validate files before a separate load/transform path, flatten arrays with index, inspect the managed join in Query Profile, and attach the masking policy. Vendor code not executed.",
+        "javascript": "const sfCaseGate=$('sfCaseGate'),sfCaseWorld=$('sfCaseWorld');function paintSfCase(){const g=sfCaseGate.value;let a=g==='role'?['DENY: warehouse USAGE']:g==='transform'?['ERROR: validation mode cannot transform']:['validated: 1 error','loaded: 1 order','flattened: positions 0,1','managed join','query-time '+(g==='mask'?'masked':'policy-aware')];sfCaseWorld.innerHTML='<div class=step-flow>'+a.map(x=>'<div class=\"tile '+((g==='role'||g==='transform')?'fail':'ok')+'\">'+x+'</div>').join('<div class=arrow>→</div>')+'</div>';};sfCaseGate.onchange=paintSfCase;paintSfCase();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Gate</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Identity</td><td>Federated service principal + UC grants</td><td>WIF SERVICE user + role grants</td></tr><tr><td>Bad rows</td><td>Rescued/corrupt columns</td><td>validation results / load error policy</td></tr><tr><td>Arrays</td><td>posexplode_outer</td><td>LATERAL FLATTEN, OUTER</td></tr><tr><td>Small join</td><td>broadcast hint/AQE; inspect plan</td><td>managed optimizer; inspect Query Profile</td></tr><tr><td>Email</td><td>column mask</td><td>masking policy</td></tr></tbody></table>",
+      "markdown": "Databricks exposes Spark join strategy controls; Snowflake manages the join plan. Both require separate identity and object privileges, product-specific error handling, positional array expansion, and query-time masking."
+    },
+    "product_questions": [
+      [
+        "Snowflake validation mode is combined with a transformed COPY. What happens?",
+        [
+          "The statement is unsupported; separate validation from transformation",
+          "It silently broadcasts the lookup",
+          "It creates a masking policy"
+        ],
+        0,
+        "The current COPY reference says VALIDATION_MODE does not support load transformations."
+      ],
+      [
+        "A 12 MB Databricks lookup is hinted for broadcast. What evidence is still needed?",
+        [
+          "The actual physical plan and runtime metrics",
+          "Only the source row count",
+          "A Snowflake warehouse size"
+        ],
+        0,
+        "A hint and size estimate do not prove the executed plan or safe driver memory."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks Auto Loader schema and rescued data",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/schema",
+        "Official Databricks documentation; updated September 11, 2026"
+      ],
+      [
+        "Databricks AQE broadcast joins",
+        "https://docs.databricks.com/aws/en/optimizations/aqe",
+        "Official Databricks documentation; checked November 10, 2026"
+      ],
+      [
+        "Databricks column masks",
+        "https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-column-mask",
+        "Official Databricks SQL reference; checked November 10, 2026"
+      ],
+      [
+        "Databricks AWS workload identity",
+        "https://docs.databricks.com/aws/en/dev-tools/auth/provider-aws-iam",
+        "Official Databricks documentation; checked November 10, 2026"
+      ],
+      [
+        "Snowflake COPY INTO table",
+        "https://docs.snowflake.com/en/sql-reference/sql/copy-into-table",
+        "Official Snowflake reference; checked November 10, 2026"
+      ],
+      [
+        "Snowflake FLATTEN",
+        "https://docs.snowflake.com/en/sql-reference/functions/flatten",
+        "Official Snowflake reference; checked November 10, 2026"
+      ],
+      [
+        "Snowflake Dynamic Data Masking",
+        "https://docs.snowflake.com/en/user-guide/security-column-ddm-intro",
+        "Official Snowflake documentation; checked November 10, 2026"
+      ],
+      [
+        "Snowflake workload identity federation",
+        "https://docs.snowflake.com/en/user-guide/workload-identity-federation",
+        "Official Snowflake documentation; checked November 10, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-03/databricks-certified-data-engineer-associate-exam-guide-may-4-2026.pdf",
+        "Official guide; May 4, 2026 version"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official current overview; full IDs and weights remain unverified"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-10",
+      "session_type": "consolidation_case",
+      "cycle_position": 6,
+      "cycle_origin": "Day45",
+      "databricks": {
+        "scope": "Integrated ingestion, semi-structured transformation, join planning, governance/security, and platform identity from Days45–49."
+      },
+      "snowflake": {
+        "scope": "Integrated loading validation, semi-structured data, managed performance, masking, and connectivity/access planning groups. Planning groups only; full COF-C03 IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run; browser models are local JavaScript and recorded example is local Python"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "request(10) grants ten signals—it does not create ten storage slots",
+    "goal": "Separate reactive-stream demand from publisher buffer capacity.",
+    "tag": "Software engineering · Java Flow",
+    "concept": "<p>A deli ticket says the counter may hand you ten sandwiches. It does not say your bag can hold ten.</p><p>In Java Flow, <code>Subscription.request(n)</code> adds demand: the publisher must not send more <code>onNext</code> signals than requested. Buffer capacity is a separate implementation resource. Safe systems bound both outstanding demand and queued items.</p>",
+    "example": "<p>A subscriber requests 10 records but processes 3 per tick. With a publisher buffer of 4, a burst can fill the queue before all ten requested records are delivered. Replenishing demand only after processing keeps the outstanding window bounded.</p>",
+    "use_case": {
+      "when": "Use bounded demand when a Java subscriber consumes events slower than a producer can offer them.",
+      "example": "A Kafka-adjacent enrichment stage asks for four records, processes two, then asks for two more.",
+      "decision": "Choose a demand window from downstream capacity and latency. Configure publisher buffers separately; use a simple blocking queue when a full reactive protocol adds no value."
+    },
+    "practice": "Change demand, buffer capacity, and processing rate. Predict delivered, queued, and rejected items.",
+    "boundary": "The Java trace is synchronous arithmetic, not a real Publisher. It omits threading, SubmissionPublisher lag/drop handlers, reentrant requests, cancellation, errors, multiple subscribers, memory visibility, and Reactive Streams rule verification.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>request <input id=\"flowDemand\" type=\"range\" min=\"1\" max=\"12\" value=\"10\"></label><label>buffer <input id=\"flowBuffer\" type=\"range\" min=\"1\" max=\"8\" value=\"4\"></label><label>consumer frees <input id=\"flowDrain\" type=\"range\" min=\"0\" max=\"6\" value=\"3\"></label><div id=\"flowWorld\" class=\"world\"></div></div>",
+    "js": "function paintFlow(){const d=+flowDemand.value,b=+flowBuffer.value,p=+flowDrain.value,del=Math.min(d,b+p),queued=Math.max(0,del-p),blocked=d-del;flowWorld.innerHTML='<p><strong>Question:</strong> does demand fit the storage path?</p><div class=step-flow><div class=tile>demand '+d+'</div><div class=arrow>→</div><div class=tile>processed '+Math.min(p,del)+'</div><div class=arrow>+</div><div class=tile>queued '+queued+' / '+b+'</div><div class=arrow>→</div><div class=\"tile '+(blocked?'fail':'ok')+'\">not delivered '+blocked+'</div></div>';};flowDemand.oninput=paintFlow;flowBuffer.oninput=paintFlow;flowDrain.oninput=paintFlow;paintFlow();",
+    "questions": [
+      [
+        "A subscriber requests 10 and the publisher buffer is 4. What did request create?",
+        [
+          "Demand for up to ten signals, not ten buffer slots",
+          "A ten-slot queue",
+          "Ten worker threads"
+        ],
+        0,
+        "Demand and storage capacity are different controls."
+      ],
+      [
+        "Why replenish after processing?",
+        [
+          "To keep outstanding demand tied to downstream progress",
+          "To bypass onSubscribe",
+          "To guarantee zero latency"
+        ],
+        0,
+        "Replenishment closes the feedback loop."
+      ],
+      [
+        "What must a real test add?",
+        [
+          "Concurrency, cancellation, error, and actual publisher buffer behavior",
+          "A larger font",
+          "A SQL role"
+        ],
+        0,
+        "The toy arithmetic does not implement the protocol."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "int requested = 10;",
+          "note": "Grant demand for up to ten onNext signals."
+        },
+        {
+          "code": "int bufferCapacity = 4; int processedImmediately = 3;",
+          "note": "Set independent storage and processing resources."
+        },
+        {
+          "code": "int delivered = Math.min(requested, bufferCapacity + processedImmediately); int queued = Math.max(0, delivered - processedImmediately);",
+          "note": "Bound delivery by the current processing-plus-buffer path."
+        },
+        {
+          "code": "int notDelivered = requested - delivered; String result = \"delivered=\" + delivered + \", queued=\" + queued + \", notDelivered=\" + notDelivered;",
+          "note": "Demand can remain unmet without implying extra storage."
+        }
+      ],
+      "expect": {
+        "requested": "10",
+        "bufferCapacity": "4",
+        "processedImmediately": "3",
+        "delivered": "7",
+        "queued": "4",
+        "notDelivered": "3",
+        "result": "delivered=7, queued=4, notDelivered=3"
+      },
+      "limit": "The Java trace is synchronous arithmetic, not a real Publisher. It omits threading, SubmissionPublisher lag/drop handlers, reentrant requests, cancellation, errors, multiple subscribers, memory visibility, and Reactive Streams rule verification.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "requested": "10"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "requested": "10",
+            "bufferCapacity": "4",
+            "processedImmediately": "3"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "requested": "10",
+            "bufferCapacity": "4",
+            "processedImmediately": "3",
+            "delivered": "7",
+            "queued": "4"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "requested": "10",
+            "bufferCapacity": "4",
+            "processedImmediately": "3",
+            "delivered": "7",
+            "queued": "4",
+            "notDelivered": "3",
+            "result": "delivered=7, queued=4, notDelivered=3"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java SE 25 Flow API",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/Flow.html",
+        "Official Java SE 25 API; checked November 10, 2026"
+      ],
+      [
+        "Reactive Streams specification",
+        "https://github.com/reactive-streams/reactive-streams-jvm",
+        "Official specification repository"
+      ]
+    ],
+    "visual_explanation": "One demand counter feeds a separately bounded processing-plus-buffer path; unmet demand remains visibly outside storage.",
+    "written_questions": [
+      "Where does your current reactive pipeline bound demand?",
+      "Which queue or publisher buffer is actually consuming memory?"
+    ],
+    "source_checked_on": "2026-11-10"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A pilot that avoids the hard case proves only the easy case",
+    "goal": "Select a low-blast-radius pilot that still exercises the majority of in-scope capabilities.",
+    "tag": "Distinguished Engineer · representative pilots",
+    "concept": "<p>A driving test held only in an empty parking lot is safe, but it does not prove motorway readiness.</p><p>A good platform pilot balances two dimensions: failure must be affordable, and the workload must still exercise representative risks. Predefine measurable success and the next decision. Recommendations and redesign findings are useful evidence, not pilot failure.</p>",
+    "example": "<p>Three pipeline candidates exist. A tiny CSV batch is safe but exercises 2 of 7 required capabilities. A payments stream exercises all 7 but has unacceptable blast radius. A duplicated order stream exercises 6 of 7 with synthetic customer data and reversible cutover. The third is the decision-grade pilot.</p>",
+    "use_case": {
+      "when": "Use this method before declaring a platform pattern ready for a broader migration wave.",
+      "example": "Choose a shadow order pipeline that includes schema drift, backfill, observability, privacy, and rollback without serving production decisions.",
+      "decision": "Prefer low criticality plus high scope coverage. If no candidate has both, create a shadow or replay environment rather than selecting an easy but unrepresentative demo."
+    },
+    "practice": "Score three candidates for risk, scope coverage, and evidence quality; move the threshold and observe the choice.",
+    "boundary": "The weighted score is a decision aid, not an AWS formula. It omits political sponsorship, opportunity cost, regulatory approval, team skill, dependency timing, and qualitative failure modes.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>minimum capability coverage <input id=\"pilotCoverage\" type=\"range\" min=\"20\" max=\"100\" value=\"70\"></label><div id=\"pilotWorld\" class=\"world\"></div></div>",
+    "js": "function paintPilot(){const min=+pilotCoverage.value,c=[['tiny batch',20,10],['payments live',100,95],['orders shadow',85,25]];pilotWorld.innerHTML='<p><strong>Question:</strong> which candidate is safe enough and representative?</p><div class=step-flow>'+c.map(x=>'<div class=\"tile '+(x[1]>=min&&x[2]<=40?'ok':'fail')+'\">'+x[0]+'<br>coverage '+x[1]+'%<br>blast '+x[2]+'%</div>').join('')+'</div><p>Rule: coverage ≥ '+min+'% and blast ≤ 40%.</p>';};pilotCoverage.oninput=paintPilot;paintPilot();",
+    "questions": [
+      [
+        "Which pilot is strongest?",
+        [
+          "The reversible shadow workload covering most capabilities",
+          "The easiest possible demo",
+          "The highest-blast-radius production flow"
+        ],
+        0,
+        "It balances representative evidence with affordable failure."
+      ],
+      [
+        "Why define success before starting?",
+        [
+          "To prevent post-hoc storytelling and make the next decision explicit",
+          "To guarantee zero findings",
+          "To remove users"
+        ],
+        0,
+        "Predetermined evidence supports a real go/no-go decision."
+      ],
+      [
+        "What invalidates the score?",
+        [
+          "An unmodeled regulatory or dependency risk",
+          "A pilot recommendation",
+          "A reversible cutover"
+        ],
+        0,
+        "Weighted arithmetic cannot erase a hard constraint."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "candidates=[{'name':'tiny batch','coverage':20,'blast':10},{'name':'payments live','coverage':100,'blast':95},{'name':'orders shadow','coverage':85,'blast':25}]",
+          "note": "Describe three pilot candidates."
+        },
+        {
+          "code": "eligible=[x for x in candidates if x['coverage']>=70 and x['blast']<=40]",
+          "note": "Apply the predeclared coverage and blast-radius gates."
+        },
+        {
+          "code": "chosen=max(eligible,key=lambda x:x['coverage']-x['blast'])",
+          "note": "Rank only candidates that passed both hard gates."
+        },
+        {
+          "code": "result={'chosen':chosen['name'],'coverage':chosen['coverage'],'blast':chosen['blast']} ",
+          "note": "Record the choice and its evidence dimensions."
+        }
+      ],
+      "expect": {
+        "result": {
+          "chosen": "orders shadow",
+          "coverage": 85,
+          "blast": 25
+        }
+      },
+      "limit": "The weighted score is a decision aid, not an AWS formula. It omits political sponsorship, opportunity cost, regulatory approval, team skill, dependency timing, and qualitative failure modes.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "candidates": [
+              {
+                "name": "tiny batch",
+                "coverage": 20,
+                "blast": 10
+              },
+              {
+                "name": "payments live",
+                "coverage": 100,
+                "blast": 95
+              },
+              {
+                "name": "orders shadow",
+                "coverage": 85,
+                "blast": 25
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "candidates": [
+              {
+                "name": "tiny batch",
+                "coverage": 20,
+                "blast": 10
+              },
+              {
+                "name": "payments live",
+                "coverage": 100,
+                "blast": 95
+              },
+              {
+                "name": "orders shadow",
+                "coverage": 85,
+                "blast": 25
+              }
+            ],
+            "eligible": [
+              {
+                "name": "orders shadow",
+                "coverage": 85,
+                "blast": 25
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "candidates": [
+              {
+                "name": "tiny batch",
+                "coverage": 20,
+                "blast": 10
+              },
+              {
+                "name": "payments live",
+                "coverage": 100,
+                "blast": 95
+              },
+              {
+                "name": "orders shadow",
+                "coverage": 85,
+                "blast": 25
+              }
+            ],
+            "eligible": [
+              {
+                "name": "orders shadow",
+                "coverage": 85,
+                "blast": 25
+              }
+            ],
+            "chosen": {
+              "name": "orders shadow",
+              "coverage": 85,
+              "blast": 25
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "candidates": [
+              {
+                "name": "tiny batch",
+                "coverage": 20,
+                "blast": 10
+              },
+              {
+                "name": "payments live",
+                "coverage": 100,
+                "blast": 95
+              },
+              {
+                "name": "orders shadow",
+                "coverage": 85,
+                "blast": 25
+              }
+            ],
+            "eligible": [
+              {
+                "name": "orders shadow",
+                "coverage": 85,
+                "blast": 25
+              }
+            ],
+            "chosen": {
+              "name": "orders shadow",
+              "coverage": 85,
+              "blast": 25
+            },
+            "result": {
+              "chosen": "orders shadow",
+              "coverage": 85,
+              "blast": 25
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Prescriptive Guidance: Running a pilot",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/strategy-migration-connect/pilot.html",
+        "Official AWS guidance; checked November 10, 2026"
+      ],
+      [
+        "AWS Prescriptive Guidance: application prioritization",
+        "https://docs.aws.amazon.com/prescriptive-guidance/latest/application-portfolio-assessment-guide/prioritization-and-migration-strategy.html",
+        "Official AWS guidance; checked November 10, 2026"
+      ]
+    ],
+    "visual_explanation": "Three candidates sit on the same coverage and blast-radius scales, revealing why easiest and most complete can both be wrong.",
+    "written_questions": [
+      "Which candidate in your roadmap is safe but too unrepresentative?",
+      "What evidence and next decision will be fixed before the pilot starts?"
+    ],
+    "source_checked_on": "2026-11-10"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Route on MCP headers—then reject a body that disagrees",
+    "goal": "Use MCP 2026 header-based routing without letting a proxy and server interpret different requests.",
+    "tag": "GenAI engineering · MCP 2026 harness gateways",
+    "concept": "<p>An envelope label helps the mailroom route a package, but the label and form inside must describe the same destination.</p><p>For MCP 2026-07-28 Streamable HTTP, <code>Mcp-Method</code> and <code>Mcp-Name</code> support routing before parsing the full JSON-RPC body. The server must reject a mismatch with MCP error <code>-32020</code>. The headers are duplicated routing metadata, not a second source of truth.</p>",
+    "example": "<p>A gateway routes <code>Mcp-Method: tools/call</code> and <code>Mcp-Name: query_orders</code> to the data-tool pool. If the body says <code>tools/call</code> for <code>delete_catalog</code>, the server rejects it instead of executing either interpretation.</p>",
+    "use_case": {
+      "when": "Use header routing when an MCP gateway, WAF, or load balancer must steer requests before decoding the JSON-RPC body.",
+      "example": "Send query tools to a read-only pool and image tools to a GPU pool, then verify header/body equality at the server boundary.",
+      "decision": "Use the headers for early routing only on the 2026-07-28 protocol path. Keep body parsing and mismatch rejection authoritative; older protocol versions need their documented transport behavior."
+    },
+    "practice": "Change method or name in one layer. Predict the route and the server result.",
+    "boundary": "The model compares strings only. It omits HTTP parsing, protocol negotiation, Mcp-Param headers, proxies, signatures, authorization, JSON-RPC batch behavior, redirects, CORS, request smuggling, and SDK interoperability.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>header name <select id=\"mcpHead\"><option>query_orders</option><option>delete_catalog</option></select></label><label>body name <select id=\"mcpBody\"><option>query_orders</option><option>delete_catalog</option></select></label><div id=\"mcpRouteWorld\" class=\"world\"></div></div>",
+    "js": "function paintMcpRoute(){const same=mcpHead.value===mcpBody.value;mcpRouteWorld.innerHTML='<p><strong>Question:</strong> can the tool execute?</p><div class=step-flow><div class=tile>proxy routes '+mcpHead.value+'</div><div class=arrow>→ compare</div><div class=\"tile '+(same?'ok':'fail')+'\">'+(same?'body agrees':'-32020 header mismatch')+'</div><div class=arrow>→</div><div class=tile>'+(same?'execute after auth':'execute nothing')+'</div></div>';};mcpHead.onchange=paintMcpRoute;mcpBody.onchange=paintMcpRoute;paintMcpRoute();",
+    "questions": [
+      [
+        "Header says query_orders; body says delete_catalog. What should happen?",
+        [
+          "Reject with -32020 and execute nothing",
+          "Trust the proxy route",
+          "Trust the body silently"
+        ],
+        0,
+        "Mismatch rejection prevents split interpretation."
+      ],
+      [
+        "Why include the headers?",
+        [
+          "To enable early routing while preserving body agreement",
+          "To replace authorization",
+          "To encrypt JSON-RPC"
+        ],
+        0,
+        "They expose routing metadata before full parsing."
+      ],
+      [
+        "What remains outside this lesson?",
+        [
+          "Authorization, proxy hardening, protocol negotiation, and parameter headers",
+          "The tool name",
+          "String equality"
+        ],
+        0,
+        "Matching metadata is only one harness boundary."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "headers={'Mcp-Method':'tools/call','Mcp-Name':'query_orders'}",
+          "note": "Receive routing metadata."
+        },
+        {
+          "code": "body={'method':'tools/call','params':{'name':'delete_catalog'}}",
+          "note": "Parse a body that disagrees on the principal name."
+        },
+        {
+          "code": "method_match=headers['Mcp-Method']==body['method']; name_match=headers['Mcp-Name']==body['params']['name']",
+          "note": "Compare both mirrored values."
+        },
+        {
+          "code": "result={'accepted':method_match and name_match,'error':None if method_match and name_match else -32020}",
+          "note": "Reject before tool dispatch when either value differs."
+        }
+      ],
+      "expect": {
+        "method_match": true,
+        "name_match": false,
+        "result": {
+          "accepted": false,
+          "error": -32020
+        }
+      },
+      "limit": "The model compares strings only. It omits HTTP parsing, protocol negotiation, Mcp-Param headers, proxies, signatures, authorization, JSON-RPC batch behavior, redirects, CORS, request smuggling, and SDK interoperability.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "headers": {
+              "Mcp-Method": "tools/call",
+              "Mcp-Name": "query_orders"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "headers": {
+              "Mcp-Method": "tools/call",
+              "Mcp-Name": "query_orders"
+            },
+            "body": {
+              "method": "tools/call",
+              "params": {
+                "name": "delete_catalog"
+              }
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "headers": {
+              "Mcp-Method": "tools/call",
+              "Mcp-Name": "query_orders"
+            },
+            "body": {
+              "method": "tools/call",
+              "params": {
+                "name": "delete_catalog"
+              }
+            },
+            "method_match": true,
+            "name_match": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "headers": {
+              "Mcp-Method": "tools/call",
+              "Mcp-Name": "query_orders"
+            },
+            "body": {
+              "method": "tools/call",
+              "params": {
+                "name": "delete_catalog"
+              }
+            },
+            "method_match": true,
+            "name_match": false,
+            "result": {
+              "accepted": false,
+              "error": -32020
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP 2026-07-28 changelog",
+        "https://modelcontextprotocol.io/specification/2026-07-28/changelog",
+        "Official MCP specification; header-based routing introduced in 2026-07-28"
+      ],
+      [
+        "MCP Go SDK protocol lifecycle",
+        "https://go.sdk.modelcontextprotocol.io/protocol/",
+        "Official SDK reference; mismatch maps to -32020"
+      ],
+      [
+        "MCP draft changelog",
+        "https://modelcontextprotocol.io/specification/draft/changelog",
+        "Official current draft; checked November 10, 2026"
+      ]
+    ],
+    "visual_explanation": "The proxy route and parsed body converge at an equality gate; disagreement terminates before dispatch.",
+    "written_questions": [
+      "Which MCP gateway could benefit from early method/name routing?",
+      "Where will you enforce the equality check so no downstream pool can bypass it?"
+    ],
+    "source_checked_on": "2026-11-10"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "An AI copilot can suggest where to edit a structure—the engineer still chooses the change",
+    "goal": "Understand a new human-in-the-loop topology-optimization result without turning its synthetic preference model into a production claim.",
+    "tag": "Technology breakthroughs · peer-reviewed research · November 10, 2026",
+    "concept": "<p>Imagine editing a bridge-shaped puzzle. Instead of clicking many candidate regions, an assistant highlights the long member or complex junction most likely to need attention.</p><p>A new Communications Engineering paper frames region selection as image segmentation with a U-Net. It trains on synthetic preference masks for the longest member or most complex connection, then recommends plausible edit regions inside a topology-optimization loop. The human still selects and modifies the design.</p>",
+    "example": "<p>The paper reports demonstration cases improving manufacturability or linear buckling load by 39% with 15 seconds added versus a simplified baseline. Those numbers belong to the reported cases, not a general guarantee. The browser ranks invented regions only; it does not solve mechanics.</p>",
+    "use_case": {
+      "when": "Study this work when interactive structural optimization is bottlenecked by repeated manual region selection.",
+      "example": "A structural engineer asks the copilot to highlight a long slender member, then decides whether to thicken, remove, or constrain it before rerunning optimization.",
+      "decision": "Treat it as an accepted peer-reviewed research workflow. Require physical constraints, expert studies, compute cost, uncertainty, manufacturability, and validation on your geometry before engineering use."
+    },
+    "practice": "Change the synthetic preference from longest member to complex junction. Predict which invented region is highlighted.",
+    "boundary": "The model uses three invented scores. It does not run U-Net inference, topology optimization, finite elements, buckling analysis, skeletonization, manufacturing constraints, uncertainty, or the paper's datasets. Reported 39% and 15-second figures are case results, not reproduced here.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>preference <select id=\"topoPref\"><option value=\"long\">longest member</option><option value=\"node\">most complex junction</option></select></label><div id=\"topoWorld\" class=\"world\"></div></div>",
+    "js": "function paintTopo(){const long=topoPref.value==='long',r=[['A',.9,.3],['B',.5,.95],['C',.7,.6]],best=r.slice().sort((a,b)=>(long?b[1]-a[1]:b[2]-a[2]))[0][0];topoWorld.innerHTML='<p><strong>Question:</strong> which region does the synthetic preference rank first?</p><div class=step-flow>'+r.map(x=>'<div class=\"tile '+(x[0]===best?'ok':'')+'\">region '+x[0]+'<br>length '+x[1]+'<br>junction '+x[2]+'</div>').join('')+'</div><p>Recommendation: '+best+'. Human decision and physics optimization still follow.</p>';};topoPref.onchange=paintTopo;paintTopo();",
+    "questions": [
+      [
+        "What does the reported U-Net predict?",
+        [
+          "A preferred region for human modification",
+          "A certified final bridge",
+          "A replacement for finite-element analysis"
+        ],
+        0,
+        "The model assists region selection inside the workflow."
+      ],
+      [
+        "Why is the human still in the loop?",
+        [
+          "The recommendation does not decide the engineering modification or validate physics",
+          "The model cannot produce pixels",
+          "Topology optimization forbids automation"
+        ],
+        0,
+        "Preference guidance and engineering authority are different roles."
+      ],
+      [
+        "Why not generalize the 39% result?",
+        [
+          "It is a demonstration-case outcome against a specific baseline",
+          "Percentages are never useful",
+          "The paper was not peer reviewed"
+        ],
+        0,
+        "Case metrics need replication across constraints and geometries."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "regions=[{'id':'A','length':.9,'junction':.3},{'id':'B','length':.5,'junction':.95},{'id':'C','length':.7,'junction':.6}]",
+          "note": "Create invented region features for the teaching model."
+        },
+        {
+          "code": "preference='junction'",
+          "note": "Represent one synthetic user preference."
+        },
+        {
+          "code": "recommended=max(regions,key=lambda r:r[preference])",
+          "note": "Rank regions by the selected feature; this is not the paper's U-Net."
+        },
+        {
+          "code": "result={'recommended':recommended['id'],'human_decision_required':True,'physics_solved':False}",
+          "note": "Keep recommendation, engineering choice, and physics validation separate."
+        }
+      ],
+      "expect": {
+        "preference": "junction",
+        "result": {
+          "recommended": "B",
+          "human_decision_required": true,
+          "physics_solved": false
+        }
+      },
+      "limit": "The model uses three invented scores. It does not run U-Net inference, topology optimization, finite elements, buckling analysis, skeletonization, manufacturing constraints, uncertainty, or the paper's datasets. Reported 39% and 15-second figures are case results, not reproduced here.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "regions": [
+              {
+                "id": "A",
+                "length": 0.9,
+                "junction": 0.3
+              },
+              {
+                "id": "B",
+                "length": 0.5,
+                "junction": 0.95
+              },
+              {
+                "id": "C",
+                "length": 0.7,
+                "junction": 0.6
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "regions": [
+              {
+                "id": "A",
+                "length": 0.9,
+                "junction": 0.3
+              },
+              {
+                "id": "B",
+                "length": 0.5,
+                "junction": 0.95
+              },
+              {
+                "id": "C",
+                "length": 0.7,
+                "junction": 0.6
+              }
+            ],
+            "preference": "junction"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "regions": [
+              {
+                "id": "A",
+                "length": 0.9,
+                "junction": 0.3
+              },
+              {
+                "id": "B",
+                "length": 0.5,
+                "junction": 0.95
+              },
+              {
+                "id": "C",
+                "length": 0.7,
+                "junction": 0.6
+              }
+            ],
+            "preference": "junction",
+            "recommended": {
+              "id": "B",
+              "length": 0.5,
+              "junction": 0.95
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "regions": [
+              {
+                "id": "A",
+                "length": 0.9,
+                "junction": 0.3
+              },
+              {
+                "id": "B",
+                "length": 0.5,
+                "junction": 0.95
+              },
+              {
+                "id": "C",
+                "length": 0.7,
+                "junction": 0.6
+              }
+            ],
+            "preference": "junction",
+            "recommended": {
+              "id": "B",
+              "length": 0.5,
+              "junction": 0.95
+            },
+            "result": {
+              "recommended": "B",
+              "human_decision_required": true,
+              "physics_solved": false
+            }
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Ha et al., AI-guided human-in-the-loop inverse design of high performance engineering structures",
+        "https://www.nature.com/articles/s44172-026-00818-x",
+        "Communications Engineering; accepted manuscript published November 10, 2026"
+      ],
+      [
+        "Ha et al. preprint",
+        "https://arxiv.org/abs/2601.10859",
+        "Original preprint posted January 15, 2026; research chronology"
+      ]
+    ],
+    "visual_explanation": "Three regions expose the recommendation score while a separate final box keeps the human decision and physics solve visibly unresolved.",
+    "written_questions": [
+      "Which structural decision must remain with a licensed or accountable engineer?",
+      "What comparison set would you require before trusting the reported workflow on a new geometry?"
+    ],
+    "source_checked_on": "2026-11-10"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "GITHUB_OUTPUT writes strings; fromJSON restores the type",
+    "goal": "Convert step-output text before using it as a boolean, number, object, or matrix.",
+    "tag": "CI/CD & GitHub Actions · workflow structure",
+    "concept": "<p>A shipping label that says <code>10</code> is text until a system parses it as a number.</p><p>GitHub step outputs are strings. Expressions can coerce some values, but explicit <code>fromJSON()</code> makes the intended type visible and supports objects, arrays, booleans, and numbers. Invalid JSON should fail rather than quietly become policy.</p>",
+    "example": "<p>A planning step writes <code>timeout=10</code> and <code>experimental=false</code> to <code>GITHUB_OUTPUT</code>. The consumer uses <code>fromJSON</code> for <code>timeout-minutes</code> and <code>continue-on-error</code>. The string <code>false</code> must not be treated as a nonempty truthy value by surrounding shell or application logic.</p>",
+    "use_case": {
+      "when": "Use fromJSON when a job or step output represents a number, boolean, array, object, or dynamic matrix.",
+      "example": "A planner emits a JSON matrix and a numeric timeout for downstream test jobs.",
+      "decision": "Keep plain strings as strings. Parse typed control data exactly once at the workflow boundary and validate the producer's JSON."
+    },
+    "practice": "Toggle raw values and parsing. Predict the resulting type and gate decision.",
+    "boundary": "The browser uses JavaScript JSON.parse, which illustrates JSON typing but is not GitHub's full expression evaluator. It omits YAML parsing, loose equality, NaN rules, secrets, output limits, multiline values, and runner execution.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>raw output <select id=\"jsonRaw\"><option value=\"false\">false</option><option value=\"10\">10</option><option value=\"bad\">not-json</option></select></label><label><input id=\"jsonParse\" type=\"checkbox\" checked> apply fromJSON</label><div id=\"jsonWorld\" class=\"world\"></div></div>",
+    "js": "function paintJson(){let raw=jsonRaw.value,parse=jsonParse.checked,val=raw,err='';if(parse){try{val=JSON.parse(raw)}catch(e){err='parse failure'}}jsonWorld.innerHTML='<p><strong>Question:</strong> what type reaches policy?</p><div class=step-flow><div class=tile>GITHUB_OUTPUT<br>'+raw+'</div><div class=arrow>→</div><div class=\"tile '+(err?'fail':'ok')+'\">'+(err?err:'type '+typeof val+'; value '+String(val))+'</div></div>';};jsonRaw.onchange=paintJson;jsonParse.onchange=paintJson;paintJson();",
+    "questions": [
+      [
+        "A step output contains false. What type is it before fromJSON?",
+        [
+          "String",
+          "Boolean",
+          "Null"
+        ],
+        0,
+        "Step output values are strings."
+      ],
+      [
+        "Why parse explicitly?",
+        [
+          "To make typed policy inputs unambiguous",
+          "To encrypt the output",
+          "To increase the output limit"
+        ],
+        0,
+        "fromJSON restores the intended JSON type."
+      ],
+      [
+        "What should invalid JSON do?",
+        [
+          "Fail the typed boundary and expose the producer defect",
+          "Become true",
+          "Become an empty matrix silently"
+        ],
+        0,
+        "Silent fallback can invert policy."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "raw_timeout='10'; raw_continue='false'",
+          "note": "Receive text values like step outputs."
+        },
+        {
+          "code": "import json; timeout=json.loads(raw_timeout); continue_on_error=json.loads(raw_continue)",
+          "note": "Parse legal JSON into a number and boolean."
+        },
+        {
+          "code": "types={'timeout':type(timeout).__name__,'continue':type(continue_on_error).__name__}",
+          "note": "Observe the restored types."
+        },
+        {
+          "code": "result={'timeout_minutes':timeout,'continue_on_error':continue_on_error,'types':types}",
+          "note": "Use typed values at the policy boundary."
+        }
+      ],
+      "expect": {
+        "timeout": 10,
+        "continue_on_error": false,
+        "types": {
+          "timeout": "int",
+          "continue": "bool"
+        },
+        "result": {
+          "timeout_minutes": 10,
+          "continue_on_error": false,
+          "types": {
+            "timeout": "int",
+            "continue": "bool"
+          }
+        }
+      },
+      "limit": "The browser uses JavaScript JSON.parse, which illustrates JSON typing but is not GitHub's full expression evaluator. It omits YAML parsing, loose equality, NaN rules, secrets, output limits, multiline values, and runner execution.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "raw_timeout": "10",
+            "raw_continue": "false"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "raw_timeout": "10",
+            "raw_continue": "false",
+            "timeout": 10,
+            "continue_on_error": false
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "raw_timeout": "10",
+            "raw_continue": "false",
+            "timeout": 10,
+            "continue_on_error": false,
+            "types": {
+              "timeout": "int",
+              "continue": "bool"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "raw_timeout": "10",
+            "raw_continue": "false",
+            "timeout": 10,
+            "continue_on_error": false,
+            "types": {
+              "timeout": "int",
+              "continue": "bool"
+            },
+            "result": {
+              "timeout_minutes": 10,
+              "continue_on_error": false,
+              "types": {
+                "timeout": "int",
+                "continue": "bool"
+              }
+            }
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions expressions: fromJSON",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#fromjson",
+        "Official GitHub documentation; checked November 10, 2026"
+      ],
+      [
+        "GitHub Actions contexts: step outputs",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#steps-context",
+        "Official GitHub documentation; step output values are strings"
+      ]
+    ],
+    "visual_explanation": "The same raw characters cross an explicit parsing gate and emerge with a labeled boolean or integer type—or a visible failure.",
+    "written_questions": [
+      "Which workflow output currently carries typed control data as text?",
+      "What producer-side schema would prevent malformed JSON from reaching deployment policy?"
+    ],
+    "source_checked_on": "2026-11-10"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "103 can start preload—it is not the final response",
+    "goal": "Use HTTP 103 Early Hints as speculative performance metadata without treating it as success.",
+    "tag": "APIs & Microservices · HTTP performance",
+    "concept": "<p>A restaurant can tell you the bread is coming while the kitchen still decides whether the main dish is available.</p><p>HTTP 103 is an informational response. It can carry likely <code>Link: rel=preload</code> fields so a client starts fetching resources while the origin computes the final response. The client must still wait for and process the final status and headers independently.</p>",
+    "example": "<p>An API-backed page sends 103 for <code>/app.css</code> at 20 ms, then discovers at 180 ms that the user is unauthorized and sends final 401. The stylesheet preload may have started; the application must not render authenticated content or mark the request successful.</p>",
+    "use_case": {
+      "when": "Use 103 when final response generation is slow but useful preload links are known early and clients/intermediaries handle informational responses correctly.",
+      "example": "A gateway emits a stylesheet preload while an upstream page request waits on a regional database.",
+      "decision": "Measure actual latency benefit and client support. Skip 103 when the final headers arrive quickly, hints are unstable or sensitive, or HTTP/1.1 compatibility is uncertain."
+    },
+    "practice": "Change final status and hint timing. Predict what may start early and what remains undecided.",
+    "boundary": "The model uses a simple timeline. It does not open HTTP connections, implement caching, browser preload rules, HTTP/2 or HTTP/3 framing, intermediary behavior, credential modes, content policy, or the RFC's cross-origin security considerations.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>final status <select id=\"hintFinal\"><option value=\"200\">200 OK</option><option value=\"401\">401 Unauthorized</option></select></label><label>103 timing <input id=\"hintTime\" type=\"range\" min=\"0\" max=\"150\" value=\"20\"></label><div id=\"hintWorld\" class=\"world\"></div></div>",
+    "js": "function paintHint(){const t=+hintTime.value,s=hintFinal.value;hintWorld.innerHTML='<p><strong>Question:</strong> what is known at '+t+' ms?</p><div class=step-flow><div class=tile>0 ms request</div><div class=arrow>→</div><div class=tile>'+t+' ms<br>103: preload CSS</div><div class=arrow>→</div><div class=\"tile '+(s==='200'?'ok':'fail')+'\">180 ms<br>FINAL '+s+'</div></div><p>Preload may begin at 103; application outcome is unknown until '+s+'.</p>';};hintFinal.onchange=paintHint;hintTime.oninput=paintHint;paintHint();",
+    "questions": [
+      [
+        "A server sends 103, then final 401. What is the application result?",
+        [
+          "401 Unauthorized",
+          "103 success",
+          "200 because preload started"
+        ],
+        0,
+        "103 is informational; the final response determines the outcome."
+      ],
+      [
+        "Why send 103?",
+        [
+          "To let clients speculatively prepare, such as starting preloads",
+          "To replace final headers",
+          "To authenticate the user"
+        ],
+        0,
+        "Hints can overlap resource fetch with origin work."
+      ],
+      [
+        "When should a server be cautious?",
+        [
+          "When clients or HTTP/1.1 intermediaries may mishandle informational responses",
+          "When CSS exists",
+          "When the final response is 200"
+        ],
+        0,
+        "The RFC identifies compatibility and information-disclosure risks."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "events=[{'ms':0,'status':'request'},{'ms':20,'status':103,'link':'/app.css'},{'ms':180,'status':401}]",
+          "note": "Create a response timeline."
+        },
+        {
+          "code": "preload_started=any(e.get('status')==103 for e in events)",
+          "note": "The hint may start speculative work."
+        },
+        {
+          "code": "final=next(e for e in events if isinstance(e.get('status'),int) and e['status']>=200)",
+          "note": "Find the final, non-informational response."
+        },
+        {
+          "code": "result={'preload_started':preload_started,'application_status':final['status'],'success':200<=final['status']<300}",
+          "note": "Keep performance preparation separate from the application result."
+        }
+      ],
+      "expect": {
+        "preload_started": true,
+        "final": {
+          "ms": 180,
+          "status": 401
+        },
+        "result": {
+          "preload_started": true,
+          "application_status": 401,
+          "success": false
+        }
+      },
+      "limit": "The model uses a simple timeline. It does not open HTTP connections, implement caching, browser preload rules, HTTP/2 or HTTP/3 framing, intermediary behavior, credential modes, content policy, or the RFC's cross-origin security considerations.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "events": [
+              {
+                "ms": 0,
+                "status": "request"
+              },
+              {
+                "ms": 20,
+                "status": 103,
+                "link": "/app.css"
+              },
+              {
+                "ms": 180,
+                "status": 401
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "events": [
+              {
+                "ms": 0,
+                "status": "request"
+              },
+              {
+                "ms": 20,
+                "status": 103,
+                "link": "/app.css"
+              },
+              {
+                "ms": 180,
+                "status": 401
+              }
+            ],
+            "preload_started": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "events": [
+              {
+                "ms": 0,
+                "status": "request"
+              },
+              {
+                "ms": 20,
+                "status": 103,
+                "link": "/app.css"
+              },
+              {
+                "ms": 180,
+                "status": 401
+              }
+            ],
+            "preload_started": true,
+            "final": {
+              "ms": 180,
+              "status": 401
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "events": [
+              {
+                "ms": 0,
+                "status": "request"
+              },
+              {
+                "ms": 20,
+                "status": 103,
+                "link": "/app.css"
+              },
+              {
+                "ms": 180,
+                "status": 401
+              }
+            ],
+            "preload_started": true,
+            "final": {
+              "ms": 180,
+              "status": 401
+            },
+            "result": {
+              "preload_started": true,
+              "application_status": 401,
+              "success": false
+            }
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "RFC 8297: 103 Early Hints",
+        "https://www.rfc-editor.org/rfc/rfc8297.html",
+        "IETF Experimental RFC; published December 2017; checked November 10, 2026"
+      ],
+      [
+        "HTTP Semantics: informational responses",
+        "https://www.rfc-editor.org/rfc/rfc9110.html#name-informational-1xx",
+        "IETF Standards Track; foundation"
+      ]
+    ],
+    "visual_explanation": "A time-scaled response lane puts the 103 before the final status, making speculative work and application outcome separate events.",
+    "written_questions": [
+      "Which slow page or API response could know safe preload links before its final status?",
+      "How would you measure whether 103 improves user-visible latency rather than only network activity?"
+    ],
+    "source_checked_on": "2026-11-10"
+  }
+]
