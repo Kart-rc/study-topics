@@ -2,7 +2,7 @@
   "schema_version": 1,
   "created_on": "2026-10-08",
   "target_date": "2026-12-31",
-  "source_checked_on": "2026-11-10",
+  "source_checked_on": "2026-11-11",
   "guide_recheck": "weekly and before booking",
   "time_budget_minutes": 30,
   "tracks": [
@@ -1144,6 +1144,39 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day51/data-engineering",
+      "product_material_added_on": "2026-11-11",
+      "session_type": "retrieval_gap",
+      "cycle_position": 7,
+      "cycle_origin": "Day45",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "governance_security",
+        "troubleshooting_optimization",
+        "data_processing_transformations"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official COF-C03 overview rechecked 2026-11-11; full objective IDs and weights still unverified; planning groups only",
+      "snowflake_planning_groups": [
+        "data_protection_sharing",
+        "loading_transformation",
+        "account_access_security"
+      ],
+      "source_checked_on": "2026-11-11",
+      "source_versions": {
+        "databricks": "May 4, 2026 exam guide plus current table history and RESTORE documentation rechecked 2026-11-11",
+        "snowflake": "Current Time Travel, CLONE, UNDROP, and COF-C03 overview rechecked 2026-11-11; full guide IDs/weights unverified"
+      },
+      "depth": "Cycle-five retrieval across Days45\u201350 plus a bounded recovery gap: retained history, safe restore/clone, permissions, retention, and reconciliation. No personal gap, mastery, or complete exam coverage claim.",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -1313,6 +1346,11 @@
       "day_number": 50,
       "date": "2026-11-10",
       "key": "Day24/data-engineering+products+7"
+    },
+    {
+      "day_number": 51,
+      "date": "2026-11-11",
+      "key": "Day28/data-engineering+products+3"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
@@ -1338,7 +1376,7 @@
       "6": "consolidation_case",
       "7": "retrieval_gap"
     },
-    "next_consolidation_day": 50,
-    "next_retrieval_day": 51
+    "next_consolidation_day": 57,
+    "next_retrieval_day": 58
   }
 }

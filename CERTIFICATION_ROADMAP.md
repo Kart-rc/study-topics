@@ -22,7 +22,7 @@ Each week uses five focused concept lessons, one consolidation case, and one ret
 
 ## Coverage map
 
-Databricks weights below are from the official linked guide checked October 8. Snowflake categories below are planning groups based on the **current COF-C03 public overview**, not a claim of exact exam domains, objective IDs, or weights. The full Snowflake study-guide download was not exposed by the accessible page in this run; obtain it from that page and reconcile the map before claiming complete exam coverage. Do not substitute the older COF-C02 blueprint.
+Databricks weights below are from the official linked guide rechecked November 11, 2026. Snowflake categories below are planning groups based on the **current COF-C03 public overview**, not a claim of exact exam domains, objective IDs, or weights. The full Snowflake study-guide objective IDs and weights remain unverified; obtain the current guide from the official page and reconcile the map before claiming complete exam coverage. Do not substitute the older COF-C02 blueprint.
 
 | Databricks domain | Weight | Evidence-producing exercise |
 |---|---:|---|
@@ -83,7 +83,7 @@ Day17 adds product recovery on **2026-10-08** while preserving its original deli
 
 ## Official sources
 
-Checked **2026-10-08**. Recheck the guides weekly and again before booking; exam scope can change.
+Checked **2026-11-11**. Recheck the guides weekly and again before booking; exam scope can change.
 
 - [Databricks certification overview](https://www.databricks.com/learn/certification/data-engineer-associate)
 - [Current linked Databricks exam guide — May 4, 2026 version](https://www.databricks.com/sites/default/files/2026-03/databricks-certified-data-engineer-associate-exam-guide-may-4-2026.pdf)
