@@ -1209,6 +1209,38 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day53/data-engineering",
+      "product_material_added_on": "2026-11-13",
+      "session_type": "focused",
+      "cycle_position": 2,
+      "cycle_origin": "Day52",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "transformation_modeling",
+        "troubleshooting_optimization",
+        "databricks_intelligence_platform"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official COF-C03 overview last rechecked 2026-11-11; full objective IDs and weights still unverified; planning groups only",
+      "snowflake_planning_groups": [
+        "performance",
+        "architecture_connectivity"
+      ],
+      "source_checked_on": "2026-11-13",
+      "source_versions": {
+        "databricks": "May 4, 2026 exam guide last weekly check 2026-11-11; current liquid clustering and OPTIMIZE docs checked 2026-11-13",
+        "snowflake": "COF-C03 overview last weekly check 2026-11-11; current clustering-key and Automatic Clustering docs checked 2026-11-13; full guide IDs/weights unverified"
+      },
+      "depth": "Focused workload-driven layout keys, file and micro-partition pruning, liquid clustering, OPTIMIZE, Automatic Clustering, DML maintenance, and cost evidence. No mastery or complete exam coverage claim.",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_sql": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -1388,6 +1420,11 @@
       "day_number": 52,
       "date": "2026-11-12",
       "key": "Day30/data-engineering+products+1"
+    },
+    {
+      "day_number": 53,
+      "date": "2026-11-13",
+      "key": "Day17/data-engineering+products+14"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",

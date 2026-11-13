@@ -1,0 +1,1353 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Cluster for the filters you actually run—not every column you own",
+    "goal": "Use workload evidence to decide whether reorganizing a large table can skip enough storage to repay its maintenance cost.",
+    "tag": "Certification cycle 1 · focused lesson 2 · table layout and pruning",
+    "concept": "<p>A grocery store groups cereal in one aisle. A shopper looking for cereal can skip produce, dairy, and frozen food. If every product were scattered across every aisle, the shopper would inspect the whole store.</p><p>Large analytical tables work similarly. Good layout puts related filter values into fewer storage units. A query can then skip units whose metadata proves they cannot match. The win comes from <em>less data read</em>, not from a magic sort command. Choose keys from repeated, selective filters and verify bytes or partitions scanned before paying to rewrite data.</p>",
+    "example": "<p>An orders table has twelve storage units. Rows for customer <code>c52</code> are scattered across four units, so the query reads four. After layout maintenance groups nearby customer values, the same query reads one unit. A filter on unclustered <code>notes</code> still scans broadly.</p>",
+    "use_case": {
+      "when": "Consider clustering when a multi-terabyte table serves repeated selective filters and scan evidence shows poor pruning.",
+      "example": "A financial investigation repeatedly filters an orders table by customer_id and event_date but reads most files or micro-partitions.",
+      "decision": "Start with query history and scan evidence. Prefer automatic or managed layout where appropriate, use a small stable key set, measure maintenance credits or rewrite work, and remove a key that does not repay its cost."
+    },
+    "practice": "Move c52 between storage units and compare scattered versus grouped layout. Predict the number of units a customer filter must read.",
+    "boundary": "The local Python and JavaScript worlds use tiny lists and exact metadata. They do not run Delta, Photon, OPTIMIZE, predictive optimization, Snowflake Automatic Clustering, micro-partition pruning, Query Profile, concurrent DML, statistics collection, cloud storage, or credit billing.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>layout <select id=\"layoutMode\"><option value=\"scattered\">c52 scattered across four units</option><option value=\"grouped\">c52 grouped in one unit</option><option value=\"wrong\">clustered by a different column</option></select></label><div id=\"layoutWorld\" class=\"world\"></div></div>",
+    "js": "function paintLayout(){const m=layoutMode.value;const units=m==='grouped'?[['c10','c11'],['c52','c52'],['c70','c71'],['c90','c91']]:m==='scattered'?[['c52','c10'],['c20','c52'],['c52','c70'],['c90','c52']]:[['c52','c10'],['c20','c52'],['c52','c70'],['c90','c52']];const read=units.filter(u=>u.includes('c52')).length;layoutWorld.innerHTML='<p><strong>Question:</strong> how many storage units can the c52 filter skip?</p><div class=step-flow>'+units.map((u,i)=>'<div class=\"tile '+(u.includes('c52')?'wait':'ok')+'\">unit '+(i+1)+'<br>'+u.join(', ')+'<br>'+(u.includes('c52')?'read':'skip')+'</div>').join('')+'</div><p><strong>'+read+'/4 units read.</strong> '+(m==='grouped'?'The filter aligns with layout.':'The query still sees c52 in every unit.')+'</p>';};layoutMode.onchange=paintLayout;paintLayout();",
+    "questions": [
+      [
+        "c52 appears in one of four storage units after maintenance. What changed?",
+        [
+          "The query can skip three units using metadata",
+          "Every query became faster",
+          "The table stopped accepting writes"
+        ],
+        0,
+        "The benefit is bounded to predicates that align with useful layout metadata."
+      ],
+      [
+        "Why inspect query history before choosing a clustering key?",
+        [
+          "Repeated selective filters determine whether skipped reads can repay maintenance",
+          "The newest column is always best",
+          "Clustering removes compute cost"
+        ],
+        0,
+        "A key earns its place through workload evidence, not schema prominence."
+      ],
+      [
+        "When should you avoid adding another key?",
+        [
+          "When maintenance cost rises but scan evidence barely improves",
+          "Whenever a table has more than one column",
+          "Whenever filters use dates"
+        ],
+        0,
+        "Clustering is an optimization with rewrite or service cost, not a free correctness feature."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "units_before=[['c52','c10'],['c20','c52'],['c52','c70'],['c90','c52']]",
+          "note": "Place c52 in every synthetic storage unit."
+        },
+        {
+          "code": "scanned_before=sum('c52' in unit for unit in units_before)",
+          "note": "Count units whose metadata cannot rule out c52."
+        },
+        {
+          "code": "units_after=[['c10','c20'],['c52','c52'],['c70','c80'],['c90','c99']]; scanned_after=sum('c52' in unit for unit in units_after)",
+          "note": "Regroup rows so c52 occupies one unit."
+        },
+        {
+          "code": "result={'before':scanned_before,'after':scanned_after,'skipped_after':len(units_after)-scanned_after}",
+          "note": "Compare units read and skipped for the same predicate."
+        }
+      ],
+      "expect": {
+        "result": {
+          "before": 4,
+          "after": 1,
+          "skipped_after": 3
+        }
+      },
+      "limit": "The local Python and JavaScript worlds use tiny lists and exact metadata. They do not run Delta, Photon, OPTIMIZE, predictive optimization, Snowflake Automatic Clustering, micro-partition pruning, Query Profile, concurrent DML, statistics collection, cloud storage, or credit billing.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "units_before": [
+              [
+                "c52",
+                "c10"
+              ],
+              [
+                "c20",
+                "c52"
+              ],
+              [
+                "c52",
+                "c70"
+              ],
+              [
+                "c90",
+                "c52"
+              ]
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "units_before": [
+              [
+                "c52",
+                "c10"
+              ],
+              [
+                "c20",
+                "c52"
+              ],
+              [
+                "c52",
+                "c70"
+              ],
+              [
+                "c90",
+                "c52"
+              ]
+            ],
+            "scanned_before": 4
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "units_before": [
+              [
+                "c52",
+                "c10"
+              ],
+              [
+                "c20",
+                "c52"
+              ],
+              [
+                "c52",
+                "c70"
+              ],
+              [
+                "c90",
+                "c52"
+              ]
+            ],
+            "scanned_before": 4,
+            "units_after": [
+              [
+                "c10",
+                "c20"
+              ],
+              [
+                "c52",
+                "c52"
+              ],
+              [
+                "c70",
+                "c80"
+              ],
+              [
+                "c90",
+                "c99"
+              ]
+            ],
+            "scanned_after": 1
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "units_before": [
+              [
+                "c52",
+                "c10"
+              ],
+              [
+                "c20",
+                "c52"
+              ],
+              [
+                "c52",
+                "c70"
+              ],
+              [
+                "c90",
+                "c52"
+              ]
+            ],
+            "scanned_before": 4,
+            "units_after": [
+              [
+                "c10",
+                "c20"
+              ],
+              [
+                "c52",
+                "c52"
+              ],
+              [
+                "c70",
+                "c80"
+              ],
+              [
+                "c90",
+                "c99"
+              ]
+            ],
+            "scanned_after": 1,
+            "result": {
+              "before": 4,
+              "after": 1,
+              "skipped_after": 3
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks: Use liquid clustering for tables",
+        "https://docs.databricks.com/aws/en/tables/clustering",
+        "Official Databricks documentation; checked November 13, 2026"
+      ],
+      [
+        "Databricks: Optimize data file layout",
+        "https://docs.databricks.com/aws/en/tables/operations/optimize",
+        "Official Databricks documentation; checked November 13, 2026"
+      ],
+      [
+        "Snowflake: Clustering keys and clustered tables",
+        "https://docs.snowflake.com/en/user-guide/tables-clustering-keys",
+        "Official Snowflake documentation; checked November 13, 2026"
+      ],
+      [
+        "Snowflake: Automatic Clustering",
+        "https://docs.snowflake.com/en/user-guide/tables-auto-reclustering",
+        "Official Snowflake documentation; checked November 13, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-03/databricks-certified-data-engineer-associate-exam-guide-may-4-2026.pdf",
+        "Official May 4, 2026 guide; last weekly check November 11, 2026"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official overview; last weekly check November 11, 2026; full study-guide objective IDs and weights remain unverified"
+      ]
+    ],
+    "visual_explanation": "Four storage units show c52 scattered and then grouped, making the number read and skipped visible on one consistent scale.",
+    "written_questions": [
+      "Which production filter currently reads far more storage than its selectivity suggests?",
+      "What before/after scan evidence and maintenance cost would justify retaining its layout key?"
+    ],
+    "source_checked_on": "2026-11-13",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: liquid clustering reorganizes files for data skipping",
+        "minutes": 9,
+        "html": "<p><strong>First-minute product recall:</strong> Day31 used change feeds; Day47 used join-plan evidence. Today, use scan evidence before changing physical layout.</p><pre><code><span>-- Databricks SQL; not executed in product</span><span>CREATE TABLE orders (...) CLUSTER BY (customer_id);</span><span>OPTIMIZE orders;</span></code></pre><p>Liquid clustering records clustering columns in table metadata. <code>OPTIMIZE</code> rewrites files so values on those keys are colocated, improving data skipping for aligned filters. Databricks recommends liquid clustering for table layout; runtime and feature details matter. Predictive optimization can run maintenance for eligible Unity Catalog managed tables; otherwise schedule it deliberately.</p><label>Databricks layout <select id=\"dbCluster\"><option value=\"before\">four files overlap c52</option><option value=\"after\">OPTIMIZE groups c52</option><option value=\"wrong\">filter uses notes</option></select></label><div id=\"dbClusterWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL was not run in Databricks; this is a local browser teaching model.</p>",
+        "markdown": "Recall Day31 change feeds and Day47 plan evidence. Liquid clustering declares layout keys; OPTIMIZE rewrites files to colocate key values for data skipping. Maintenance may be managed by predictive optimization for eligible Unity Catalog managed tables or scheduled explicitly. SQL not executed in Databricks.",
+        "javascript": "const dbCluster=$('dbCluster'),dbClusterWorld=$('dbClusterWorld');function paintDbCluster(){const s=dbCluster.value,a=s==='before'?['4 files overlap','filter c52','read 4 files']:s==='after'?['OPTIMIZE rewrites','filter c52','read 1 file']:['files grouped by customer','filter notes','read broadly'];dbClusterWorld.innerHTML='<div class=step-flow>'+a.map((x,i)=>'<div class=\"tile '+((s==='after'&&i===2)?'ok':(i===2?'wait':''))+'\">'+x+'</div>').join('<div class=arrow>→</div>')+'</div>';};dbCluster.onchange=paintDbCluster;paintDbCluster();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: clustering keys guide automatic micro-partition maintenance",
+        "minutes": 9,
+        "html": "<p><strong>First-minute product recall:</strong> Day47 inspected Query Profile before changing a join. Use the same evidence-first habit for pruning.</p><pre><code><span>-- Snowflake SQL; not executed in product</span><span>ALTER TABLE orders CLUSTER BY (customer_id);</span><span>SELECT SYSTEM$CLUSTERING_INFORMATION('orders');</span></code></pre><p>Snowflake stores data in micro-partitions and tracks metadata used for pruning. A clustering key on a very large table can improve the arrangement for repeated filters. Automatic Clustering maintains it in the background, but defining or changing the key can trigger credit-consuming reclustering. High DML can increase maintenance work.</p><label>Snowflake state <select id=\"sfCluster\"><option value=\"overlap\">high overlap</option><option value=\"maintained\">automatic clustering maintained key</option><option value=\"dml\">sustained DML</option></select></label><div id=\"sfClusterWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL was not run in Snowflake.</p>",
+        "markdown": "Recall Day47 Query Profile evidence. Snowflake micro-partition metadata enables pruning. A clustering key can improve very large tables with repeated filters; Automatic Clustering maintains the key, with credit cost when reclustering. Sustained DML can increase maintenance. SQL not executed in Snowflake.",
+        "javascript": "const sfCluster=$('sfCluster'),sfClusterWorld=$('sfClusterWorld');function paintSfCluster(){const s=sfCluster.value,a=s==='overlap'?['4 micro-partitions overlap','filter c52','scan 4']:s==='maintained'?['service reclusters','filter c52','scan 1']:['new DML overlaps','service work rises','re-measure cost'];sfClusterWorld.innerHTML='<div class=step-flow>'+a.map((x,i)=>'<div class=\"tile '+((s==='maintained'&&i===2)?'ok':(s==='dml'?'fail':'wait'))+'\">'+x+'</div>').join('<div class=arrow>→</div>')+'</div>';};sfCluster.onchange=paintSfCluster;paintSfCluster();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><thead><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr></thead><tbody><tr><td>Physical unit</td><td>Delta data files</td><td>Snowflake micro-partitions</td></tr><tr><td>Declare layout</td><td>CLUSTER BY / CLUSTER BY AUTO where supported</td><td>CLUSTER BY expression</td></tr><tr><td>Maintain</td><td>OPTIMIZE or eligible predictive optimization</td><td>Automatic Clustering service</td></tr><tr><td>Evidence/cost</td><td>Files or bytes skipped; rewrite compute</td><td>Partitions scanned, clustering information; serverless credits</td></tr></tbody></table>",
+      "markdown": "Both mechanisms improve pruning by reducing overlap, but they operate on different storage units and maintenance systems. Databricks liquid clustering rewrites Delta files through OPTIMIZE or eligible predictive optimization. Snowflake Automatic Clustering maintains micro-partitions after a key is defined and can consume credits. Measure each in its native evidence."
+    },
+    "product_questions": [
+      [
+        "A Databricks query filters customer_id but c52 still appears in four files. What action is evidence-aligned?",
+        [
+          "Verify the filter is frequent/selective, define a useful clustering key, run or schedule maintenance, then re-measure",
+          "Add every table column as a key",
+          "Increase retries"
+        ],
+        0,
+        "Layout changes should follow workload evidence and be verified after file rewrite."
+      ],
+      [
+        "A Snowflake table receives sustained DML after a clustering key is added. What should you watch?",
+        [
+          "Pruning improvement and Automatic Clustering credit usage",
+          "Only result row count",
+          "Kafka consumer lag"
+        ],
+        0,
+        "The benefit and background maintenance cost can both change with DML."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks: Use liquid clustering for tables",
+        "https://docs.databricks.com/aws/en/tables/clustering",
+        "Official Databricks documentation; checked November 13, 2026"
+      ],
+      [
+        "Databricks: Optimize data file layout",
+        "https://docs.databricks.com/aws/en/tables/operations/optimize",
+        "Official Databricks documentation; checked November 13, 2026"
+      ],
+      [
+        "Snowflake: Clustering keys and clustered tables",
+        "https://docs.snowflake.com/en/user-guide/tables-clustering-keys",
+        "Official Snowflake documentation; checked November 13, 2026"
+      ],
+      [
+        "Snowflake: Automatic Clustering",
+        "https://docs.snowflake.com/en/user-guide/tables-auto-reclustering",
+        "Official Snowflake documentation; checked November 13, 2026"
+      ],
+      [
+        "Databricks Data Engineer Associate exam guide",
+        "https://www.databricks.com/sites/default/files/2026-03/databricks-certified-data-engineer-associate-exam-guide-may-4-2026.pdf",
+        "Official May 4, 2026 guide; last weekly check November 11, 2026"
+      ],
+      [
+        "SnowPro Core COF-C03 overview",
+        "https://learn.snowflake.com/en/certifications/snowpro-core-c03/",
+        "Official overview; last weekly check November 11, 2026; full study-guide objective IDs and weights remain unverified"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-13",
+      "session_type": "focused",
+      "cycle_position": 2,
+      "cycle_origin": "Day52",
+      "databricks": {
+        "scope": "Liquid clustering, OPTIMIZE, data skipping, managed maintenance, runtime and cost boundaries."
+      },
+      "snowflake": {
+        "scope": "Micro-partition pruning, clustering keys, Automatic Clustering, DML and credit boundaries. Planning groups only; full COF-C03 IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run; browser models are local JavaScript and recorded example is local Python"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "LongAdder is a fast metric—not an atomic checkpoint",
+    "goal": "Use LongAdder for high-contention statistics while keeping exact business decisions on a transactional or synchronized value.",
+    "tag": "Software engineering · Java 25 concurrency",
+    "concept": "<p>A stadium has several turnstiles counting visitors. Adding each turnstile's number is fast enough for a live attendance screen. But while you walk from one counter to the next, more people enter. Your total is useful telemetry, not a frozen photograph.</p><p><code>LongAdder</code> spreads contended updates across internal variables and combines them in <code>sum()</code>. Java documents that the returned value is not an atomic snapshot. That trade improves update throughput for statistics. It makes the value unsuitable as the sole proof for billing, quota enforcement, or a one-time transition.</p>",
+    "example": "<p>Two request-counter cells hold 40 and 35. The dashboard reads both as 75. Five requests arrive in the second cell during the read, so live cells total 80. The displayed value can catch up on the next scrape; a quota decision cannot assume 75 is exact.</p>",
+    "use_case": {
+      "when": "Use LongAdder for frequently updated counters such as requests, bytes, and cache hits when an eventually current total is acceptable.",
+      "example": "Hundreds of API threads increment a per-endpoint telemetry counter while Prometheus scrapes once every 15 seconds.",
+      "decision": "Choose LongAdder for statistics under contention. Choose AtomicLong, a lock, or a transactional datastore when a read must coordinate with an exact state transition."
+    },
+    "practice": "Move an update before, during, or after the synthetic sum. Predict whether this particular read includes it.",
+    "boundary": "The Java replay uses two integers to expose one possible interleaving. It does not inspect LongAdder's private cells, launch threads, reproduce scheduler behavior, benchmark contention, or claim that a particular concurrent update must be omitted.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>five new requests arrive <select id=\"adderWhen\"><option value=\"during\">during the sum</option><option value=\"before\">before the sum</option><option value=\"after\">after the sum</option></select></label><div id=\"adderWorld\" class=\"world\"></div></div>",
+    "js": "function paintAdder(){const w=adderWhen.value,reported=w==='before'?80:75,live=w==='after'?75:80;adderWorld.innerHTML='<p><strong>Question:</strong> is this scrape an atomic snapshot?</p><div class=step-flow><div class=tile>cells start 40 + 35</div><div class=arrow>→ '+w+' update +5 →</div><div class=\"tile '+(reported===live?'ok':'wait')+'\">reported '+reported+'<br>live '+live+'</div></div><p>'+(reported===live?'This interleaving matches.':'The next scrape can catch up; do not use this total as a commit boundary.')+'</p>';};adderWhen.onchange=paintAdder;paintAdder();",
+    "questions": [
+      [
+        "A LongAdder scrape returns 75 while updates are concurrent. What is guaranteed?",
+        [
+          "It is a combined current-looking statistic, not an atomic snapshot",
+          "Exactly 75 requests existed at one instant",
+          "All updater threads paused"
+        ],
+        0,
+        "sum() can omit concurrent updates and is intended for statistics rather than fine-grained synchronization."
+      ],
+      [
+        "Why can LongAdder outperform one AtomicLong under contention?",
+        [
+          "Updates can be spread across multiple variables",
+          "It skips recording increments",
+          "It uses a database transaction"
+        ],
+        0,
+        "Spreading updates reduces contention on one shared location, at some space and snapshot cost."
+      ],
+      [
+        "Which use is outside the safe boundary?",
+        [
+          "Charge a customer exactly when the value crosses 10,000",
+          "Expose approximate requests per second",
+          "Count cache hits for telemetry"
+        ],
+        0,
+        "An exact one-time business transition needs coordinated state, not an approximate concurrent sum."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "int left=40; int right=35;",
+          "note": "Represent two internal counter cells."
+        },
+        {
+          "code": "int readLeft=left; int readRight=right;",
+          "note": "Read both cells for one synthetic sum."
+        },
+        {
+          "code": "right+=5; int liveTotal=left+right;",
+          "note": "Let five updates arrive before the read is used."
+        },
+        {
+          "code": "int reported=readLeft+readRight; String result=\"reported=\"+reported+\", live=\"+liveTotal;",
+          "note": "Compare the non-atomic read with current cell contents."
+        }
+      ],
+      "expect": {
+        "left": "40",
+        "right": "40",
+        "readLeft": "40",
+        "readRight": "35",
+        "liveTotal": "80",
+        "reported": "75",
+        "result": "reported=75, live=80"
+      },
+      "limit": "The Java replay uses two integers to expose one possible interleaving. It does not inspect LongAdder's private cells, launch threads, reproduce scheduler behavior, benchmark contention, or claim that a particular concurrent update must be omitted.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "left": "40",
+            "right": "35"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "left": "40",
+            "right": "35",
+            "readLeft": "40",
+            "readRight": "35"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "left": "40",
+            "right": "40",
+            "readLeft": "40",
+            "readRight": "35",
+            "liveTotal": "80"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "left": "40",
+            "right": "40",
+            "readLeft": "40",
+            "readRight": "35",
+            "liveTotal": "80",
+            "reported": "75",
+            "result": "reported=75, live=80"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "LongAdder — Java SE 25 API",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/atomic/LongAdder.html",
+        "Official Java SE 25 API; checked November 13, 2026"
+      ],
+      [
+        "java.util.concurrent.atomic package — Java SE 25",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/atomic/package-summary.html",
+        "Official Java SE 25 API; checked November 13, 2026"
+      ]
+    ],
+    "visual_explanation": "Two counter cells update independently while a separate read path combines them, revealing the gap between a live metric and an atomic checkpoint.",
+    "written_questions": [
+      "Which counter in your platform drives a business decision even though it is collected as telemetry?",
+      "What exact state store or synchronization boundary should own that decision instead?"
+    ],
+    "source_checked_on": "2026-11-13"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "An exception without an owner and review date is a second standard",
+    "goal": "Let teams deviate deliberately while making the risk, compensating control, owner, and exit decision visible.",
+    "tag": "Distinguished Engineer · architecture governance",
+    "concept": "<p>A building code can allow a temporary alternate fire exit during renovation. It must name who owns the risk, what keeps people safe today, and when the arrangement is reviewed. A handwritten note saying “special case” is not governance.</p><p>Architecture standards need an exception path because real constraints differ. But an exception without evidence becomes permanent divergence. Record the requirement, business reason, risk, compensating control, accountable owner, review date, and explicit outcome: renew, remediate, or retire.</p>",
+    "example": "<p>Team <code>orders-52</code> cannot adopt the standard workload-identity library before a vendor deadline. It requests 60 days using a rotated secret plus restricted network access. The platform security owner reviews evidence on day 30 and the exception expires on day 60 unless renewed.</p>",
+    "use_case": {
+      "when": "Use an exception process when a mandatory platform standard conflicts with a time-bound business, vendor, regulatory, or technical constraint.",
+      "example": "A legacy batch agent cannot yet use OIDC but must continue a regulated month-end process.",
+      "decision": "Approve only when the deviation is explicit, bounded, owned, monitored, and safer than stopping the outcome. Reject open-ended convenience exceptions; change the standard itself when many teams need the same deviation."
+    },
+    "practice": "Add or remove an owner, compensating control, and review date. Predict whether the exception is governable or merely hidden divergence.",
+    "boundary": "The model is an original governance checklist. It does not approve security risk, calculate regulatory exposure, replace counsel or risk officers, enforce cloud controls, or prove that all required evidence is present.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"excOwner\" type=\"checkbox\" checked> accountable owner</label><label><input id=\"excControl\" type=\"checkbox\" checked> compensating control</label><label><input id=\"excReview\" type=\"checkbox\" checked> review and expiry dates</label><div id=\"excWorld\" class=\"world\"></div></div>",
+    "js": "function paintExc(){const parts=[excOwner.checked,excControl.checked,excReview.checked],n=parts.filter(Boolean).length;excWorld.innerHTML='<p><strong>Question:</strong> is the deviation a governed exception?</p><div class=step-flow><div class=\"tile '+(parts[0]?'ok':'fail')+'\">owner '+(parts[0]?'orders-platform':'missing')+'</div><div class=\"tile '+(parts[1]?'ok':'fail')+'\">control '+(parts[1]?'rotation + network limit':'missing')+'</div><div class=\"tile '+(parts[2]?'ok':'fail')+'\">review '+(parts[2]?'day 30 / expiry 60':'open-ended')+'</div><div class=\"tile '+(n===3?'ok':'fail')+'\">'+(n===3?'governable':'parallel standard')+'</div></div>';};[excOwner,excControl,excReview].forEach(x=>x.onchange=paintExc);paintExc();",
+    "questions": [
+      [
+        "orders-52 has a business reason but no owner. What is missing?",
+        [
+          "Someone accountable for evidence, review, and closure",
+          "A longer exception period",
+          "A second undocumented secret"
+        ],
+        0,
+        "Unowned risk tends to survive because nobody must decide its outcome."
+      ],
+      [
+        "Why add an expiry date?",
+        [
+          "It forces a new decision with current evidence",
+          "It guarantees remediation by itself",
+          "It removes the need for compensating controls"
+        ],
+        0,
+        "Expiry does not solve the risk; it prevents silent indefinite acceptance."
+      ],
+      [
+        "When should leaders reconsider the standard itself?",
+        [
+          "When many independent teams need the same justified exception",
+          "Whenever one team dislikes it",
+          "Only after an incident"
+        ],
+        0,
+        "Repeated exceptions can reveal that the standard or paved road no longer fits reality."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "exception={'owner':'orders-platform','days':60,'control':'rotate secret weekly'}",
+          "note": "Create a bounded exception with ownership and a compensating control."
+        },
+        {
+          "code": "exception['review_day']=30; exception['evidence']=['secret age','denied network attempts']",
+          "note": "Define when and how risk will be reviewed."
+        },
+        {
+          "code": "today=31; evidence_current=True; decision='continue-to-expiry' if evidence_current else 'revoke'",
+          "note": "Make an explicit review decision from current evidence."
+        },
+        {
+          "code": "result={'owned':bool(exception['owner']),'bounded':exception['days']<90,'reviewed':today>=exception['review_day'],'decision':decision}",
+          "note": "Expose the conditions that keep the deviation governable."
+        }
+      ],
+      "expect": {
+        "result": {
+          "owned": true,
+          "bounded": true,
+          "reviewed": true,
+          "decision": "continue-to-expiry"
+        }
+      },
+      "limit": "The model is an original governance checklist. It does not approve security risk, calculate regulatory exposure, replace counsel or risk officers, enforce cloud controls, or prove that all required evidence is present.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "exception": {
+              "owner": "orders-platform",
+              "days": 60,
+              "control": "rotate secret weekly"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "exception": {
+              "owner": "orders-platform",
+              "days": 60,
+              "control": "rotate secret weekly",
+              "review_day": 30,
+              "evidence": [
+                "secret age",
+                "denied network attempts"
+              ]
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "exception": {
+              "owner": "orders-platform",
+              "days": 60,
+              "control": "rotate secret weekly",
+              "review_day": 30,
+              "evidence": [
+                "secret age",
+                "denied network attempts"
+              ]
+            },
+            "today": 31,
+            "evidence_current": true,
+            "decision": "continue-to-expiry"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "exception": {
+              "owner": "orders-platform",
+              "days": 60,
+              "control": "rotate secret weekly",
+              "review_day": 30,
+              "evidence": [
+                "secret age",
+                "denied network attempts"
+              ]
+            },
+            "today": 31,
+            "evidence_current": true,
+            "decision": "continue-to-expiry",
+            "result": {
+              "owned": true,
+              "bounded": true,
+              "reviewed": true,
+              "decision": "continue-to-expiry"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS Well-Architected OPS02-BP05: requests for changes and exceptions",
+        "https://docs.aws.amazon.com/wellarchitected/2025-02-25/framework/ops_ops_model_req_add_chg_exception.html",
+        "Official AWS guidance; checked November 13, 2026"
+      ],
+      [
+        "AWS Well-Architected: manage responsibilities and ownership",
+        "https://docs.aws.amazon.com/wellarchitected/2025-02-25/framework/ops_ops_model_def_responsibilities_ownership.html",
+        "Official AWS guidance; checked November 13, 2026"
+      ],
+      [
+        "AWS Well-Architected Tool: improving your workload",
+        "https://docs.aws.amazon.com/wellarchitected/latest/userguide/improving-your-workload.html",
+        "Official AWS guidance; checked November 13, 2026"
+      ]
+    ],
+    "visual_explanation": "Four linked evidence tiles turn a deviation into a decision record; removing any tile visibly converts it into an unmanaged parallel standard.",
+    "written_questions": [
+      "Which current platform exception lacks a named closure decision?",
+      "At what repeat rate would you change the standard or paved road instead of renewing exceptions?"
+    ],
+    "source_checked_on": "2026-11-13"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "JSON Schema default documents a value—the harness must still insert it",
+    "goal": "Keep MCP tool validation, default materialization, and handler execution as three explicit harness stages.",
+    "tag": "GenAI harness engineering · MCP tool schemas",
+    "concept": "<p>A restaurant menu may say “standard spice: medium.” If you leave the spice box blank, the printed hint does not walk into the kitchen and fill the order.</p><p>MCP tool inputs use JSON Schema. In JSON Schema, <code>default</code> is an annotation: validation does not automatically add the property. A harness can deliberately materialize defaults before calling a handler, but that is application behavior and must be consistent across clients, logs, signatures, approvals, and retries.</p>",
+    "example": "<p>The tool <code>search-orders</code> declares <code>limit</code> with default 10 but does not require it. The model sends <code>{\"customer\":\"c52\"}</code>. Validation can accept the object while <code>limit</code> is still absent. The harness either inserts 10 explicitly or the handler uses <code>args.get(\"limit\",10)</code>.</p>",
+    "use_case": {
+      "when": "Use explicit default materialization when several MCP clients call the same tool and the resolved arguments must be stable, observable, and reviewable.",
+      "example": "An order-search tool should cap omitted result limits at 10 before an expensive warehouse query runs.",
+      "decision": "Prefer required fields for decisions the model must make. For safe convenience defaults, choose one owning layer, log original and resolved arguments, validate again if transformation can violate the schema, and never assume every JSON Schema validator mutates input."
+    },
+    "practice": "Omit or provide limit, then toggle harness materialization. Predict what the handler actually receives.",
+    "boundary": "The local model uses one object and one default. It does not run an MCP client/server, JSON Schema validator, composition keywords, signatures, approval UI, retries, external references, schema-depth limits, or product-specific SDK behavior.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>model arguments <select id=\"defaultArgs\"><option value=\"missing\">customer=c52; limit missing</option><option value=\"five\">customer=c52; limit=5</option></select></label><label><input id=\"defaultHarness\" type=\"checkbox\" checked> harness materializes default 10</label><div id=\"defaultWorld\" class=\"world\"></div></div>",
+    "js": "function paintDefault(){const missing=defaultArgs.value==='missing',materialize=defaultHarness.checked;const value=missing?(materialize?10:'absent'):5;defaultWorld.innerHTML='<p><strong>Question:</strong> what reaches the handler?</p><div class=step-flow><div class=tile>schema default 10</div><div class=arrow>→ validate →</div><div class=\"tile '+(missing?'wait':'ok')+'\">input limit '+(missing?'missing':'5')+'</div><div class=arrow>→ harness →</div><div class=\"tile '+(value==='absent'?'fail':'ok')+'\">handler limit '+value+'</div></div><p>Validation '+(missing?'accepts optional property as absent; ':'sees the supplied value; ')+(materialize?'the harness owns insertion.':'no layer inserted the annotation.')+'</p>';};defaultArgs.onchange=paintDefault;defaultHarness.onchange=paintDefault;paintDefault();",
+    "questions": [
+      [
+        "limit has default 10 and is optional. The model omits it. What does JSON Schema validation do by itself?",
+        [
+          "It can accept the object without inserting limit",
+          "It always mutates the object to limit=10",
+          "It must reject the tool call"
+        ],
+        0,
+        "The default keyword is annotation metadata, not a required mutation step."
+      ],
+      [
+        "Why log both original and resolved arguments?",
+        [
+          "To distinguish the model's decision from harness policy",
+          "To hide default behavior",
+          "To bypass schema validation"
+        ],
+        0,
+        "Auditing and evaluation need to know whether a value was supplied or inserted."
+      ],
+      [
+        "When is a required property better than a default?",
+        [
+          "When the model or user must make an explicit consequential choice",
+          "When the field is harmless convenience",
+          "When every value is equivalent"
+        ],
+        0,
+        "Defaults can silently choose; consequential intent should remain explicit."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "schema={'properties':{'limit':{'type':'integer','default':10}},'required':['customer']} ; args={'customer':'c52'}",
+          "note": "Declare an optional limit annotation and omit it from the call."
+        },
+        {
+          "code": "valid='customer' in args; before=dict(args)",
+          "note": "Validate the required customer without mutating arguments."
+        },
+        {
+          "code": "resolved={**args,'limit':args.get('limit',schema['properties']['limit']['default'])}",
+          "note": "Let the harness deliberately materialize the annotation."
+        },
+        {
+          "code": "result={'valid':valid,'before':before,'handler_args':resolved,'inserted_by':'harness'}",
+          "note": "Preserve both original and resolved values for audit."
+        }
+      ],
+      "expect": {
+        "result": {
+          "valid": true,
+          "before": {
+            "customer": "c52"
+          },
+          "handler_args": {
+            "customer": "c52",
+            "limit": 10
+          },
+          "inserted_by": "harness"
+        }
+      },
+      "limit": "The local model uses one object and one default. It does not run an MCP client/server, JSON Schema validator, composition keywords, signatures, approval UI, retries, external references, schema-depth limits, or product-specific SDK behavior.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "schema": {
+              "properties": {
+                "limit": {
+                  "type": "integer",
+                  "default": 10
+                }
+              },
+              "required": [
+                "customer"
+              ]
+            },
+            "args": {
+              "customer": "c52"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "schema": {
+              "properties": {
+                "limit": {
+                  "type": "integer",
+                  "default": 10
+                }
+              },
+              "required": [
+                "customer"
+              ]
+            },
+            "args": {
+              "customer": "c52"
+            },
+            "valid": true,
+            "before": {
+              "customer": "c52"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "schema": {
+              "properties": {
+                "limit": {
+                  "type": "integer",
+                  "default": 10
+                }
+              },
+              "required": [
+                "customer"
+              ]
+            },
+            "args": {
+              "customer": "c52"
+            },
+            "valid": true,
+            "before": {
+              "customer": "c52"
+            },
+            "resolved": {
+              "customer": "c52",
+              "limit": 10
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "schema": {
+              "properties": {
+                "limit": {
+                  "type": "integer",
+                  "default": 10
+                }
+              },
+              "required": [
+                "customer"
+              ]
+            },
+            "args": {
+              "customer": "c52"
+            },
+            "valid": true,
+            "before": {
+              "customer": "c52"
+            },
+            "resolved": {
+              "customer": "c52",
+              "limit": 10
+            },
+            "result": {
+              "valid": true,
+              "before": {
+                "customer": "c52"
+              },
+              "handler_args": {
+                "customer": "c52",
+                "limit": 10
+              },
+              "inserted_by": "harness"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "JSON Schema annotations: default",
+        "https://json-schema.org/understanding-json-schema/reference/annotations",
+        "JSON Schema documentation; checked November 13, 2026"
+      ],
+      [
+        "MCP 2026-07-28 release candidate: full JSON Schema 2020-12 for tools",
+        "https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/",
+        "Official MCP blog; published July 28, 2026; checked November 13, 2026"
+      ],
+      [
+        "MCP Python SDK: low-level server schemas",
+        "https://py.sdk.modelcontextprotocol.io/advanced/low-level-server/",
+        "Official SDK documentation; checked November 13, 2026"
+      ]
+    ],
+    "visual_explanation": "A three-stage flow keeps schema annotation, accepted input, and resolved handler arguments separate so the insertion owner is visible.",
+    "written_questions": [
+      "Which harness layer currently owns default insertion, and is that behavior consistent across transports?",
+      "Which tool argument should become required because silently choosing it changes cost, scope, or authority?"
+    ],
+    "source_checked_on": "2026-11-13"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "A solution-processed film can amplify light—but “lasing-like” is still a careful claim",
+    "goal": "Read a new MoS₂ light-emission result as an evidence ladder rather than upgrading its title into a production laser.",
+    "tag": "Technology breakthroughs · new peer-reviewed research · November 13, 2026",
+    "concept": "<p>A choir can sound louder when many singers stay in tune. That does not automatically prove it is an opera company ready for a world tour.</p><p>A new peer-reviewed paper reports room-temperature continuous-wave lasing-like emission from solution-processed bulk-monolayer MoS₂ thin films placed in whispering-gallery-mode cavities. The approach matters because mechanically exfoliated flakes are small and high-temperature growth complicates scale. The authors use the careful phrase “lasing-like”; our lesson preserves that boundary.</p>",
+    "example": "<p>Think of three evidence layers for sample <code>m52</code>: the solution process preserves monolayer optical properties; the film couples to a resonant cavity; and continuous optical pumping produces lasing-like emission at room temperature. Those observations motivate device research. They do not by themselves establish an electrically pumped, packaged, reliable commercial laser.</p>",
+    "use_case": {
+      "when": "Study this result when evaluating scalable gain media for integrated photonics, optical sensing, or low-dimensional-material devices.",
+      "example": "A photonics team asks whether solution processing could provide more gain volume than isolated exfoliated flakes in a cavity experiment.",
+      "decision": "Treat it as research evidence. Require independent replication, coherence and threshold characterization, electrical pumping, lifetime, uniformity, packaging, and manufacturing yield before a product claim."
+    },
+    "practice": "Toggle the film, cavity, and continuous pump. Predict which research claim the supplied evidence can support.",
+    "boundary": "The world is an evidence checklist. It does not solve Maxwell equations, model excitons, reproduce spectra, measure coherence or threshold, fabricate MoS₂, pump a cavity, estimate yield, or validate a laser device.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label><input id=\"mosFilm\" type=\"checkbox\" checked> solution-processed bulk-monolayer film</label><label><input id=\"mosCavity\" type=\"checkbox\" checked> whispering-gallery-mode cavity</label><label><input id=\"mosPump\" type=\"checkbox\" checked> room-temperature continuous optical pump</label><div id=\"mosWorld\" class=\"world\"></div></div>",
+    "js": "function paintMos(){const n=[mosFilm.checked,mosCavity.checked,mosPump.checked].filter(Boolean).length;const claim=n===3?'lasing-like emission evidence':'insufficient for reported setup';mosWorld.innerHTML='<p><strong>Question:</strong> how far does the evidence reach?</p><div class=step-flow><div class=\"tile '+(mosFilm.checked?'ok':'fail')+'\">film '+(mosFilm.checked?'present':'missing')+'</div><div class=\"tile '+(mosCavity.checked?'ok':'fail')+'\">cavity '+(mosCavity.checked?'present':'missing')+'</div><div class=\"tile '+(mosPump.checked?'ok':'fail')+'\">CW pump '+(mosPump.checked?'present':'missing')+'</div><div class=\"tile '+(n===3?'wait':'fail')+'\">'+claim+'<br>not commercial laser proof</div></div>';};[mosFilm,mosCavity,mosPump].forEach(x=>x.onchange=paintMos);paintMos();",
+    "questions": [
+      [
+        "Why is solution processing interesting in this paper?",
+        [
+          "It may scale gain material beyond tiny exfoliated flakes while preserving useful optical properties",
+          "It proves zero-defect mass production",
+          "It removes the need for a cavity"
+        ],
+        0,
+        "The research motivation is scalable film preparation, not an already-proven production line."
+      ],
+      [
+        "Why retain the phrase lasing-like?",
+        [
+          "It matches the authors' bounded evidence claim",
+          "It means no light was observed",
+          "It proves electrical pumping"
+        ],
+        0,
+        "Precise language prevents a research observation from becoming a stronger unsupported device claim."
+      ],
+      [
+        "What is a key deployment gap?",
+        [
+          "Electrical pumping, lifetime, uniformity, packaging, and yield remain to be established",
+          "A fluent summary",
+          "A larger Java heap"
+        ],
+        0,
+        "A laboratory optical-pumping result is not a packaged reliable product."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "evidence={'solution_film':True,'cavity':True,'continuous_optical_pump':True}",
+          "note": "Record the reported experimental ingredients."
+        },
+        {
+          "code": "reported_setup=all(evidence.values())",
+          "note": "Check whether the small evidence model matches the setup."
+        },
+        {
+          "code": "product_evidence={'electrical_pump':False,'lifetime':False,'manufacturing_yield':False}",
+          "note": "Separate missing device and manufacturing evidence."
+        },
+        {
+          "code": "result={'supports_lasing_like_setup':reported_setup,'supports_commercial_laser':all(product_evidence.values()),'claim':'lasing-like'}",
+          "note": "Keep the research claim below the production claim."
+        }
+      ],
+      "expect": {
+        "result": {
+          "supports_lasing_like_setup": true,
+          "supports_commercial_laser": false,
+          "claim": "lasing-like"
+        }
+      },
+      "limit": "The world is an evidence checklist. It does not solve Maxwell equations, model excitons, reproduce spectra, measure coherence or threshold, fabricate MoS₂, pump a cavity, estimate yield, or validate a laser device.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "evidence": {
+              "solution_film": true,
+              "cavity": true,
+              "continuous_optical_pump": true
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "evidence": {
+              "solution_film": true,
+              "cavity": true,
+              "continuous_optical_pump": true
+            },
+            "reported_setup": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "evidence": {
+              "solution_film": true,
+              "cavity": true,
+              "continuous_optical_pump": true
+            },
+            "reported_setup": true,
+            "product_evidence": {
+              "electrical_pump": false,
+              "lifetime": false,
+              "manufacturing_yield": false
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "evidence": {
+              "solution_film": true,
+              "cavity": true,
+              "continuous_optical_pump": true
+            },
+            "reported_setup": true,
+            "product_evidence": {
+              "electrical_pump": false,
+              "lifetime": false,
+              "manufacturing_yield": false
+            },
+            "result": {
+              "supports_lasing_like_setup": true,
+              "supports_commercial_laser": false,
+              "claim": "lasing-like"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Room-temperature continuous-wave lasing-like emission from solution-processed bulk monolayer MoS₂ thin films",
+        "https://www.nature.com/articles/s41467-026-79012-8",
+        "Nature Communications; published November 13, 2026; checked November 13, 2026"
+      ],
+      [
+        "Article DOI",
+        "https://doi.org/10.1038/s41467-026-79012-8",
+        "Primary peer-reviewed paper DOI; checked November 13, 2026"
+      ]
+    ],
+    "visual_explanation": "An evidence ladder distinguishes the reported film-cavity-pump setup from the still-missing electrical, reliability, and manufacturing proof.",
+    "written_questions": [
+      "Which measurement would most clearly separate amplified spontaneous emission from laser operation in a replication?",
+      "What manufacturing evidence would you require before calling the solution process scalable?"
+    ],
+    "source_checked_on": "2026-11-13"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A restore-key finds an older cache—it does not prove the bytes still fit",
+    "goal": "Use partial cache matches as a performance hint while making the package manager verify and repair restored dependencies.",
+    "tag": "CI/CD & GitHub Actions · caches",
+    "concept": "<p>A spare key from last year's office may open the supply closet. It does not prove every item inside matches today's inventory list.</p><p>GitHub Actions first searches for an exact cache key. If that misses, <code>restore-keys</code> can select a prefix match, typically the most recently created matching cache. That older cache is a starting point. The package manager must compare it with today's lockfile, download missing versions, and save a new exact cache after a successful job.</p>",
+    "example": "<p>Commit <code>sha-53</code> needs key <code>npm-linux-lock53</code>. The exact key misses, but prefix <code>npm-linux-</code> restores <code>npm-linux-lock51</code>. <code>npm ci</code> verifies the new lockfile, replaces stale packages, and the workflow later saves <code>lock53</code>.</p>",
+    "use_case": {
+      "when": "Use restore-key prefixes when dependency sets evolve incrementally and an older download cache can safely accelerate restoration.",
+      "example": "A Java or Node build reuses previously downloaded immutable package archives, then the package manager resolves the current lockfile.",
+      "decision": "Include OS, architecture, tool/runtime, and lockfile hash in the exact key. Use a deliberately broader prefix only for content a trusted resolver can verify. Never treat restored build outputs or unverified executables as compatible merely because the cache matched."
+    },
+    "practice": "Change the current lock hash and prefix. Predict exact hit, partial restore, verification work, and whether a new cache is saved.",
+    "boundary": "The model compares key strings and package sets. It does not call GitHub, implement cache version matching, model branch scope, eviction, trust restrictions, archive extraction, supply-chain attacks, action versions, billing, or package-manager integrity checks.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>requested key <select id=\"cacheKey\"><option value=\"53\">npm-linux-lock53</option><option value=\"51\">npm-linux-lock51</option></select></label><label>restore prefix <select id=\"cachePrefix\"><option value=\"broad\">npm-linux-</option><option value=\"none\">none</option></select></label><div id=\"cacheWorld\" class=\"world\"></div></div>",
+    "js": "function paintCache(){const k=cacheKey.value,p=cachePrefix.value,exact=k==='51';const restored=exact?'lock51 exact':(p==='broad'?'lock51 partial':'nothing');cacheWorld.innerHTML='<p><strong>Question:</strong> what may the job trust?</p><div class=step-flow><div class=tile>request lock'+k+'</div><div class=arrow>→ lookup →</div><div class=\"tile '+(exact?'ok':'wait')+'\">restore '+restored+'</div><div class=arrow>→</div><div class=\"tile '+(exact?'ok':(restored==='nothing'?'wait':'fail'))+'\">'+(exact?'use exact cache':'package manager verifies lock'+k)+'</div></div><p>'+(exact?'Exact cache hit.':'A partial match is not compatibility proof; resolve and save the new exact key after success.')+'</p>';};cacheKey.onchange=paintCache;cachePrefix.onchange=paintCache;paintCache();",
+    "questions": [
+      [
+        "lock53 misses and restore-keys returns lock51. What should happen next?",
+        [
+          "The package manager verifies lock53 and repairs the cache contents",
+          "Deploy lock51 without checks",
+          "Rename the old cache key"
+        ],
+        0,
+        "A partial cache is only a seed; today's dependency contract remains the lockfile."
+      ],
+      [
+        "Why include the lockfile hash in the exact key?",
+        [
+          "Dependency changes produce a new exact cache identity",
+          "It encrypts the cache",
+          "It grants cloud permissions"
+        ],
+        0,
+        "The exact key should change when the dependency graph changes."
+      ],
+      [
+        "What is unsafe to restore broadly?",
+        [
+          "Unverified build outputs that are assumed compatible",
+          "Download archives checked by a trusted resolver",
+          "Immutable packages verified against the current lockfile"
+        ],
+        0,
+        "A prefix match cannot certify executable compatibility or provenance."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "requested='npm-linux-lock53'; caches=['npm-linux-lock49','npm-linux-lock51']",
+          "note": "Request a new exact key with two older caches available."
+        },
+        {
+          "code": "exact=requested if requested in caches else None; prefix='npm-linux-'",
+          "note": "Observe the exact miss and declare a fallback prefix."
+        },
+        {
+          "code": "restored=exact or sorted([k for k in caches if k.startswith(prefix)])[-1]",
+          "note": "Select the newest synthetic prefix match."
+        },
+        {
+          "code": "result={'exact_hit':restored==requested,'restored':restored,'verify_lock':'lock53','save_after_success':requested}",
+          "note": "Require current-lock verification before saving the new exact cache."
+        }
+      ],
+      "expect": {
+        "result": {
+          "exact_hit": false,
+          "restored": "npm-linux-lock51",
+          "verify_lock": "lock53",
+          "save_after_success": "npm-linux-lock53"
+        }
+      },
+      "limit": "The model compares key strings and package sets. It does not call GitHub, implement cache version matching, model branch scope, eviction, trust restrictions, archive extraction, supply-chain attacks, action versions, billing, or package-manager integrity checks.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "requested": "npm-linux-lock53",
+            "caches": [
+              "npm-linux-lock49",
+              "npm-linux-lock51"
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "requested": "npm-linux-lock53",
+            "caches": [
+              "npm-linux-lock49",
+              "npm-linux-lock51"
+            ],
+            "exact": null,
+            "prefix": "npm-linux-"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "requested": "npm-linux-lock53",
+            "caches": [
+              "npm-linux-lock49",
+              "npm-linux-lock51"
+            ],
+            "exact": null,
+            "prefix": "npm-linux-",
+            "restored": "npm-linux-lock51"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "requested": "npm-linux-lock53",
+            "caches": [
+              "npm-linux-lock49",
+              "npm-linux-lock51"
+            ],
+            "exact": null,
+            "prefix": "npm-linux-",
+            "restored": "npm-linux-lock51",
+            "result": {
+              "exact_hit": false,
+              "restored": "npm-linux-lock51",
+              "verify_lock": "lock53",
+              "save_after_success": "npm-linux-lock53"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions dependency caching reference",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching",
+        "Official GitHub documentation; checked November 13, 2026"
+      ],
+      [
+        "GitHub Actions dependency caching concepts",
+        "https://docs.github.com/en/actions/concepts/workflows-and-actions/dependency-caching",
+        "Official GitHub documentation; checked November 13, 2026"
+      ]
+    ],
+    "visual_explanation": "A lookup path separates exact hit, partial prefix restoration, package-manager verification, and creation of the new exact cache.",
+    "written_questions": [
+      "Which cache in your pipelines restores a broad prefix without a verifying consumer?",
+      "Which dimensions—OS, architecture, runtime, tool, and lockfile—belong in its exact key?"
+    ],
+    "source_checked_on": "2026-11-13"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "409 says the resource state conflicts; 422 says the instructions cannot be processed",
+    "goal": "Return an error that tells clients whether to refresh resource state or repair otherwise well-formed content.",
+    "tag": "APIs & Microservices · HTTP error semantics",
+    "concept": "<p>A bank transfer can fail for two different reasons. You may be editing an old account version, or you may be asking to transfer a negative amount. The fixes are different.</p><p><code>409 Conflict</code> fits a request that clashes with the current state of the target resource and might succeed after the client resolves that conflict. <code>422 Unprocessable Content</code> fits understood, syntactically correct content whose instructions cannot be processed. A useful response explains the repair path.</p>",
+    "example": "<p>Client A reads order <code>o52</code> at version 7. Client B changes it to version 8. A's update with version 7 gets 409 plus the current version. A separate request with quantity -2 gets 422 plus a field error. Retrying either unchanged is not a fix.</p>",
+    "use_case": {
+      "when": "Use this distinction when an API accepts structurally valid JSON but must communicate either stale resource state or invalid domain instructions.",
+      "example": "An order update uses optimistic concurrency and domain validation in a financial workflow.",
+      "decision": "Use 409 when current server state is the conflict and provide safe reconciliation metadata. Use 422 when the representation is understood but its instructions cannot be processed. Keep 400 for malformed or otherwise generic request errors when a more precise status is not useful."
+    },
+    "practice": "Change order version and quantity. Predict 200, 409, or 422 and the next client action.",
+    "boundary": "The model implements one opinionated validation order. RFC 9110 does not prescribe every application mapping. It does not send HTTP, define a standard error body, authorize callers, prevent races, merge updates, persist orders, or guarantee that every framework uses the same exception mapping.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>client version <select id=\"httpVersion\"><option value=\"7\">7 (stale)</option><option value=\"8\">8 (current)</option></select></label><label>quantity <select id=\"httpQuantity\"><option value=\"2\">2</option><option value=\"-2\">-2</option></select></label><div id=\"httpWorld\" class=\"world\"></div></div>",
+    "js": "function paintHttp(){const v=+httpVersion.value,q=+httpQuantity.value;let status,action;if(v!==8){status=409;action='refresh version 8 and reconcile';}else if(q<0){status=422;action='repair quantity';}else{status=200;action='update accepted';}httpWorld.innerHTML='<p><strong>Question:</strong> what can the client repair?</p><div class=step-flow><div class=tile>order o52 server v8</div><div class=arrow>← update v'+v+' qty '+q+' →</div><div class=\"tile '+(status===200?'ok':'fail')+'\">HTTP '+status+'<br>'+action+'</div></div>';};httpVersion.onchange=paintHttp;httpQuantity.onchange=paintHttp;paintHttp();",
+    "questions": [
+      [
+        "o52 is now version 8; the client sends version 7. Which response best guides repair?",
+        [
+          "409 with current-version or reconciliation information",
+          "422 because JSON parsed",
+          "200 and silently overwrite"
+        ],
+        0,
+        "The request conflicts with the resource's current version and may be resolvable after refresh."
+      ],
+      [
+        "The current version is correct but quantity is -2. Why 422?",
+        [
+          "The content type and syntax are understood, but the instruction cannot be processed",
+          "The resource version is stale",
+          "The server is overloaded"
+        ],
+        0,
+        "The problem is semantic content, not resource-state concurrency."
+      ],
+      [
+        "What should the client avoid for both errors?",
+        [
+          "Blindly retrying the identical request",
+          "Showing field guidance for 422",
+          "Refreshing state for 409"
+        ],
+        0,
+        "Neither error is made safe or successful by an unchanged retry."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "server={'id':'o52','version':8}; request={'version':7,'quantity':2}",
+          "note": "Create a stale but otherwise valid update."
+        },
+        {
+          "code": "status=409 if request['version']!=server['version'] else 200",
+          "note": "Check target-resource state first."
+        },
+        {
+          "code": "if status==200 and request['quantity']<0: status=422",
+          "note": "Validate domain instructions only after state matches."
+        },
+        {
+          "code": "action='refresh-and-reconcile' if status==409 else ('repair-content' if status==422 else 'accept'); result={'status':status,'action':action}",
+          "note": "Return a repair path aligned to the failure."
+        }
+      ],
+      "expect": {
+        "result": {
+          "status": 409,
+          "action": "refresh-and-reconcile"
+        }
+      },
+      "limit": "The model implements one opinionated validation order. RFC 9110 does not prescribe every application mapping. It does not send HTTP, define a standard error body, authorize callers, prevent races, merge updates, persist orders, or guarantee that every framework uses the same exception mapping.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "server": {
+              "id": "o52",
+              "version": 8
+            },
+            "request": {
+              "version": 7,
+              "quantity": 2
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "server": {
+              "id": "o52",
+              "version": 8
+            },
+            "request": {
+              "version": 7,
+              "quantity": 2
+            },
+            "status": 409
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "server": {
+              "id": "o52",
+              "version": 8
+            },
+            "request": {
+              "version": 7,
+              "quantity": 2
+            },
+            "status": 409
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "server": {
+              "id": "o52",
+              "version": 8
+            },
+            "request": {
+              "version": 7,
+              "quantity": 2
+            },
+            "status": 409,
+            "action": "refresh-and-reconcile",
+            "result": {
+              "status": 409,
+              "action": "refresh-and-reconcile"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "RFC 9110: HTTP Semantics",
+        "https://www.rfc-editor.org/rfc/rfc9110.html",
+        "IETF standard; published June 2022; checked November 13, 2026"
+      ],
+      [
+        "RFC 9110 information page",
+        "https://www.rfc-editor.org/info/rfc9110/",
+        "IETF publication record; checked November 13, 2026"
+      ]
+    ],
+    "visual_explanation": "One order update branches on stale state versus invalid instructions, pairing each status with a different client repair action.",
+    "written_questions": [
+      "Which current API maps stale state and invalid domain content to the same status?",
+      "What safe reconciliation data can a 409 response reveal without leaking another tenant's state?"
+    ],
+    "source_checked_on": "2026-11-13"
+  }
+]
