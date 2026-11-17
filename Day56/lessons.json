@@ -1,0 +1,1208 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Close the old customer version before opening the new one",
+    "goal": "Preserve one non-overlapping Type-2 history when customer changes arrive late or are replayed.",
+    "tag": "Certification cycle 1 · focused lesson 5 · CDC transformation and history",
+    "concept": "<p>A passport office does not erase your old passport when it issues a new one. It stamps the old validity period closed and opens a new period.</p><p>A slowly changing dimension Type 2 table does the same for business facts. Each key has dated versions. A change for customer <code>c56</code> at time 20 closes the current <code>basic</code> row at 20 and inserts <code>pro</code> starting at 20. The hard invariant is not “keep two rows”; it is “for one key, validity ranges do not overlap and one row is current.” Sequence evidence, duplicate handling, deletes, null rules, and late events must be explicit.</p>",
+    "example": "<p>Before: <code>c56 | basic | [0,∞)</code>. After the event <code>(c56, pro, ts=20)</code>: <code>basic | [0,20)</code> and <code>pro | [20,∞)</code>. Replaying the exact event must not create a second <code>pro</code> row.</p>",
+    "use_case": {
+      "when": "Use Type-2 history when analytics or audit questions need the value that was valid at an earlier business time.",
+      "example": "A financial data platform must explain which customer tier and risk segment applied when an order was approved.",
+      "decision": "Choose Type 2 only for attributes whose history matters. Use Type 1 for corrections where old values have no business meaning. Define sequence, tie, delete, late-arrival, and replay rules before choosing a product mechanism."
+    },
+    "practice": "Apply the c56 event, then replay it. Predict the row ranges and current-row count.",
+    "boundary": "The local worlds model one key and one ordered update. They do not run Lakeflow AUTO CDC, Delta, Snowflake streams/tasks, transactions, late events, deletes, schema evolution, bitemporal history, concurrent writers, retention, or production recovery.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>event <select id=\"scdEvent\"><option value=\"once\">apply ts=20 once</option><option value=\"replay\">replay ts=20 twice</option><option value=\"broken\">insert new without closing old</option></select></label><div id=\"scdWorld\" class=\"world\"></div></div>",
+    "js": "function paintScd(){const b=scdEvent.value==='broken';scdWorld.innerHTML='<p><strong>Question:</strong> how many rows claim to be current?</p><table><tr><th>tier</th><th>valid from</th><th>valid to</th><th>current</th></tr><tr><td>basic</td><td>0</td><td>'+(b?'∞':'20')+'</td><td>'+(b?'yes':'no')+'</td></tr><tr><td>pro</td><td>20</td><td>∞</td><td>yes</td></tr></table><p class=\"'+(b?'fail':'ok')+'\">Current rows = '+(b?2:1)+'. '+(scdEvent.value==='replay'?'The duplicate event is ignored by sequence/idempotency in this toy.':b?'Ranges overlap: history is ambiguous.':'Old range closes exactly where the new one opens.')+'</p>';};scdEvent.onchange=paintScd;paintScd();",
+    "questions": [
+      [
+        "What must happen when c56 changes at time 20?",
+        [
+          "Close basic at 20 and open pro at 20",
+          "Overwrite basic in place",
+          "Insert pro while leaving basic current"
+        ],
+        0,
+        "Adjacent half-open ranges preserve history without overlap."
+      ],
+      [
+        "Why is a sequence column essential?",
+        [
+          "It decides event order and helps reject stale or duplicate changes",
+          "It grants table access",
+          "It chooses warehouse size"
+        ],
+        0,
+        "Type-2 correctness depends on a deterministic change order."
+      ],
+      [
+        "When is Type 1 simpler and better?",
+        [
+          "When old values have no business or audit meaning",
+          "Whenever events arrive late",
+          "Whenever history is required"
+        ],
+        0,
+        "Do not pay history complexity for attributes whose previous values are irrelevant."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "rows=[{'id':'c56','tier':'basic','from':0,'to':None,'current':True}]",
+          "note": "Start with one current version."
+        },
+        {
+          "code": "event={'id':'c56','tier':'pro','ts':20}",
+          "note": "Receive the ordered change."
+        },
+        {
+          "code": "rows[0].update({'to':event['ts'],'current':False})",
+          "note": "Close the previous half-open range."
+        },
+        {
+          "code": "rows.append({'id':'c56','tier':'pro','from':20,'to':None,'current':True}); result={'ranges':[(r['tier'],r['from'],r['to']) for r in rows],'current_count':sum(r['current'] for r in rows)}",
+          "note": "Open the new version and verify one current row."
+        }
+      ],
+      "expect": {
+        "result": {
+          "ranges": [
+            [
+              "basic",
+              0,
+              20
+            ],
+            [
+              "pro",
+              20,
+              null
+            ]
+          ],
+          "current_count": 1
+        }
+      },
+      "limit": "The local worlds model one key and one ordered update. They do not run Lakeflow AUTO CDC, Delta, Snowflake streams/tasks, transactions, late events, deletes, schema evolution, bitemporal history, concurrent writers, retention, or production recovery.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "rows": [
+              {
+                "id": "c56",
+                "tier": "basic",
+                "from": 0,
+                "to": null,
+                "current": true
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "rows": [
+              {
+                "id": "c56",
+                "tier": "basic",
+                "from": 0,
+                "to": null,
+                "current": true
+              }
+            ],
+            "event": {
+              "id": "c56",
+              "tier": "pro",
+              "ts": 20
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "rows": [
+              {
+                "id": "c56",
+                "tier": "basic",
+                "from": 0,
+                "to": 20,
+                "current": false
+              }
+            ],
+            "event": {
+              "id": "c56",
+              "tier": "pro",
+              "ts": 20
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "rows": [
+              {
+                "id": "c56",
+                "tier": "basic",
+                "from": 0,
+                "to": 20,
+                "current": false
+              },
+              {
+                "id": "c56",
+                "tier": "pro",
+                "from": 20,
+                "to": null,
+                "current": true
+              }
+            ],
+            "event": {
+              "id": "c56",
+              "tier": "pro",
+              "ts": 20
+            },
+            "result": {
+              "ranges": [
+                [
+                  "basic",
+                  0,
+                  20
+                ],
+                [
+                  "pro",
+                  20,
+                  null
+                ]
+              ],
+              "current_count": 1
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks: AUTO CDC INTO",
+        "https://docs.databricks.com/aws/en/ldp/developer/ldp-sql-ref-apply-changes-into",
+        "Official Databricks documentation; checked November 16, 2026"
+      ],
+      [
+        "Databricks: AUTO CDC APIs",
+        "https://docs.databricks.com/aws/en/ldp/cdc",
+        "Official Databricks documentation; checked November 16, 2026"
+      ],
+      [
+        "Snowflake: Introduction to streams and tasks",
+        "https://docs.snowflake.com/en/user-guide/data-pipelines-intro",
+        "Official Snowflake documentation; checked November 16, 2026"
+      ],
+      [
+        "Snowflake: MERGE",
+        "https://docs.snowflake.com/en/sql-reference/sql/merge",
+        "Official Snowflake documentation; checked November 16, 2026"
+      ]
+    ],
+    "visual_explanation": "Two validity rows share the time-20 boundary, while the broken branch makes their overlap and double-current failure visible.",
+    "written_questions": [
+      "Which customer attribute in your platform genuinely needs historical truth rather than overwrite semantics?",
+      "How will you define ordering when two source changes have the same timestamp?"
+    ],
+    "source_checked_on": "2026-11-16",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: declare keys, sequence, and SCD Type 2 in AUTO CDC",
+        "minutes": 9,
+        "html": "<p><strong>First-minute product recall:</strong> Recall Day31: a change feed is evidence, not yet a correct history table.</p><pre><code><span>-- Lakeflow Declarative Pipelines SQL; not executed</span><span>CREATE OR REFRESH STREAMING TABLE dim_customer;</span><span>CREATE FLOW customer_history AS AUTO CDC INTO dim_customer</span><span>FROM STREAM(customer_changes)</span><span>KEYS (customer_id)</span><span>SEQUENCE BY event_ts</span><span>COLUMNS * EXCEPT (op, event_ts)</span><span>STORED AS SCD TYPE 2;</span></code></pre><p><code>AUTO CDC</code> is Databricks’ recommended declarative path for CDC. It handles ordering and Type-2 history from a change feed, but you must still define keys, sequence, ignored columns, and delete semantics. Product/runtime prerequisites apply; inspect the generated target and late-event behavior rather than treating the clause as magic.</p><label>Databricks input <select id=\"dbScd\"><option value=\"ordered\">ts 20 then duplicate 20</option><option value=\"late\">ts 20 then late ts 10</option></select></label><div id=\"dbScdWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL was not run in Databricks; this is a local JavaScript teaching model.</p>",
+        "markdown": "Recall Day31's distinction between a feed and a correct target. `AUTO CDC INTO` declares keys, sequence and `STORED AS SCD TYPE 2`; prerequisites, delete semantics and late data still need design. SQL not executed in Databricks.",
+        "javascript": "const dbScd=$('dbScd'),dbScdWorld=$('dbScdWorld');function paintDbScd(){const late=dbScd.value==='late';dbScdWorld.innerHTML='<div class=step-flow><div class=tile>key c56</div><div class=arrow>→</div><div class=tile>sequence '+(late?'20 then 10':'20 then 20')+'</div><div class=arrow>→</div><div class=\"tile '+(late?'wait':'ok')+'\">'+(late?'late-event policy matters':'duplicate does not add version')+'</div></div>';};dbScd.onchange=paintDbScd;paintDbScd();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: make close-and-insert an explicit stream/task transaction",
+        "minutes": 9,
+        "html": "<p><strong>First-minute product recall:</strong> Recall Day31: a Snowflake stream exposes a change interval and advances when committed DML consumes it.</p><pre><code><span>-- Snowflake SQL sketch; not executed</span><span>BEGIN;</span><span>UPDATE dim_customer d SET valid_to=s.event_ts, is_current=FALSE</span><span>  FROM customer_stream s</span><span>  WHERE d.customer_id=s.customer_id AND d.is_current;</span><span>INSERT INTO dim_customer</span><span>  SELECT customer_id,tier,event_ts,NULL,TRUE FROM customer_stream;</span><span>COMMIT;</span></code></pre><p>A stream plus triggered task can drive explicit change processing. Snowflake <code>MERGE</code> is useful, but Type 2 needs both closing the old row and inserting a new row; many designs stage action rows or use a stored procedure/explicit transaction. Deduplicate the source first because multiple source rows matching one target can make MERGE nondeterministic. This is not a direct managed equivalent of AUTO CDC.</p><label>Snowflake transaction <select id=\"sfScd\"><option value=\"atomic\">close + insert commit</option><option value=\"split\">close commits; insert fails</option></select></label><div id=\"sfScdWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL was not run in Snowflake; this is a local JavaScript teaching model.</p>",
+        "markdown": "Recall Day31's stream offset boundary. Snowflake stream/task processing makes Type-2 close-and-insert explicit; keep both effects in a transaction and deduplicate before MERGE. There is no direct managed AUTO CDC equivalent. SQL not executed in Snowflake.",
+        "javascript": "const sfScd=$('sfScd'),sfScdWorld=$('sfScdWorld');function paintSfScd(){const ok=sfScd.value==='atomic';sfScdWorld.innerHTML='<div class=step-flow><div class=tile>basic current</div><div class=arrow>→</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'close + insert commit':'close commits; insert fails')+'</div><div class=arrow>→</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'one current row':'zero current rows')+'</div></div>';};sfScd.onchange=paintSfScd;paintSfScd();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><tr><th>Question</th><th>Databricks</th><th>Snowflake</th></tr><tr><td>Main mechanism</td><td>AUTO CDC flow</td><td>Stream/task plus explicit DML</td></tr><tr><td>Order</td><td>SEQUENCE BY</td><td>Deduplicate/order staged changes</td></tr><tr><td>Type-2 close/insert</td><td>Managed by declared flow</td><td>Designed explicitly and kept atomic</td></tr><tr><td>Exact equivalent?</td><td colspan=2>No; the business invariant matches, the operational mechanism does not.</td></tr></table>",
+      "markdown": "Databricks AUTO CDC manages declared Type-2 mechanics. Snowflake uses explicit stream/task and DML patterns. Both require deterministic keys/order, delete rules, deduplication, non-overlapping ranges, and verification."
+    },
+    "product_questions": [
+      [
+        "What prevents duplicate c56 versions in Databricks?",
+        [
+          "A stable key plus deterministic sequence and flow semantics",
+          "Warehouse size",
+          "The table comment"
+        ],
+        0,
+        "CDC history needs identity and order."
+      ],
+      [
+        "Why keep Snowflake close-and-insert atomic?",
+        [
+          "A failure between them can leave zero or two current rows",
+          "It changes the account edition",
+          "It makes every MERGE deterministic"
+        ],
+        0,
+        "Both effects form one history transition."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks: AUTO CDC INTO",
+        "https://docs.databricks.com/aws/en/ldp/developer/ldp-sql-ref-apply-changes-into",
+        "Official Databricks documentation; checked November 16, 2026"
+      ],
+      [
+        "Databricks: AUTO CDC APIs",
+        "https://docs.databricks.com/aws/en/ldp/cdc",
+        "Official Databricks documentation; checked November 16, 2026"
+      ],
+      [
+        "Snowflake: Introduction to streams and tasks",
+        "https://docs.snowflake.com/en/user-guide/data-pipelines-intro",
+        "Official Snowflake documentation; checked November 16, 2026"
+      ],
+      [
+        "Snowflake: MERGE",
+        "https://docs.snowflake.com/en/sql-reference/sql/merge",
+        "Official Snowflake documentation; checked November 16, 2026"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-16",
+      "session_type": "focused",
+      "cycle_position": 5,
+      "cycle_origin": "Day52",
+      "databricks": {
+        "scope": "AUTO CDC, keys, sequence, Type-2 history, duplicate/late-event boundary, and Lakeflow pipeline prerequisites."
+      },
+      "snowflake": {
+        "scope": "Streams, triggered tasks, explicit close-and-insert transaction, MERGE nondeterminism boundary, and no-direct-managed-equivalent comparison. Planning groups only; full COF-C03 IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run; browser models are local JavaScript and recorded example is local Python"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "invokeAny returns the first success—not the first task to finish",
+    "goal": "Race equivalent providers without letting an early failure hide a later successful answer.",
+    "tag": "Software engineering · Java bulk concurrency",
+    "concept": "<p>Three couriers race to deliver the same parcel. The first courier may call to say the van broke down. That is not the first delivery.</p><p><code>ExecutorService.invokeAny</code> runs a collection of callables and returns one result that completed successfully. An early exception does not win. If none succeeds, it throws <code>ExecutionException</code>; the timed overload can throw <code>TimeoutException</code>. On return, unfinished tasks are cancelled, but cancellation is an attempt—not proof that external work stopped.</p>",
+    "example": "<p>Replica A fails at 10 ms. Replica B returns <code>order-56</code> at 30 ms. Replica C is still running. <code>invokeAny</code> returns B’s value and cancels C. A custom “first completion” race would incorrectly surface A’s failure.</p>",
+    "use_case": {
+      "when": "Use invokeAny when several equivalent computations or replicas may produce one acceptable answer and first success is the contract.",
+      "example": "A Java service races two read replicas for the same immutable catalog record during a regional degradation.",
+      "decision": "Use it only for equivalent, safe-to-duplicate operations. Keep a shared deadline, make losers cancellation-aware, and do not race side effects such as payments. Use CompletionService when you need custom acceptance or evidence from multiple results."
+    },
+    "practice": "Change the first completion from failure to success. Predict the returned value and loser state.",
+    "boundary": "The Java and browser models use a scripted completion order. They do not create real threads, model scheduling, network calls, interrupt handling, timeout clocks, executor saturation, or guarantee cancellation of external effects.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>first completion <select id=\"raceFirst\"><option value=\"fail\">A fails at 10 ms</option><option value=\"success\">A succeeds at 10 ms</option></select></label><div id=\"raceWorld\" class=\"world\"></div></div>",
+    "js": "function paintRace(){const f=raceFirst.value==='fail';raceWorld.innerHTML='<p><strong>Question:</strong> which result returns?</p><div class=step-flow><div class=\"tile '+(f?'fail':'ok')+'\">A '+(f?'fails':'returns A')+'<br>10 ms</div><div class=arrow>→</div><div class=\"tile ok\">B returns order-56<br>30 ms</div><div class=arrow>→</div><div class=\"tile ok\">invokeAny returns '+(f?'B':'A')+'</div></div><p>C cancellation is requested after a successful return.</p>';};raceFirst.onchange=paintRace;paintRace();",
+    "questions": [
+      [
+        "A fails before B succeeds. What does invokeAny return?",
+        [
+          "B's successful value",
+          "A's exception immediately",
+          "A list of both outcomes"
+        ],
+        0,
+        "The method waits for one successful completion."
+      ],
+      [
+        "What if every callable fails?",
+        [
+          "ExecutionException",
+          "null",
+          "The last task's value"
+        ],
+        0,
+        "No successful result exists."
+      ],
+      [
+        "Why avoid racing payment calls?",
+        [
+          "Loser cancellation may not undo an external side effect",
+          "invokeAny is too slow",
+          "Callables cannot use HTTP"
+        ],
+        0,
+        "Duplicate side effects outlive the local cancellation contract."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "String[] names={\"A\",\"B\",\"C\"}; String[] values={\"fail\",\"order-56\",\"order-56\"};",
+          "note": "Script completion order for three equivalent reads."
+        },
+        {
+          "code": "String failures=names[0];",
+          "note": "Record the early failure without returning it."
+        },
+        {
+          "code": "int winnerIndex=1; String winner=names[winnerIndex]; String value=values[winnerIndex];",
+          "note": "Select the first successful completion."
+        },
+        {
+          "code": "String cancelRequested=names[2]; String result=\"winner=\"+winner+\", value=\"+value+\", failures=\"+failures+\", cancel=\"+cancelRequested;",
+          "note": "Return B and request cancellation of the unfinished task."
+        }
+      ],
+      "expect": {
+        "result": "winner=B, value=order-56, failures=A, cancel=C"
+      },
+      "limit": "The Java and browser models use a scripted completion order. They do not create real threads, model scheduling, network calls, interrupt handling, timeout clocks, executor saturation, or guarantee cancellation of external effects.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {
+            "failures": "A"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "failures": "A",
+            "winnerIndex": "1",
+            "winner": "B",
+            "value": "order-56"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "failures": "A",
+            "winnerIndex": "1",
+            "winner": "B",
+            "value": "order-56",
+            "cancelRequested": "C",
+            "result": "winner=B, value=order-56, failures=A, cancel=C"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java SE 25: ExecutorService.invokeAny",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/ExecutorService.html",
+        "Oracle Java API specification; checked November 16, 2026"
+      ]
+    ],
+    "visual_explanation": "A completion timeline keeps the first failure visible while the return arrow advances to the first success.",
+    "written_questions": [
+      "Which read operation in your platform is safe to duplicate across equivalent replicas?",
+      "What external work could continue after loser cancellation?"
+    ],
+    "source_checked_on": "2026-11-16"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A healthy global average can hide one tenant in pain",
+    "goal": "Make platform reliability decisions from tenant and tier distributions, not only aggregate success.",
+    "tag": "Distinguished Engineer · tenant-aware operations",
+    "concept": "<p>If nine checkout lanes are empty and one has a hundred people, the store’s average queue can still look small. The people in the bad lane do not experience the average.</p><p>A shared platform can report 99.9% overall success while a small tenant repeatedly fails. Distinguished-level judgment keeps the global SLO but adds tenant/tier views, minimum-volume rules, top-offender evidence, and a response policy. Do not create thousands of noisy pages; use distributions and drill-downs to find concentrated harm.</p>",
+    "example": "<p>Tenant A sends 999,000 successful requests. Tenant B sends 1,000 requests and 500 fail. Global success is about 99.95%; B experiences only 50%. The platform is globally green and locally broken.</p>",
+    "use_case": {
+      "when": "Use tenant-aware reliability views when a shared service has uneven traffic and aggregate metrics can be dominated by large users.",
+      "example": "A data-quality API serves forty producer teams; one smaller team cannot register rules although the fleet dashboard is green.",
+      "decision": "Retain a global objective for capacity and business health, then add tier and tenant distributions with minimum-volume confidence rules. Page on actionable widespread harm; route concentrated degradation to an owned incident or ticket policy."
+    },
+    "practice": "Move failed requests between the large and small tenant. Predict global and tenant success.",
+    "boundary": "The model has two tenants and a single success metric. It does not handle sampling confidence, latency, retries, traffic weighting, tier contracts, low-volume burn rates, regional cells, alert routing, or privacy limits.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>tenant B failures <input id=\"tenantFails\" type=\"range\" min=\"0\" max=\"1000\" step=\"100\" value=\"500\"></label><div id=\"tenantWorld\" class=\"world\"></div></div>",
+    "js": "function paintTenant(){const f=+tenantFails.value,g=((1000000-f)/1000000*100).toFixed(2),b=((1000-f)/1000*100).toFixed(0);tenantWorld.innerHTML='<p><strong>Question:</strong> who experiences the global '+g+'%?</p><div class=step-flow><div class=\"tile ok\">Tenant A<br>999,000 / 999,000</div><div class=\"tile '+(f?'fail':'ok')+'\">Tenant B<br>'+(1000-f)+' / 1,000 = '+b+'%</div><div class=\"tile wait\">Global<br>'+g+'%</div></div><p>The aggregate is traffic-weighted; B’s experience requires its own slice.</p>';};tenantFails.oninput=paintTenant;paintTenant();",
+    "questions": [
+      [
+        "Why is 99.95% global success misleading here?",
+        [
+          "Tenant A's volume hides Tenant B's 50% success",
+          "Percentages cannot measure reliability",
+          "Tenant B has too many requests"
+        ],
+        0,
+        "Aggregate weighting can conceal concentrated harm."
+      ],
+      [
+        "Why not page separately for every tiny tenant?",
+        [
+          "Low-volume noise needs confidence and actionability rules",
+          "Small tenants never matter",
+          "AWS forbids tenant metrics"
+        ],
+        0,
+        "Tenant visibility and alert design are separate decisions."
+      ],
+      [
+        "What should remain alongside tenant views?",
+        [
+          "A global objective plus tier/distribution evidence",
+          "Only the worst tenant",
+          "Only CPU utilization"
+        ],
+        0,
+        "The system needs both overall and concentrated-harm perspectives."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "a={'requests':999000,'failures':0}; b={'requests':1000,'failures':500}",
+          "note": "Create one large healthy tenant and one small degraded tenant."
+        },
+        {
+          "code": "global_success=1-(a['failures']+b['failures'])/(a['requests']+b['requests'])",
+          "note": "Compute the traffic-weighted aggregate."
+        },
+        {
+          "code": "b_success=1-b['failures']/b['requests']",
+          "note": "Compute the affected tenant's experience."
+        },
+        {
+          "code": "result={'global_pct':round(global_success*100,2),'tenant_b_pct':round(b_success*100,2),'needs_tenant_view':True}",
+          "note": "Show why both views are required."
+        }
+      ],
+      "expect": {
+        "result": {
+          "global_pct": 99.95,
+          "tenant_b_pct": 50.0,
+          "needs_tenant_view": true
+        }
+      },
+      "limit": "The model has two tenants and a single success metric. It does not handle sampling confidence, latency, retries, traffic weighting, tier contracts, low-volume burn rates, regional cells, alert routing, or privacy limits.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "a": {
+              "requests": 999000,
+              "failures": 0
+            },
+            "b": {
+              "requests": 1000,
+              "failures": 500
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "a": {
+              "requests": 999000,
+              "failures": 0
+            },
+            "b": {
+              "requests": 1000,
+              "failures": 500
+            },
+            "global_success": 0.9995
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "a": {
+              "requests": 999000,
+              "failures": 0
+            },
+            "b": {
+              "requests": 1000,
+              "failures": 500
+            },
+            "global_success": 0.9995,
+            "b_success": 0.5
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "a": {
+              "requests": 999000,
+              "failures": 0
+            },
+            "b": {
+              "requests": 1000,
+              "failures": 500
+            },
+            "global_success": 0.9995,
+            "b_success": 0.5,
+            "result": {
+              "global_pct": 99.95,
+              "tenant_b_pct": 50.0,
+              "needs_tenant_view": true
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "AWS SaaS Lens: Tenant-aware operations",
+        "https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/tenant-aware-operations.html",
+        "AWS Well-Architected guidance; checked November 16, 2026"
+      ],
+      [
+        "AWS SaaS Lens: Operate",
+        "https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/operate.html",
+        "AWS Well-Architected guidance; checked November 16, 2026"
+      ]
+    ],
+    "visual_explanation": "Three equal cards contrast raw tenant denominators with the traffic-weighted aggregate, exposing exactly how the large tenant dominates it.",
+    "written_questions": [
+      "Which platform SLO could be green while one producer team is unable to complete its core task?",
+      "What minimum-volume or confidence rule would prevent noisy tenant alerts without hiding harm?"
+    ],
+    "source_checked_on": "2026-11-16"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "A task ID may be a bearer secret—authorize every poll",
+    "goal": "Keep durable MCP task state bound to the original caller across disconnects and follow-up requests.",
+    "tag": "GenAI engineering · harness security · MCP Tasks extension",
+    "concept": "<p>A coat-check ticket is useful because it retrieves something later. If anyone holding the number can claim the coat, the number is also a secret.</p><p>The MCP Tasks extension allows a task ID to identify durable stored state, and the specification says it may act as a bearer token. IDs must be hard to guess, but entropy is not authorization. Every <code>tasks/get</code>, <code>tasks/update</code>, and <code>tasks/cancel</code> request must authenticate and authorize the caller. A client that resumes by ID must carry the original request context—headers, tenant, and timeout policy—into follow-ups.</p>",
+    "example": "<p>Tenant red starts task <code>t56</code>. Tenant blue learns the ID from a log. A server that checks only “does t56 exist?” leaks status and perhaps results. A safe lookup checks <code>task.owner == caller.tenant</code> before returning anything.</p>",
+    "use_case": {
+      "when": "Use durable tasks for expensive MCP tool work that must survive disconnects or require later input.",
+      "example": "A lineage extraction tool returns a task handle while a Spark plan is analyzed asynchronously.",
+      "decision": "Use opaque high-entropy IDs, bind stored tasks to authenticated principal and authorization policy, propagate wire context to every follow-up, redact IDs from logs, expire state, and avoid tasks when synchronous work is short enough."
+    },
+    "practice": "Switch the polling tenant from red to blue. Predict whether task status is returned.",
+    "boundary": "The model compares two tenant strings. It does not implement MCP transport, token validation, capability negotiation, cryptographic entropy, task storage, expiry, cancellation, input requests, log redaction, or cross-region recovery.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>polling tenant <select id=\"taskTenant\"><option value=\"red\">red (owner)</option><option value=\"blue\">blue (other)</option></select></label><div id=\"taskWorld\" class=\"world\"></div></div>",
+    "js": "function paintTask(){const ok=taskTenant.value==='red';taskWorld.innerHTML='<p><strong>Question:</strong> does task t56 existence grant access?</p><div class=step-flow><div class=tile>task t56<br>owner red</div><div class=arrow>→</div><div class=\"tile '+(ok?'ok':'fail')+'\">caller '+taskTenant.value+'<br>'+(ok?'authorized':'denied')+'</div><div class=arrow>→</div><div class=\"tile '+(ok?'ok':'wait')+'\">'+(ok?'status working':'no task data')+'</div></div>';};taskTenant.onchange=paintTask;paintTask();",
+    "questions": [
+      [
+        "Blue knows red's task ID. What must the server do?",
+        [
+          "Authenticate and authorize blue against that task before revealing data",
+          "Return status because the ID is valid",
+          "Rotate only the polling interval"
+        ],
+        0,
+        "Task IDs may be bearer-like, but every task request still requires authorization."
+      ],
+      [
+        "Why use high-entropy task IDs?",
+        [
+          "To prevent enumeration and guessing",
+          "To replace authorization",
+          "To make polling faster"
+        ],
+        0,
+        "Entropy reduces discovery; it does not establish ownership."
+      ],
+      [
+        "What context must a resumed client preserve?",
+        [
+          "Authentication headers, caller scope, and request timeout policy",
+          "Only the task status message",
+          "The model prompt in public logs"
+        ],
+        0,
+        "Follow-up requests cross the same security boundary as creation."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "task={'id':'t56','owner':'red','status':'working'}",
+          "note": "Store a durable task with an owner."
+        },
+        {
+          "code": "caller='blue'; exists=task['id']=='t56'",
+          "note": "Let another tenant present the valid ID."
+        },
+        {
+          "code": "authorized=exists and caller==task['owner']",
+          "note": "Check identity and ownership, not existence alone."
+        },
+        {
+          "code": "result={'exists':exists,'authorized':authorized,'response':'denied' if not authorized else task['status']}",
+          "note": "Deny without exposing task state."
+        }
+      ],
+      "expect": {
+        "result": {
+          "exists": true,
+          "authorized": false,
+          "response": "denied"
+        }
+      },
+      "limit": "The model compares two tenant strings. It does not implement MCP transport, token validation, capability negotiation, cryptographic entropy, task storage, expiry, cancellation, input requests, log redaction, or cross-region recovery.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "task": {
+              "id": "t56",
+              "owner": "red",
+              "status": "working"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "task": {
+              "id": "t56",
+              "owner": "red",
+              "status": "working"
+            },
+            "caller": "blue",
+            "exists": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "task": {
+              "id": "t56",
+              "owner": "red",
+              "status": "working"
+            },
+            "caller": "blue",
+            "exists": true,
+            "authorized": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "task": {
+              "id": "t56",
+              "owner": "red",
+              "status": "working"
+            },
+            "caller": "blue",
+            "exists": true,
+            "authorized": false,
+            "result": {
+              "exists": true,
+              "authorized": false,
+              "response": "denied"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP Tasks Extension: Tasks specification",
+        "https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks",
+        "Official MCP extension specification; checked November 16, 2026"
+      ],
+      [
+        "MCP Tasks Extension overview",
+        "https://tasks.extensions.modelcontextprotocol.io/",
+        "Official MCP extension documentation; checked November 16, 2026"
+      ]
+    ],
+    "visual_explanation": "A task record and caller identity meet at an authorization gate, showing why a valid identifier alone returns no state.",
+    "written_questions": [
+      "Where could task IDs leak today—logs, URLs, traces, chat transcripts, or metrics?",
+      "Which principal and policy will each follow-up request re-evaluate?"
+    ],
+    "source_checked_on": "2026-11-16"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "One membrane can open from nanometres to submillimetres—but the control spans five orders of magnitude",
+    "goal": "Read a newly reported tunable membrane as a reversible spacing mechanism, not a ready universal filter.",
+    "tag": "Technology breakthroughs · new peer-reviewed research · November 16, 2026",
+    "concept": "<p>A book can be tightly closed or fanned open. The same pages create very different gaps without changing the page material.</p><p>A Nature Materials paper reports layered membranes whose interlayer spacing is reversibly controlled by deprotonation-driven electrostatic repulsion and cation coordination. Reported spacing spans 1.39 to 152,000 nm, porosity 0% to 78%, and thickness 43 to 5,400 μm. Demonstrations tune zinc-ion capacitance, osmotic power, and pressure sensing. Those outcomes occur at very different openings; “bigger gap” is not one universal optimum.</p>",
+    "example": "<p>Our visual places 1.39 nm, 140 nm, and 140,000 nm on a logarithmic scale. On a linear bar, the first two would look identical. The log view makes the five-order range visible without pretending that spacing alone predicts performance.</p>",
+    "use_case": {
+      "when": "Study the strategy when a materials team needs one membrane platform with reversibly adjustable transport or sensing geometry.",
+      "example": "A lab explores whether ion coordination can retune a layered membrane between ion storage, osmotic conversion, and pressure-sensing regimes.",
+      "decision": "Treat the publication as a mechanism and materials platform. Reproduce cycling, selectivity, response time, chemical stability, mechanical fatigue, scale-up, and the target device metric before choosing it over a fixed membrane."
+    },
+    "practice": "Choose three reported-scale gaps and compare them on linear versus logarithmic axes.",
+    "boundary": "The local model plots spacing only. It does not simulate charge, cation coordination, porosity, thickness coupling, ion transport, capacitance, osmotic conversion, pressure response, cycling, fabrication, or reproduce the paper's datasets.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>spacing <select id=\"membraneGap\"><option value=\"1.39\">1.39 nm</option><option value=\"140\">140 nm</option><option value=\"140000\">140,000 nm</option></select></label><div id=\"membraneWorld\" class=\"world\"></div></div>",
+    "js": "function paintMembrane(){const v=+membraneGap.value,min=Math.log10(1.39),max=Math.log10(152000),p=Math.round((Math.log10(v)-min)/(max-min)*100);membraneWorld.innerHTML='<p><strong>Question:</strong> where does '+v.toLocaleString()+' nm sit across the reported range?</p><div class=world style=\"position:relative;height:90px\"><div style=\"position:absolute;left:0;right:0;top:42px;height:8px;background:#73988b\"></div><div style=\"position:absolute;left:'+p+'%;top:20px;width:4px;height:50px;background:#a43d32\"></div><span style=\"position:absolute;left:0;bottom:0\">1.39 nm</span><span style=\"position:absolute;right:0;bottom:0\">152,000 nm</span></div><p>Log-position = '+p+'%. Equal distance means equal multiplication, not equal nanometres.</p>';};membraneGap.onchange=paintMembrane;paintMembrane();",
+    "questions": [
+      [
+        "What drives the reported expansion?",
+        [
+          "Deprotonation-driven repulsion, reversed or tuned by cation coordination",
+          "Heating until layers melt",
+          "A database transaction"
+        ],
+        0,
+        "Charge and ion coordination control the layer spacing."
+      ],
+      [
+        "Why use a log scale for the lesson visual?",
+        [
+          "The range spans about five orders of magnitude",
+          "It proves device performance",
+          "It makes every point linear in nanometres"
+        ],
+        0,
+        "Multiplicative distance keeps both small and large gaps visible."
+      ],
+      [
+        "What must be validated for a product?",
+        [
+          "Target-specific transport or sensing, cycling, stability, mechanics, and scale-up",
+          "Only maximum spacing",
+          "Only the abstract"
+        ],
+        0,
+        "One geometry range supports different demonstrations, not a universal optimum."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "gaps_nm=[1.39,140,140000]; reported_max=152000",
+          "note": "Choose three scales within the reported range."
+        },
+        {
+          "code": "import math; lo=math.log10(1.39); hi=math.log10(reported_max)",
+          "note": "Build a logarithmic axis."
+        },
+        {
+          "code": "positions=[round((math.log10(x)-lo)/(hi-lo)*100) for x in gaps_nm]",
+          "note": "Map multiplication to equal visual distance."
+        },
+        {
+          "code": "result={'gaps_nm':gaps_nm,'log_positions_pct':positions,'predicts_performance':False}",
+          "note": "Keep geometry visualization separate from device claims."
+        }
+      ],
+      "expect": {
+        "result": {
+          "gaps_nm": [
+            1.39,
+            140,
+            140000
+          ],
+          "log_positions_pct": [
+            0,
+            40,
+            99
+          ],
+          "predicts_performance": false
+        }
+      },
+      "limit": "The local model plots spacing only. It does not simulate charge, cation coordination, porosity, thickness coupling, ion transport, capacitance, osmotic conversion, pressure response, cycling, fabrication, or reproduce the paper's datasets.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "gaps_nm": [
+              1.39,
+              140,
+              140000
+            ],
+            "reported_max": 152000
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "gaps_nm": [
+              1.39,
+              140,
+              140000
+            ],
+            "reported_max": 152000,
+            "lo": 0.14301480025409505,
+            "hi": 5.181843587944773
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "gaps_nm": [
+              1.39,
+              140,
+              140000
+            ],
+            "reported_max": 152000,
+            "lo": 0.14301480025409505,
+            "hi": 5.181843587944773,
+            "positions": [
+              0,
+              40,
+              99
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "gaps_nm": [
+              1.39,
+              140,
+              140000
+            ],
+            "reported_max": 152000,
+            "lo": 0.14301480025409505,
+            "hi": 5.181843587944773,
+            "positions": [
+              0,
+              40,
+              99
+            ],
+            "result": {
+              "gaps_nm": [
+                1.39,
+                140,
+                140000
+              ],
+              "log_positions_pct": [
+                0,
+                40,
+                99
+              ],
+              "predicts_performance": false
+            }
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Two-dimensional material membranes with precisely tunable interlayer spacing from nanometre to submillimetre",
+        "https://www.nature.com/articles/s41563-026-02799-w",
+        "Primary peer-reviewed Nature Materials paper; published November 16, 2026; checked November 16, 2026"
+      ]
+    ],
+    "visual_explanation": "A logarithmic ruler makes a five-order spacing range legible and explicitly separates reported geometry from unmodeled device performance.",
+    "written_questions": [
+      "Which application metric would you measure while changing spacing, and why might its optimum be narrow?",
+      "Which cycling or chemical-stability failure could make reversible laboratory tuning impractical?"
+    ],
+    "source_checked_on": "2026-11-16"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A readable action tag can move; the lockfile chooses the commit that runs",
+    "goal": "Keep review-friendly GitHub Actions references while executing the exact reviewed dependency commits.",
+    "tag": "CI/CD & GitHub Actions · dependency lockfiles",
+    "concept": "<p>A restaurant menu can keep the friendly name “house soup,” but the kitchen needs the exact recipe version approved for today.</p><p>GitHub Actions workflow dependency lockfiles, generally available on October 28, 2026, let workflow YAML retain readable tag or branch references while the runner executes recorded commits. Onboarded workflows require dependencies in <code>.github/workflows/actions.lock</code>. Dependabot can update the reference and lock entry together. The lockfile reduces unexpected movement; it does not prove the locked code is safe.</p>",
+    "example": "<p>The workflow says <code>uses: vendor/scan@v3</code>. Yesterday the lock maps it to commit <code>abc56</code>. The tag later moves to <code>bad99</code>. With a current enforced lock, the run still executes <code>abc56</code>; without it, the tag resolves to the moved code.</p>",
+    "use_case": {
+      "when": "Use workflow lockfiles when many actions and transitive dependencies make manual SHA pinning hard to review and maintain.",
+      "example": "An enterprise data-platform repository runs third-party build, scan, and cloud-auth actions before production deployment.",
+      "decision": "Review dependencies before locking, enforce lockfiles in stages, verify staleness in CI, let Dependabot update both files, and retain SHA/policy controls where lockfile coverage has exceptions—especially reusable-workflow dependency boundaries."
+    },
+    "practice": "Move the v3 tag while keeping or removing the lock entry. Predict the executed commit.",
+    "boundary": "The model resolves one direct action. It does not run GitHub Actions, generate a real lockfile, cover transitive graphs, reusable-workflow exceptions, policy enforcement, Dependabot, repository compromise, immutable releases, attestations, or vulnerability analysis.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>dependency control <select id=\"lockMode\"><option value=\"locked\">enforced lock abc56</option><option value=\"tag\">tag only; now bad99</option></select></label><div id=\"lockWorld\" class=\"world\"></div></div>",
+    "js": "function paintLock(){const ok=lockMode.value==='locked';lockWorld.innerHTML='<p><strong>Question:</strong> which code executes after v3 moves?</p><div class=step-flow><div class=tile>YAML<br>vendor/scan@v3</div><div class=arrow>→</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'actions.lock → abc56':'tag resolves → bad99')+'</div><div class=arrow>→</div><div class=\"tile '+(ok?'ok':'fail')+'\">run '+(ok?'reviewed abc56':'unexpected bad99')+'</div></div>';};lockMode.onchange=paintLock;paintLock();",
+    "questions": [
+      [
+        "v3 moves after review. What does an enforced current lock do?",
+        [
+          "Runs the recorded commit abc56",
+          "Runs both commits",
+          "Proves abc56 is vulnerability-free"
+        ],
+        0,
+        "Resolution is fixed; safety still requires review."
+      ],
+      [
+        "Why keep readable tags in YAML?",
+        [
+          "Humans see intended version while the lock records execution identity",
+          "Tags become immutable automatically",
+          "SHA collisions are impossible"
+        ],
+        0,
+        "Intent and exact resolution live in complementary files."
+      ],
+      [
+        "What important boundary remains?",
+        [
+          "Lock coverage has exceptions such as reusable-workflow dependencies, and locked code can still be unsafe",
+          "Lockfiles remove all supply-chain risk",
+          "Dependabot is no longer useful"
+        ],
+        0,
+        "Locking controls movement, not trustworthiness or every dependency shape."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "yaml_ref='vendor/scan@v3'; tag_now='bad99'",
+          "note": "Let the readable tag move after review."
+        },
+        {
+          "code": "lock={'vendor/scan@v3':'abc56'}",
+          "note": "Record the reviewed commit."
+        },
+        {
+          "code": "enforced=True; executed=lock[yaml_ref] if enforced else tag_now",
+          "note": "Resolve through the enforced lock."
+        },
+        {
+          "code": "result={'yaml_ref':yaml_ref,'tag_now':tag_now,'executed':executed,'safety_proven':False}",
+          "note": "Fix identity without claiming the code is safe."
+        }
+      ],
+      "expect": {
+        "result": {
+          "yaml_ref": "vendor/scan@v3",
+          "tag_now": "bad99",
+          "executed": "abc56",
+          "safety_proven": false
+        }
+      },
+      "limit": "The model resolves one direct action. It does not run GitHub Actions, generate a real lockfile, cover transitive graphs, reusable-workflow exceptions, policy enforcement, Dependabot, repository compromise, immutable releases, attestations, or vulnerability analysis.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "yaml_ref": "vendor/scan@v3",
+            "tag_now": "bad99"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "yaml_ref": "vendor/scan@v3",
+            "tag_now": "bad99",
+            "lock": {
+              "vendor/scan@v3": "abc56"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "yaml_ref": "vendor/scan@v3",
+            "tag_now": "bad99",
+            "lock": {
+              "vendor/scan@v3": "abc56"
+            },
+            "enforced": true,
+            "executed": "abc56"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "yaml_ref": "vendor/scan@v3",
+            "tag_now": "bad99",
+            "lock": {
+              "vendor/scan@v3": "abc56"
+            },
+            "enforced": true,
+            "executed": "abc56",
+            "result": {
+              "yaml_ref": "vendor/scan@v3",
+              "tag_now": "bad99",
+              "executed": "abc56",
+              "safety_proven": false
+            }
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions workflow lockfiles are generally available",
+        "https://github.blog/changelog/2026-10-28-github-actions-workflow-lockfiles-are-generally-available/",
+        "Official GitHub changelog; published October 28, 2026; checked November 16, 2026"
+      ],
+      [
+        "GitHub Actions: Workflow dependency lockfiles",
+        "https://docs.github.com/en/actions/concepts/security/workflow-dependency-lockfiles",
+        "Official GitHub documentation; checked November 16, 2026"
+      ],
+      [
+        "GitHub Actions: Secure use reference",
+        "https://docs.github.com/en/actions/reference/security/secure-use",
+        "Official GitHub documentation; checked November 16, 2026"
+      ]
+    ],
+    "visual_explanation": "One friendly YAML reference splits into moved-tag and locked-commit resolution paths, making execution identity explicit.",
+    "written_questions": [
+      "Which production workflow has the largest unreviewed action dependency graph?",
+      "Which reusable-workflow or policy exception needs a separate pinning control?"
+    ],
+    "source_checked_on": "2026-11-16"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "gRPC health is scoped to a service name—not every dependency behind it",
+    "goal": "Publish and consume health status at the same service boundary the client actually calls.",
+    "tag": "APIs & Microservices · gRPC health checking",
+    "concept": "<p>A mall can be open while one shop is closed. A sign at the parking lot and a sign at the shop answer different questions.</p><p>The standard gRPC health service accepts a service name. An empty string can represent the whole server; a named value such as <code>orders.v1.Orders</code> represents that service. Client-side health checking uses the streaming <code>Watch</code> RPC and can stop sending calls when the selected service reports <code>NOT_SERVING</code>. Your application is responsible for updating the status, including shutdown.</p>",
+    "example": "<p>The process is alive and the catalog service is healthy, but the orders service has lost its database. Server-wide health remains <code>SERVING</code>; <code>orders.v1.Orders</code> must report <code>NOT_SERVING</code>. An orders client watching only the empty name would keep sending doomed calls.</p>",
+    "use_case": {
+      "when": "Use standard gRPC health checking when clients or load balancers need a protocol-level signal before routing RPCs.",
+      "example": "An EKS gRPC orders service removes only unhealthy orders backends while catalog RPCs on the same process remain available.",
+      "decision": "Report the narrowest meaningful service status, wire it to real readiness evidence, update it before shutdown, and test Watch behavior. Keep Kubernetes liveness separate so a downstream outage does not cause pointless process restarts."
+    },
+    "practice": "Switch the watched name from whole server to orders. Predict whether calls continue during an orders-only database failure.",
+    "boundary": "The model has one process and two named services. It does not run gRPC, Health.Check/Watch, service config, load balancing, backoff, Kubernetes probes, TLS, database checks, shutdown races, or language-specific implementations.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>client watches <select id=\"healthScope\"><option value=\"server\">empty name (whole server)</option><option value=\"orders\">orders.v1.Orders</option></select></label><div id=\"healthWorld\" class=\"world\"></div></div>",
+    "js": "function paintHealth(){const narrow=healthScope.value==='orders';healthWorld.innerHTML='<p><strong>Question:</strong> are orders calls sent while its database is down?</p><div class=step-flow><div class=\"tile ok\">process<br>SERVING</div><div class=\"tile fail\">orders service<br>NOT_SERVING</div><div class=\"tile '+(narrow?'ok':'fail')+'\">watch '+(narrow?'orders':'empty name')+'<br>'+(narrow?'calls paused':'calls continue')+'</div></div>';};healthScope.onchange=paintHealth;paintScope=paintHealth;paintHealth();",
+    "questions": [
+      [
+        "The process is healthy but orders lost its DB. What should orders health say?",
+        [
+          "NOT_SERVING for the orders service name",
+          "SERVING because the process runs",
+          "UNIMPLEMENTED for every service"
+        ],
+        0,
+        "Health should match the routing boundary the client calls."
+      ],
+      [
+        "Why use Watch for client-side health checking?",
+        [
+          "It streams status changes and lets clients pause/resume routing",
+          "It authorizes the RPC",
+          "It replaces deadlines"
+        ],
+        0,
+        "Watch avoids constant fleet polling and drives routing state."
+      ],
+      [
+        "What remains separate from service health?",
+        [
+          "Liveness, authorization, request deadlines, and dependency-specific behavior",
+          "The service name",
+          "The health library"
+        ],
+        0,
+        "Health is one routing signal, not a complete resilience policy."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "health={'':'SERVING','catalog.v1.Catalog':'SERVING','orders.v1.Orders':'NOT_SERVING'}",
+          "note": "Publish server-wide and named-service states."
+        },
+        {
+          "code": "watched=''",
+          "note": "Configure a client to watch only whole-server health."
+        },
+        {
+          "code": "send_orders=health[watched]=='SERVING'",
+          "note": "The broad signal incorrectly permits orders traffic."
+        },
+        {
+          "code": "result={'broad_watch_sends':send_orders,'orders_watch_sends':health['orders.v1.Orders']=='SERVING'}",
+          "note": "Compare the two routing decisions."
+        }
+      ],
+      "expect": {
+        "result": {
+          "broad_watch_sends": true,
+          "orders_watch_sends": false
+        }
+      },
+      "limit": "The model has one process and two named services. It does not run gRPC, Health.Check/Watch, service config, load balancing, backoff, Kubernetes probes, TLS, database checks, shutdown races, or language-specific implementations.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "health": {
+              "": "SERVING",
+              "catalog.v1.Catalog": "SERVING",
+              "orders.v1.Orders": "NOT_SERVING"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "health": {
+              "": "SERVING",
+              "catalog.v1.Catalog": "SERVING",
+              "orders.v1.Orders": "NOT_SERVING"
+            },
+            "watched": ""
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "health": {
+              "": "SERVING",
+              "catalog.v1.Catalog": "SERVING",
+              "orders.v1.Orders": "NOT_SERVING"
+            },
+            "watched": "",
+            "send_orders": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "health": {
+              "": "SERVING",
+              "catalog.v1.Catalog": "SERVING",
+              "orders.v1.Orders": "NOT_SERVING"
+            },
+            "watched": "",
+            "send_orders": true,
+            "result": {
+              "broad_watch_sends": true,
+              "orders_watch_sends": false
+            }
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "gRPC: Health Checking",
+        "https://grpc.io/docs/guides/health-checking/",
+        "Official gRPC documentation; checked November 16, 2026"
+      ],
+      [
+        "gRPC health checking protocol",
+        "https://github.com/grpc/grpc-proto/blob/master/grpc/health/v1/health.proto",
+        "Official gRPC protocol definition; checked November 16, 2026"
+      ]
+    ],
+    "visual_explanation": "One process contains a healthy catalog and unhealthy orders service, while the watched name selects the correct routing decision.",
+    "written_questions": [
+      "Which gRPC process in your platform needs health split by service name?",
+      "Which dependency failures should change readiness without triggering liveness restarts?"
+    ],
+    "source_checked_on": "2026-11-16"
+  }
+]
