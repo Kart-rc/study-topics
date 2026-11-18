@@ -1,0 +1,1245 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "Consolidation case: replay the missed customer window, prove one current row, then publish",
+    "goal": "Recover one missed customer-dimension window without widening the input, duplicating Type-2 history, or exposing unverified data.",
+    "tag": "Certification cycle 1 · consolidation case 6 · orchestration, transformation, performance, sharing, deployment",
+    "concept": "<p>A bakery misses the 9:00 delivery. The safe response is not “take every delivery now in the yard.” It is “replay the 9:00–10:00 manifest, count every box, then open the shop shelf.”</p><p>Our customer pipeline missed its 09:00–10:00 window. Customer <code>c57</code> changed from <code>basic</code> to <code>pro</code> at 09:20. A sound recovery carries one fixed window through five controls: select only that interval, apply the Type-2 change once, verify one current row, retain a useful query layout, and publish only after the checks pass. Scheduling, history, performance, sharing, and deployment are one evidence chain—not five independent demos.</p>",
+    "example": "<p>Before recovery, <code>c57 | basic | [08:00,∞)</code>. The replay reads only <code>[09:00,10:00)</code>, closes <code>basic</code> at 09:20, and opens <code>pro</code>. Replaying the same event keeps two historical rows and exactly one current row. Only then does the provider expose the verified object.</p>",
+    "use_case": {
+      "when": "Use this recovery pattern when a scheduled data interval was missed but its source history is still available and consumers need auditable publication.",
+      "example": "An enterprise customer dimension misses one hourly CDC run before downstream risk and reporting teams read it through a governed share.",
+      "decision": "Freeze the business interval first. Prove source completeness, deterministic keys/order, one-current-row history, consumer query evidence, and publication state. If the source interval is no longer recoverable, stop and use a separately approved reconciliation or snapshot path."
+    },
+    "practice": "Choose fixed-window recovery or wake-time recovery. Predict the selected events, history rows, current-row count, and publication state.",
+    "boundary": "The local worlds model one customer, one change, one fixed interval, one validation gate, and one publication flag. They do not run Lakeflow Jobs, AUTO CDC, Delta, Snowflake tasks/streams, transactions, clustering, sharing, bundles, SQL warehouses, permissions, costs, late multi-key events, concurrent consumers, or source-retention recovery.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>recovery plan <select id=\"recoveryPlan\"><option value=\"fixed\">fixed 09:00–10:00 → verify → publish</option><option value=\"wake\">use 11:00 wake time → publish immediately</option><option value=\"replay\">replay fixed window twice with stable event identity</option></select></label><div id=\"recoveryWorld\" class=\"world\"></div></div>",
+    "js": "function paintRecovery(){const p=recoveryPlan.value,f=p!=='wake',dup=p==='replay';recoveryWorld.innerHTML='<p><strong>Question:</strong> what reaches consumers?</p><div class=step-flow><div class=\"tile '+(f?'ok':'fail')+'\">window<br>'+(f?'09:00–10:00 fixed':'09:00–11:00 widened')+'</div><div class=arrow>→</div><div class=\"tile '+(f?'ok':'fail')+'\">history<br>'+(f?'basic closes 09:20; pro opens':'extra events may enter')+'</div><div class=arrow>→</div><div class=\"tile '+(f?'ok':'fail')+'\">'+(f?'1 current row':'not proven')+'</div><div class=arrow>→</div><div class=\"tile '+(f?'ok':'fail')+'\">'+(f?'publish verified':'publish stale/unknown')+'</div></div><p>'+(dup?'The same event identity is ignored on replay in this toy; row count remains two.':f?'Every gate carries evidence from the same fixed interval.':'Wake time silently changes the business question and skips the release gate.')+'</p>';};recoveryPlan.onchange=paintRecovery;paintRecovery();",
+    "questions": [
+      [
+        "The 09:00 run wakes at 11:00. Which input should recovery process?",
+        [
+          "The explicitly authorized 09:00–10:00 interval",
+          "Everything visible at 11:00",
+          "Only the newest customer row"
+        ],
+        0,
+        "A fixed business interval makes the replay bounded and auditable."
+      ],
+      [
+        "When may the provider expose the repaired dimension?",
+        [
+          "After source, Type-2, and consumer-facing checks pass",
+          "Immediately after compute starts",
+          "Whenever the table name exists"
+        ],
+        0,
+        "Publication is a release decision backed by evidence."
+      ],
+      [
+        "What invalidates this recovery plan?",
+        [
+          "The source no longer retains the complete missed interval",
+          "The event has a deterministic sequence",
+          "The target supports history"
+        ],
+        0,
+        "A replay cannot reconstruct evidence the source no longer has."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "window=(0,60); events=[{'id':'c57','tier':'pro','minute':20,'event_id':'e57'}]",
+          "note": "Freeze the missed 09:00–10:00 interval and its source event."
+        },
+        {
+          "code": "selected=[e for e in events if window[0] <= e['minute'] < window[1]]",
+          "note": "Select only records inside the half-open recovery window."
+        },
+        {
+          "code": "history=[('basic',-60,20,False),('pro',20,None,True)] if selected else [('basic',-60,None,True)]",
+          "note": "Apply one deterministic Type-2 transition."
+        },
+        {
+          "code": "current_count=sum(r[3] for r in history); published=(len(selected)==1 and current_count==1); result={'selected':len(selected),'rows':len(history),'current_count':current_count,'published':published}",
+          "note": "Gate publication on source and history checks."
+        }
+      ],
+      "expect": {
+        "result": {
+          "selected": 1,
+          "rows": 2,
+          "current_count": 1,
+          "published": true
+        }
+      },
+      "limit": "The local worlds model one customer, one change, one fixed interval, one validation gate, and one publication flag. They do not run Lakeflow Jobs, AUTO CDC, Delta, Snowflake tasks/streams, transactions, clustering, sharing, bundles, SQL warehouses, permissions, costs, late multi-key events, concurrent consumers, or source-retention recovery.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "window": [
+              0,
+              60
+            ],
+            "events": [
+              {
+                "id": "c57",
+                "tier": "pro",
+                "minute": 20,
+                "event_id": "e57"
+              }
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "window": [
+              0,
+              60
+            ],
+            "events": [
+              {
+                "id": "c57",
+                "tier": "pro",
+                "minute": 20,
+                "event_id": "e57"
+              }
+            ],
+            "selected": [
+              {
+                "id": "c57",
+                "tier": "pro",
+                "minute": 20,
+                "event_id": "e57"
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "window": [
+              0,
+              60
+            ],
+            "events": [
+              {
+                "id": "c57",
+                "tier": "pro",
+                "minute": 20,
+                "event_id": "e57"
+              }
+            ],
+            "selected": [
+              {
+                "id": "c57",
+                "tier": "pro",
+                "minute": 20,
+                "event_id": "e57"
+              }
+            ],
+            "history": [
+              [
+                "basic",
+                -60,
+                20,
+                false
+              ],
+              [
+                "pro",
+                20,
+                null,
+                true
+              ]
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "window": [
+              0,
+              60
+            ],
+            "events": [
+              {
+                "id": "c57",
+                "tier": "pro",
+                "minute": 20,
+                "event_id": "e57"
+              }
+            ],
+            "selected": [
+              {
+                "id": "c57",
+                "tier": "pro",
+                "minute": 20,
+                "event_id": "e57"
+              }
+            ],
+            "history": [
+              [
+                "basic",
+                -60,
+                20,
+                false
+              ],
+              [
+                "pro",
+                20,
+                null,
+                true
+              ]
+            ],
+            "current_count": 1,
+            "published": true,
+            "result": {
+              "selected": 1,
+              "rows": 2,
+              "current_count": 1,
+              "published": true
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks: Dynamic value references",
+        "https://docs.databricks.com/aws/en/jobs/dynamic-value-references",
+        "Official Databricks documentation; checked November 17, 2026"
+      ],
+      [
+        "Databricks: AUTO CDC APIs",
+        "https://docs.databricks.com/aws/en/ldp/cdc",
+        "Official Databricks documentation; checked November 17, 2026"
+      ],
+      [
+        "Databricks: Liquid clustering",
+        "https://docs.databricks.com/aws/en/delta/clustering",
+        "Official Databricks documentation; checked November 17, 2026"
+      ],
+      [
+        "Snowflake: Streams and tasks",
+        "https://docs.snowflake.com/en/user-guide/data-pipelines-intro",
+        "Official Snowflake documentation; checked November 17, 2026"
+      ],
+      [
+        "Snowflake: TASK_HISTORY",
+        "https://docs.snowflake.com/en/sql-reference/functions/task_history",
+        "Official Snowflake documentation; checked November 17, 2026"
+      ],
+      [
+        "Snowflake: Secure objects for sharing",
+        "https://docs.snowflake.com/en/user-guide/data-sharing-secure-views",
+        "Official Snowflake documentation; checked November 17, 2026"
+      ]
+    ],
+    "visual_explanation": "A single recovery token moves through fixed-window selection, Type-2 history, validation, and publication so the learner can see where evidence is lost.",
+    "written_questions": [
+      "Which missed interval in your platform could be replayed today without widening its business meaning?",
+      "What exact checks must block publication of a repaired shared table?"
+    ],
+    "source_checked_on": "2026-11-17",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: carry one run window into AUTO CDC, validation, and sharing",
+        "minutes": 9,
+        "html": "<p><strong>First-minute product recall:</strong> Recall Day52’s trigger-owned interval and Day56’s ordered Type-2 change.</p><pre><code><span>-- Databricks SQL sketch; not executed</span><span>CREATE OR REFRESH STREAMING TABLE customer_dim</span><span>  CLUSTER BY AUTO;</span><span>AUTO CDC INTO customer_dim</span><span>  FROM STREAM(customer_cdc_window)</span><span>  KEYS (customer_id)</span><span>  SEQUENCE BY event_ts</span><span>  STORED AS SCD TYPE 2;</span></code></pre><p>Pass <code>window_start</code> and <code>window_end</code> as job or pipeline parameters; scheduled jobs can derive stable trigger-time values. AUTO CDC owns ordered Type-2 mechanics, while a separate validation task proves source count and one current row before a share update or promotion step. <code>CLUSTER BY AUTO</code> is a workload-aware layout aid, not a correctness gate. AUTO CDC requires serverless Lakeflow pipelines or Pro/Advanced editions.</p><label>Databricks recovery <select id=\"dbConsolidate\"><option value=\"gated\">fixed parameters → AUTO CDC → checks → share</option><option value=\"start\">use job start time and share first</option></select></label><div id=\"dbConsolidateWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL was not run in Databricks; this browser runs a local JavaScript teaching model.</p>",
+        "markdown": "Recall Day52 trigger-owned intervals and Day56 ordered Type-2 history. Pass a fixed window into a pipeline task, run AUTO CDC, validate, then publish. CLUSTER BY AUTO helps query layout but does not prove correctness. SQL not executed in Databricks.",
+        "javascript": "const dbConsolidate=$('dbConsolidate'),dbConsolidateWorld=$('dbConsolidateWorld');function paintDbConsolidate(){const ok=dbConsolidate.value==='gated';dbConsolidateWorld.innerHTML='<div class=step-flow><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'trigger window fixed':'start time drifts')+'</div><div class=tile>AUTO CDC<br>Type 2</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'checks pass':'checks skipped')+'</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'share verified':'consumer sees unknown')+'</div></div>';};dbConsolidate.onchange=paintDbConsolidate;paintDbConsolidate();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: stage the recovery set, transact history, inspect task evidence, then share",
+        "minutes": 9,
+        "html": "<p><strong>First-minute product recall:</strong> Recall Day52’s scheduled-time evidence and Day56’s atomic close-and-insert.</p><pre><code><span>-- Snowflake SQL sketch; not executed</span><span>BEGIN;</span><span>UPDATE dim_customer d SET valid_to=s.event_ts,is_current=FALSE</span><span> FROM recovery_0900 s WHERE d.customer_id=s.customer_id AND d.is_current;</span><span>INSERT INTO dim_customer SELECT customer_id,tier,event_ts,NULL,TRUE</span><span> FROM recovery_0900;</span><span>COMMIT;</span></code></pre><p>Materialize or otherwise identify the fixed recovery set before consuming it. Keep close-and-insert atomic and deduplicate staged changes. Use <code>TASK_HISTORY</code> evidence such as scheduled, query-start, completion, state, and graph version to prove which run occurred. Large secure-view workloads may justify clustering on the base table. Add the verified secure view to a share only after checks pass. This is an explicit pipeline; Snowflake has no direct managed AUTO CDC equivalent.</p><label>Snowflake recovery <select id=\"sfConsolidate\"><option value=\"gated\">fixed stage → transaction → checks → share</option><option value=\"split\">close commits; insert fails; share remains open</option></select></label><div id=\"sfConsolidateWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL was not run in Snowflake; this browser runs a local JavaScript teaching model.</p>",
+        "markdown": "Identify a fixed staged recovery set, transact close-and-insert, inspect TASK_HISTORY, validate, then share a secure object. Base-table clustering is a performance choice. There is no direct managed AUTO CDC equivalent. SQL not executed in Snowflake.",
+        "javascript": "const sfConsolidate=$('sfConsolidate'),sfConsolidateWorld=$('sfConsolidateWorld');function paintSfConsolidate(){const ok=sfConsolidate.value==='gated';sfConsolidateWorld.innerHTML='<div class=step-flow><div class=tile>recovery_0900</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'close + insert commit':'close only commits')+'</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'1 current row':'0 current rows')+'</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'share verified':'share must stay closed')+'</div></div>';};sfConsolidate.onchange=paintSfConsolidate;paintSfConsolidate();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><tr><th>Control</th><th>Databricks</th><th>Snowflake</th></tr><tr><td>Run identity</td><td>Job/pipeline parameters and trigger metadata</td><td>Fixed staged set plus task history</td></tr><tr><td>Type-2 mechanic</td><td>Managed AUTO CDC declaration</td><td>Explicit transactional DML</td></tr><tr><td>Layout</td><td>Liquid clustering / CLUSTER BY AUTO</td><td>Base-table clustering when evidence justifies it</td></tr><tr><td>Publish</td><td>Governed share/promotion after checks</td><td>Secure object/share after checks</td></tr></table>",
+      "markdown": "Both products need the same evidence chain, but their mechanics differ: parameterized managed AUTO CDC versus explicit staged transactional DML. Layout and sharing happen only after correctness is established."
+    },
+    "product_questions": [
+      [
+        "Which evidence belongs before either product publishes?",
+        [
+          "Fixed source window and exactly one current row per key",
+          "Only a successful compute start",
+          "Only a clustering setting"
+        ],
+        0,
+        "Publication needs source and history evidence."
+      ],
+      [
+        "What does clustering prove?",
+        [
+          "Nothing about Type-2 correctness; it can improve supported query pruning",
+          "That the replay selected the right interval",
+          "That consumers are authorized"
+        ],
+        0,
+        "Physical layout and logical correctness are separate controls."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks: Dynamic value references",
+        "https://docs.databricks.com/aws/en/jobs/dynamic-value-references",
+        "Official Databricks documentation; checked November 17, 2026"
+      ],
+      [
+        "Databricks: AUTO CDC APIs",
+        "https://docs.databricks.com/aws/en/ldp/cdc",
+        "Official Databricks documentation; checked November 17, 2026"
+      ],
+      [
+        "Databricks: Liquid clustering",
+        "https://docs.databricks.com/aws/en/delta/clustering",
+        "Official Databricks documentation; checked November 17, 2026"
+      ],
+      [
+        "Snowflake: Streams and tasks",
+        "https://docs.snowflake.com/en/user-guide/data-pipelines-intro",
+        "Official Snowflake documentation; checked November 17, 2026"
+      ],
+      [
+        "Snowflake: TASK_HISTORY",
+        "https://docs.snowflake.com/en/sql-reference/functions/task_history",
+        "Official Snowflake documentation; checked November 17, 2026"
+      ],
+      [
+        "Snowflake: Secure objects for sharing",
+        "https://docs.snowflake.com/en/user-guide/data-sharing-secure-views",
+        "Official Snowflake documentation; checked November 17, 2026"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-17",
+      "session_type": "consolidation_case",
+      "cycle_position": 6,
+      "cycle_origin": "Day52",
+      "databricks": {
+        "scope": "Consolidates Lakeflow Jobs trigger parameters, AUTO CDC Type 2, liquid clustering, validation, declared promotion, and governed sharing."
+      },
+      "snowflake": {
+        "scope": "Consolidates scheduled/task evidence, fixed recovery staging, transactional Type-2 DML, clustering judgment, secure views, and sharing. Planning groups only; full COF-C03 IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run; browser models are local JavaScript and the recorded example is local Python"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "Interrupt the lock wait before the request owns the lock",
+    "goal": "Let cancellation stop a Java request that is blocked waiting for a lock, without running protected work or unlocking a lock it never acquired.",
+    "tag": "Software engineering · Java concurrency · interruptible lock acquisition",
+    "concept": "<p>A customer waiting outside a closed service desk should be able to leave when their ride arrives. They should not have to enter the desk, receive a ticket, and then leave.</p><p><code>ReentrantLock.lockInterruptibly()</code> waits for the lock unless the thread is interrupted. If interruption wins, it throws <code>InterruptedException</code> and the thread never owns the lock. That makes cancellation useful while waiting. Keep ownership explicit: unlock only after acquisition, normally in <code>finally</code>. Plain <code>lock()</code> does not abort its wait because of interruption.</p>",
+    "example": "<p>The main thread holds the account lock. Request <code>r57</code> waits. Its deadline expires, so the service interrupts it before releasing the lock. With <code>lockInterruptibly()</code>, <code>r57</code> reports <code>interrupted-before-owning</code> and never enters the protected section.</p>",
+    "use_case": {
+      "when": "Use interruptible lock acquisition when queued work has deadlines, cancellation, or shutdown signals and waiting after cancellation wastes capacity.",
+      "example": "A Java metadata service serializes one tenant’s catalog mutation while HTTP request cancellation should abandon a waiter that no longer has a client.",
+      "decision": "Use it only when the caller has a meaningful interrupt policy and cleanup path. For bounded waits, consider timed tryLock. For short uncontended critical sections without cancellation, plain lock may be simpler."
+    },
+    "practice": "Switch between interruptible and plain waiting. Predict whether the cancelled request enters after the holder releases.",
+    "boundary": "The Java example uses one real waiting thread and one interrupt. The browser is a teaching state machine. Neither models fairness, spurious application cancellation, nested locks, virtual-thread pinning, distributed locks, transaction rollback, HTTP disconnect propagation, or production scheduler races.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>wait method <select id=\"lockWait\"><option value=\"interruptible\">lockInterruptibly()</option><option value=\"plain\">lock()</option></select></label><div id=\"lockWaitWorld\" class=\"world\"></div></div>",
+    "js": "function paintLockWait(){const ok=lockWait.value==='interruptible';lockWaitWorld.innerHTML='<p><strong>Question:</strong> does cancelled r57 enter the critical section?</p><div class=step-flow><div class=tile>holder owns lock</div><div class=\"tile '+(ok?'ok':'wait')+'\">r57 waits<br>interrupt arrives</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'throws before owning':'wait continues')+'</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'protected work skipped':'enters after release')+'</div></div>';};lockWait.onchange=paintLockWait;paintLockWait();",
+    "questions": [
+      [
+        "r57 is interrupted while another thread owns the lock. What happens with lockInterruptibly?",
+        [
+          "InterruptedException is thrown before r57 owns the lock",
+          "r57 immediately owns the lock",
+          "The holder is interrupted"
+        ],
+        0,
+        "The wait is an explicit interruption point."
+      ],
+      [
+        "Why guard unlock with an acquired flag or a post-acquisition try/finally?",
+        [
+          "A thread must not unlock a lock it never acquired",
+          "It makes the lock fair",
+          "It converts the lock into a semaphore"
+        ],
+        0,
+        "Cancellation may exit before ownership begins."
+      ],
+      [
+        "What remains outside this guarantee?",
+        [
+          "Whether external effects already started elsewhere can be cancelled",
+          "Whether interruption aborts the lock wait",
+          "Whether the method can throw"
+        ],
+        0,
+        "Interrupting a local waiter does not roll back external systems."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "java.util.concurrent.locks.ReentrantLock lock=new java.util.concurrent.locks.ReentrantLock(); java.util.concurrent.CountDownLatch waiting=new java.util.concurrent.CountDownLatch(1); java.util.concurrent.atomic.AtomicBoolean entered=new java.util.concurrent.atomic.AtomicBoolean(false); java.util.concurrent.atomic.AtomicReference<String> outcome=new java.util.concurrent.atomic.AtomicReference<>(\"waiting\"); lock.lock();",
+          "note": "Let the main thread own the lock and create observable worker state."
+        },
+        {
+          "code": "Thread worker=Thread.ofPlatform().start(() -> { waiting.countDown(); try { lock.lockInterruptibly(); try { entered.set(true); } finally { lock.unlock(); } } catch(InterruptedException e) { outcome.set(\"interrupted-before-owning\"); } });",
+          "note": "Start r57 and wait interruptibly for the held lock."
+        },
+        {
+          "code": "waiting.await(); while(worker.getState()!=Thread.State.WAITING){ Thread.onSpinWait(); } worker.interrupt(); worker.join(); lock.unlock();",
+          "note": "Wait until r57 is actually blocked on the held lock, cancel it, prove it exits, then release the holder."
+        },
+        {
+          "code": "String result=\"outcome=\"+outcome.get()+\", entered=\"+entered.get();",
+          "note": "Prove the cancelled request never entered the critical section."
+        }
+      ],
+      "expect": {
+        "result": "outcome=interrupted-before-owning, entered=false"
+      },
+      "limit": "The Java example uses one real waiting thread and one interrupt. The browser is a teaching state machine. Neither models fairness, spurious application cancellation, nested locks, virtual-thread pinning, distributed locks, transaction rollback, HTTP disconnect propagation, or production scheduler races.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {}
+        },
+        {
+          "step": 1,
+          "state": {}
+        },
+        {
+          "step": 2,
+          "state": {}
+        },
+        {
+          "step": 3,
+          "state": {
+            "result": "outcome=interrupted-before-owning, entered=false"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java SE 25: ReentrantLock",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/locks/ReentrantLock.html",
+        "Oracle Java API specification; checked November 17, 2026"
+      ]
+    ],
+    "visual_explanation": "A lock-ownership timeline separates waiting, interruption, ownership, and protected work so the unlock boundary is visible.",
+    "written_questions": [
+      "Which Java request path should stop waiting when its client or deadline is gone?",
+      "How will the code prove ownership before unlocking or starting side effects?"
+    ],
+    "source_checked_on": "2026-11-17"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A paved road needs an escape hatch—and a route back",
+    "goal": "Standardize the common platform path without turning legitimate exceptions into permanent shadow infrastructure.",
+    "tag": "Distinguished Engineer · platform engineering · golden paths and exceptions",
+    "concept": "<p>A highway makes the common trip fast. An ambulance still needs an exit. If that exit becomes an unmarked dirt road with no way back, every later trip becomes harder.</p><p>A platform “paved road” packages the safe common path: templates, APIs, observability, security, and support. Teams should adopt it because it reduces cognitive load, not only because policy mandates it. Real exceptions still exist. A disciplined escape hatch records the unmet need, owner, controls, expiry or review date, and re-entry condition. Otherwise the exception becomes a second platform.</p>",
+    "example": "<p>Forty producer teams use the standard Spark batch template. Team <code>p57</code> needs a GPU library the standard image lacks. Approve a bounded custom image for 60 days, retain scanning and lineage controls, name an owner, and define “return when platform image v12 includes the library.”</p>",
+    "use_case": {
+      "when": "Use a governed escape hatch when the platform path blocks a material requirement but the team can preserve non-negotiable safety and operability controls.",
+      "example": "One regulated data-science workload needs a specialized runtime before the enterprise EKS Spark image supports it.",
+      "decision": "First ask whether the platform should absorb the need. If not yet, approve the smallest exception with owner, controls, review date, and re-entry test. Reject exceptions that bypass mandatory security or have no accountable operating model."
+    },
+    "practice": "Toggle p57 from an undocumented fork to a time-bounded exception. Predict support load and the chance of returning to the platform.",
+    "boundary": "The model scores one exception on four fields. It does not measure platform value, team capability, legal risk, runtime vulnerabilities, funding, roadmap priority, migration cost, organizational power, or whether the exception should become a standard feature.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>exception design <select id=\"escapePlan\"><option value=\"governed\">owner + controls + review + re-entry</option><option value=\"fork\">permanent undocumented fork</option></select></label><div id=\"escapeWorld\" class=\"world\"></div></div>",
+    "js": "function paintEscape(){const ok=escapePlan.value==='governed';escapeWorld.innerHTML='<p><strong>Question:</strong> can p57 return to the paved road?</p><div class=step-flow><div class=tile>standard Spark path</div><div class=\"tile '+(ok?'wait':'fail')+'\">GPU need<br>'+ (ok?'bounded exception':'private fork')+'</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'controls retained':'controls drift')+'</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'re-enter at image v12':'no route back')+'</div></div>';};escapePlan.onchange=paintEscape;paintEscape();",
+    "questions": [
+      [
+        "What makes p57's escape hatch governable?",
+        [
+          "Named owner, retained controls, review date, and re-entry condition",
+          "A private repository",
+          "A permanent waiver"
+        ],
+        0,
+        "The exception stays bounded and observable."
+      ],
+      [
+        "Why should adoption be value-led?",
+        [
+          "Teams sustain use when the platform removes real cognitive and operational burden",
+          "Mandates always improve usability",
+          "Every workload is identical"
+        ],
+        0,
+        "A platform is a product, not only a control point."
+      ],
+      [
+        "When should the exception be rejected?",
+        [
+          "It bypasses a mandatory control with no compensating design",
+          "The platform lacks one library today",
+          "It has a 60-day review"
+        ],
+        0,
+        "An escape hatch is not permission to abandon non-negotiable risk controls."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "exception={'owner':True,'controls':True,'review_days':60,'reentry':'image-v12'}",
+          "note": "Capture the four pieces that keep an exception bounded."
+        },
+        {
+          "code": "governed=exception['owner'] and exception['controls']",
+          "note": "Keep accountability and mandatory controls."
+        },
+        {
+          "code": "temporary=exception['review_days']>0 and bool(exception['reentry'])",
+          "note": "Require a review clock and a concrete route back."
+        },
+        {
+          "code": "result={'approved':governed and temporary,'shadow_platform':not(governed and temporary),'reentry':exception['reentry']}",
+          "note": "Approve the bounded path without creating a permanent second standard."
+        }
+      ],
+      "expect": {
+        "result": {
+          "approved": true,
+          "shadow_platform": false,
+          "reentry": "image-v12"
+        }
+      },
+      "limit": "The model scores one exception on four fields. It does not measure platform value, team capability, legal risk, runtime vulnerabilities, funding, roadmap priority, migration cost, organizational power, or whether the exception should become a standard feature.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "exception": {
+              "owner": true,
+              "controls": true,
+              "review_days": 60,
+              "reentry": "image-v12"
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "exception": {
+              "owner": true,
+              "controls": true,
+              "review_days": 60,
+              "reentry": "image-v12"
+            },
+            "governed": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "exception": {
+              "owner": true,
+              "controls": true,
+              "review_days": 60,
+              "reentry": "image-v12"
+            },
+            "governed": true,
+            "temporary": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "exception": {
+              "owner": true,
+              "controls": true,
+              "review_days": 60,
+              "reentry": "image-v12"
+            },
+            "governed": true,
+            "temporary": true,
+            "result": {
+              "approved": true,
+              "shadow_platform": false,
+              "reentry": "image-v12"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "CNCF Platforms White Paper",
+        "https://tag-app-delivery.cncf.io/whitepapers/platforms/",
+        "CNCF TAG App Delivery guidance; checked November 17, 2026"
+      ],
+      [
+        "CNCF Platform Engineering Maturity Model",
+        "https://tag-app-delivery.cncf.io/whitepapers/platform-eng-maturity-model/",
+        "CNCF TAG App Delivery guidance; checked November 17, 2026"
+      ]
+    ],
+    "visual_explanation": "A branch leaves the golden path for one unmet need while controls and a dated re-entry condition determine whether it returns or becomes a shadow platform.",
+    "written_questions": [
+      "Which current exception has no re-entry condition and is becoming a second platform?",
+      "What unmet need should the paved road absorb next because several teams share it?"
+    ],
+    "source_checked_on": "2026-11-17"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "A task can repeat the same input request—deduplicate its key before asking again",
+    "goal": "Resume a durable MCP task without showing the same approval prompt on every poll or notification.",
+    "tag": "GenAI engineering · harness engineering · MCP Tasks input_required",
+    "concept": "<p>A restaurant pager may buzz several times for the same table. You should walk to the host once, not place the same order again each time it buzzes.</p><p>An MCP task in <code>input_required</code> includes an <code>inputRequests</code> map. The server must use a request key that is unique for that task’s lifetime. A client may observe the same task state through repeated <code>tasks/get</code> polls or <code>notifications/tasks</code>. It should remember which request keys it already presented, so one approval is not shown twice. After <code>tasks/update</code>, keep observing the same task until it reaches a terminal state.</p>",
+    "example": "<p>Task <code>t57</code> asks for <code>approval-1</code>. Two polls return the same pending request before the user responds. A naïve harness opens two approval dialogs. A correct harness stores <code>(t57, approval-1)</code> as presented and shows only one.</p>",
+    "use_case": {
+      "when": "Use request-key deduplication whenever durable tasks can be polled, subscribed to, retried, or resumed across reconnects.",
+      "example": "A lineage-extraction task pauses before publishing inferred column mappings and requests producer approval.",
+      "decision": "Scope the dedupe record by authenticated task and request key, preserve it across reconnects for the task lifetime, and clear it according to task expiry. Never auto-approve because a key was seen before; dedupe presentation, not authorization or response validation."
+    },
+    "practice": "Replay the same input_required state twice with and without a presented-key set. Predict the number of dialogs and updates.",
+    "boundary": "The local model counts prompt presentation for one task and one key. It does not implement MCP transport, authentication, task storage, subscriptions, reconnects, partial responses, concurrent devices, expiry, elicitation UI, response validation, or exactly-once delivery.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>client behavior <select id=\"requestDedupe\"><option value=\"dedupe\">remember task + request key</option><option value=\"naive\">prompt on every observation</option></select></label><div id=\"requestDedupeWorld\" class=\"world\"></div></div>",
+    "js": "function paintRequestDedupe(){const ok=requestDedupe.value==='dedupe';requestDedupeWorld.innerHTML='<p><strong>Question:</strong> how many approval dialogs appear?</p><div class=step-flow><div class=tile>poll 1<br>approval-1</div><div class=arrow>→</div><div class=\"tile '+(ok?'ok':'fail')+'\">dialog '+(ok?'shown once':'shown #1')+'</div><div class=tile>poll 2<br>approval-1</div><div class=arrow>→</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'already presented':'dialog shown #2')+'</div></div><p>'+(ok?'One user decision feeds one tasks/update.':'Duplicate UI can create conflicting or repeated responses.')+'</p>';};requestDedupe.onchange=paintRequestDedupe;paintRequestDedupe();",
+    "questions": [
+      [
+        "Two polls return input key approval-1 for t57. What should the client do?",
+        [
+          "Present it once and remember the task/key pair",
+          "Show a new dialog for every poll",
+          "Treat the task as completed"
+        ],
+        0,
+        "The same outstanding request may be observed repeatedly."
+      ],
+      [
+        "Why must the server keep request keys unique within a task?",
+        [
+          "Clients need a stable identity for matching and deduplicating requests/responses",
+          "Keys authorize the caller",
+          "Keys replace task IDs"
+        ],
+        0,
+        "Stable request identity makes multi-round-trip state coherent."
+      ],
+      [
+        "What must deduplication never do?",
+        [
+          "Reuse an old approval as authorization for a different task or request",
+          "Avoid duplicate dialogs",
+          "Persist through a reconnect"
+        ],
+        0,
+        "Deduplication is scoped presentation state, not a blanket consent cache."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "observations=[('t57','approval-1'),('t57','approval-1')]",
+          "note": "Receive the same outstanding request in two task observations."
+        },
+        {
+          "code": "presented=set(); dialogs=0",
+          "note": "Create client-side presented-key memory."
+        },
+        {
+          "code": "\nfor pair in observations:\n    if pair not in presented:\n        dialogs+=1; presented.add(pair)",
+          "note": "Present only the first unseen task/request pair."
+        },
+        {
+          "code": "result={'observations':len(observations),'dialogs':dialogs,'updates_expected':1,'presented':sorted(presented)}",
+          "note": "Keep one user prompt and one response update."
+        }
+      ],
+      "expect": {
+        "result": {
+          "observations": 2,
+          "dialogs": 1,
+          "updates_expected": 1,
+          "presented": [
+            [
+              "t57",
+              "approval-1"
+            ]
+          ]
+        }
+      },
+      "limit": "The local model counts prompt presentation for one task and one key. It does not implement MCP transport, authentication, task storage, subscriptions, reconnects, partial responses, concurrent devices, expiry, elicitation UI, response validation, or exactly-once delivery.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "observations": [
+              [
+                "t57",
+                "approval-1"
+              ],
+              [
+                "t57",
+                "approval-1"
+              ]
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "observations": [
+              [
+                "t57",
+                "approval-1"
+              ],
+              [
+                "t57",
+                "approval-1"
+              ]
+            ],
+            "dialogs": 0
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "observations": [
+              [
+                "t57",
+                "approval-1"
+              ],
+              [
+                "t57",
+                "approval-1"
+              ]
+            ],
+            "dialogs": 1,
+            "pair": [
+              "t57",
+              "approval-1"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "observations": [
+              [
+                "t57",
+                "approval-1"
+              ],
+              [
+                "t57",
+                "approval-1"
+              ]
+            ],
+            "dialogs": 1,
+            "pair": [
+              "t57",
+              "approval-1"
+            ],
+            "result": {
+              "observations": 2,
+              "dialogs": 1,
+              "updates_expected": 1,
+              "presented": [
+                [
+                  "t57",
+                  "approval-1"
+                ]
+              ]
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP Tasks Extension: Tasks specification",
+        "https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks",
+        "Official MCP extension specification; checked November 17, 2026"
+      ],
+      [
+        "MCP Tasks Extension overview",
+        "https://tasks.extensions.modelcontextprotocol.io/",
+        "Official MCP extension documentation; checked November 17, 2026"
+      ]
+    ],
+    "visual_explanation": "Two identical task observations converge on one presented-key memory cell, making duplicate prompt suppression visible without hiding the required user decision.",
+    "written_questions": [
+      "Where will your harness persist presented request keys across reconnects?",
+      "How will you prevent a seen key from being mistaken for a reusable approval?"
+    ],
+    "source_checked_on": "2026-11-17"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Light energy and measurement information can flow in different directions",
+    "goal": "Read a new optical-metrology framework as information-flow engineering without confusing a Fisher-information model with a finished sensor.",
+    "tag": "Technology breakthroughs · new peer-reviewed research · November 16, 2026",
+    "concept": "<p>A flashlight can make a wall bright while still hiding the tiny scratch you want to measure. Brightness and useful measurement information are not the same map.</p><p>A Nature Materials paper published November 16, 2026 treats Fisher information (FI) carried by optical sensitivity fields as a locally conserved wave quantity. The authors show that FI flow can resonate, diffract, interfere, and form vortices, and it need not follow optical energy flow. This separates three design questions: where information about a parameter is generated, how it travels, and how a detector captures it.</p>",
+    "example": "<p>For lateral displacement of a gold nanowire, the paper models opposing-phase information sources at the two edges. Normal illumination can make their sensitivity fields cancel along the centerline. At an oblique angle, the added phase can align them and direct more information toward a detector—even though this is not simply “more light.”</p>",
+    "use_case": {
+      "when": "Study FI-flow design when an optical measurement is limited by where sensitivity is generated or captured, not merely by total illumination power.",
+      "example": "A nanometrology team chooses illumination angle and detector placement for measuring a wire’s lateral displacement.",
+      "decision": "Treat the work as a theoretical and numerical design framework supported by the paper’s case studies. Reproduce the target geometry, noise model, detector efficiency, readout noise, calibration, fabrication tolerance, and estimator behavior before claiming a precision gain in a real instrument."
+    },
+    "practice": "Switch two toy sensitivity sources between opposing and aligned phase. Compare the energy proxy with the central information proxy.",
+    "boundary": "The local world is a two-number interference analogy. It does not solve Maxwell’s equations, compute Fisher-information flux, reproduce the paper’s nanowire geometry, model polarization, wavelength, detector area, shot noise, readout noise, Cramér–Rao efficiency, fabrication, or experimental validation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>edge sensitivity phase <select id=\"fiPhase\"><option value=\"opposed\">opposed at centerline</option><option value=\"aligned\">phase compensated</option></select></label><div id=\"fiWorld\" class=\"world\"></div></div>",
+    "js": "function paintFi(){const aligned=fiPhase.value==='aligned',a=1,b=aligned?1:-1,info=(a+b)*(a+b),energy=a*a+b*b;fiWorld.innerHTML='<p><strong>Question:</strong> can equal energy carry different information toward this detector?</p><div class=step-flow><div class=tile>left sensitivity<br>+1</div><div class=\"tile '+(aligned?'ok':'fail')+'\">right sensitivity<br>'+(b>0?'+1':'−1')+'</div><div class=\"tile '+(info?'ok':'fail')+'\">central FI toy<br>'+info+'</div><div class=tile>energy proxy<br>'+energy+'</div></div><p>Equal energy proxy, different sensitivity interference. This is an analogy, not the paper’s solver.</p>';};fiPhase.onchange=paintFi;paintFi();",
+    "questions": [
+      [
+        "Why can a bright detector location still be poor for estimating displacement?",
+        [
+          "Energy flow and parameter-sensitive FI flow can have different patterns",
+          "Fisher information is always zero",
+          "Detectors cannot measure light"
+        ],
+        0,
+        "Useful sensitivity depends on how fields change with the measured parameter."
+      ],
+      [
+        "What can illumination angle change in the nanowire example?",
+        [
+          "Relative phase of spatial information sources and FI directed toward the detector",
+          "The definition of authorization",
+          "Whether the paper is experimental production hardware"
+        ],
+        0,
+        "Phase control changes information interference."
+      ],
+      [
+        "What is required before a product claim?",
+        [
+          "Geometry-specific simulation or experiment with detector and noise constraints",
+          "Only the toy value 4",
+          "Only total optical power"
+        ],
+        0,
+        "The paper’s framework and cases do not certify every instrument design."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "left=1; right_opposed=-1",
+          "note": "Represent two opposing sensitivity contributions at one detector direction."
+        },
+        {
+          "code": "energy_proxy=left*left+right_opposed*right_opposed",
+          "note": "Keep the simple energy proxy positive."
+        },
+        {
+          "code": "normal_information=(left+right_opposed)**2; right_aligned=1; aligned_information=(left+right_aligned)**2",
+          "note": "Compare destructive and constructive sensitivity interference."
+        },
+        {
+          "code": "result={'energy_proxy':energy_proxy,'normal_information_proxy':normal_information,'aligned_information_proxy':aligned_information,'paper_solver':False}",
+          "note": "Separate the intuition from a real FI-flow calculation."
+        }
+      ],
+      "expect": {
+        "result": {
+          "energy_proxy": 2,
+          "normal_information_proxy": 0,
+          "aligned_information_proxy": 4,
+          "paper_solver": false
+        }
+      },
+      "limit": "The local world is a two-number interference analogy. It does not solve Maxwell’s equations, compute Fisher-information flux, reproduce the paper’s nanowire geometry, model polarization, wavelength, detector area, shot noise, readout noise, Cramér–Rao efficiency, fabrication, or experimental validation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "left": 1,
+            "right_opposed": -1
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "left": 1,
+            "right_opposed": -1,
+            "energy_proxy": 2
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "left": 1,
+            "right_opposed": -1,
+            "energy_proxy": 2,
+            "normal_information": 0,
+            "right_aligned": 1,
+            "aligned_information": 4
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "left": 1,
+            "right_opposed": -1,
+            "energy_proxy": 2,
+            "normal_information": 0,
+            "right_aligned": 1,
+            "aligned_information": 4,
+            "result": {
+              "energy_proxy": 2,
+              "normal_information_proxy": 0,
+              "aligned_information_proxy": 4,
+              "paper_solver": false
+            }
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Controlling the flow of information in optical metrology",
+        "https://www.nature.com/articles/s41563-026-02789-y",
+        "Primary open-access Nature Materials paper; published November 16, 2026; checked November 17, 2026"
+      ],
+      [
+        "Continuity equation for the flow of Fisher information in wave scattering",
+        "https://www.nature.com/articles/s41567-024-02519-8",
+        "Primary Nature Physics foundation paper; published June 10, 2024; checked November 17, 2026"
+      ]
+    ],
+    "visual_explanation": "Two phase-controlled sensitivity arrows produce different central information bars while an equal energy proxy stays fixed, exposing the paper’s core distinction.",
+    "written_questions": [
+      "Which sensing problem is limited by parameter sensitivity rather than raw signal power?",
+      "Which detector, noise, or fabrication constraint could erase a simulated FI improvement?"
+    ],
+    "source_checked_on": "2026-11-17"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "A fast job can still wait eight minutes for a runner—measure queue and execution separately",
+    "goal": "Diagnose GitHub Actions latency by separating runner wait from the time steps actually execute.",
+    "tag": "CI/CD & GitHub Actions · pipeline observability · queue time",
+    "concept": "<p>A five-minute doctor visit can still consume an hour if you wait fifty-five minutes in the lobby. Making the examination faster does not fix the lobby.</p><p>A workflow’s wall-clock latency contains distinct phases. The run is created, a job waits for a matching runner, the job starts, and its steps execute until completion. GitHub’s workflow-job API exposes job <code>started_at</code>, <code>completed_at</code>, runner labels, name, and step timings. Pair that with the run’s creation time to estimate queue time. Treat the result as operational evidence; retries, dependencies, approvals, and matrix scheduling may need separate attribution.</p>",
+    "example": "<p>Run 57 is created at 10:00. The build job starts at 10:08 and completes at 10:10. Total latency is 10 minutes, but execution is only 2. Tuning tests cannot recover the eight minutes spent waiting for a suitable runner.</p>",
+    "use_case": {
+      "when": "Use phase-separated pipeline metrics when developers report slow feedback even though job steps look fast.",
+      "example": "A data-platform repository has scarce GPU or self-hosted runner labels and pull requests wait before any test begins.",
+      "decision": "Measure by workflow, job, label, repository, event, and percentile. Add runner capacity or change label policy for queue time; optimize steps or caching for execution time. Do not mix environment approvals or dependency waits into runner queue without modeling them separately."
+    },
+    "practice": "Move runner wait from zero to eight minutes while keeping execution at two. Predict which remediation changes.",
+    "boundary": "The model has one independent job and uses run creation as a simple queue baseline. It does not call GitHub APIs, model needs dependencies, matrices, approvals, concurrency groups, retries, hosted-runner provisioning, billing, clock skew, cancelled jobs, webhook delivery, or percentile aggregation.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>runner wait <select id=\"queueWait\"><option value=\"8\">8 minutes</option><option value=\"0\">0 minutes</option></select></label><div id=\"queueWorld\" class=\"world\"></div></div>",
+    "js": "function paintQueue(){const q=+queueWait.value,e=2,total=q+e;queueWorld.innerHTML='<p><strong>Question:</strong> where did the '+total+' minutes go?</p><div class=world><div style=\"display:flex;height:44px;border-radius:8px;overflow:hidden\"><div style=\"width:'+(total?q/total*100:0)+'%;background:#fff0b7;color:#173934;padding:8px\">queue '+q+'m</div><div style=\"width:'+(e/total*100)+'%;background:#dff3ce;color:#173934;padding:8px\">run 2m</div></div></div><p>'+(q?'Capacity or label matching dominates; step tuning is secondary.':'Execution dominates; inspect steps, cache, and tests.')+'</p>';};queueWait.onchange=paintQueue;paintQueue();",
+    "questions": [
+      [
+        "Run created 10:00; job starts 10:08; completes 10:10. What dominates?",
+        [
+          "Eight-minute runner queue time",
+          "Two-minute execution time",
+          "Artifact retention"
+        ],
+        0,
+        "Most feedback latency occurs before steps start."
+      ],
+      [
+        "Which action best fits the evidence?",
+        [
+          "Investigate matching runner capacity and label policy",
+          "Rewrite the two-minute test first",
+          "Increase artifact retention"
+        ],
+        0,
+        "Fix the phase that consumes the time."
+      ],
+      [
+        "What can invalidate the simple queue estimate?",
+        [
+          "The job first waited on needs dependencies or an environment approval",
+          "The job has a name",
+          "The workflow succeeded"
+        ],
+        0,
+        "Creation-to-start can include non-runner waits unless they are separated."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "run_created=0; job_started=8; job_completed=10",
+          "note": "Place one job on a minute timeline."
+        },
+        {
+          "code": "queue_minutes=job_started-run_created",
+          "note": "Estimate time before execution begins."
+        },
+        {
+          "code": "execution_minutes=job_completed-job_started",
+          "note": "Measure step execution separately."
+        },
+        {
+          "code": "result={'queue_minutes':queue_minutes,'execution_minutes':execution_minutes,'total_minutes':job_completed-run_created,'dominant':'queue'}",
+          "note": "Choose the remediation from the dominant phase."
+        }
+      ],
+      "expect": {
+        "result": {
+          "queue_minutes": 8,
+          "execution_minutes": 2,
+          "total_minutes": 10,
+          "dominant": "queue"
+        }
+      },
+      "limit": "The model has one independent job and uses run creation as a simple queue baseline. It does not call GitHub APIs, model needs dependencies, matrices, approvals, concurrency groups, retries, hosted-runner provisioning, billing, clock skew, cancelled jobs, webhook delivery, or percentile aggregation.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "run_created": 0,
+            "job_started": 8,
+            "job_completed": 10
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "run_created": 0,
+            "job_started": 8,
+            "job_completed": 10,
+            "queue_minutes": 8
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "run_created": 0,
+            "job_started": 8,
+            "job_completed": 10,
+            "queue_minutes": 8,
+            "execution_minutes": 2
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "run_created": 0,
+            "job_started": 8,
+            "job_completed": 10,
+            "queue_minutes": 8,
+            "execution_minutes": 2,
+            "result": {
+              "queue_minutes": 8,
+              "execution_minutes": 2,
+              "total_minutes": 10,
+              "dominant": "queue"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub REST API: Workflow jobs",
+        "https://docs.github.com/en/rest/actions/workflow-jobs",
+        "Official GitHub documentation; checked November 17, 2026"
+      ],
+      [
+        "GitHub REST API: Workflow runs",
+        "https://docs.github.com/en/rest/actions/workflow-runs",
+        "Official GitHub documentation; checked November 17, 2026"
+      ]
+    ],
+    "visual_explanation": "A proportional timeline keeps queue and execution on one consistent scale, so the largest latency phase is visually and numerically obvious.",
+    "written_questions": [
+      "Which runner label has the highest pull-request queue percentile in your repositories?",
+      "Which non-runner waits must be separated before using creation-to-start as queue time?"
+    ],
+    "source_checked_on": "2026-11-17"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "traceparent joins spans across services—it does not authenticate the caller",
+    "goal": "Propagate a valid W3C trace context for correlation while keeping authorization tied to independently verified identity.",
+    "tag": "APIs & Microservices · observability · W3C Trace Context",
+    "concept": "<p>A luggage tag helps several airports recognize the same journey. It does not prove the person carrying the suitcase is the passenger named on a passport.</p><p>The W3C <code>traceparent</code> header carries a version, trace ID, parent ID, and trace flags. A service extracts a valid context, creates its own child span, and injects the new context on the next call. That joins gateway, orders, and inventory work into one trace. The header is caller-controlled telemetry input. It can be malformed, sampled or unsampled, and may have privacy implications. Authentication and authorization must use trusted security credentials—not a trace ID.</p>",
+    "example": "<p>Gateway receives trace <code>57aa…</code> and a valid bearer identity for tenant red. It creates span <code>gw57</code>, then sends the same trace ID with a new parent ID to orders. Orders correlates the spans but still authorizes tenant red from the bearer token. If the token is absent, the shared trace must not grant access.</p>",
+    "use_case": {
+      "when": "Use W3C Trace Context when HTTP or gRPC calls cross service boundaries and you need one end-to-end latency and error trace.",
+      "example": "API Gateway, an orders service, and an inventory service propagate trace context while OpenTelemetry correlates spans and logs.",
+      "decision": "Use a standard propagator, validate or replace malformed incoming context, generate new span IDs per hop, apply sampling policy deliberately, avoid secrets in tracestate, and keep security identity in the authorization layer."
+    },
+    "practice": "Keep traceparent valid while removing authorization, then make traceparent malformed while keeping authorization. Predict correlation and access separately.",
+    "boundary": "The model checks a simplified header shape and one authorization boolean. It does not implement the full W3C grammar, all-zero checks, tracestate limits, sampling propagation, baggage, OpenTelemetry SDK behavior, cryptographic identity, privacy policy, proxies, message queues, gRPC metadata, or trace-backend storage.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>request state <select id=\"traceCase\"><option value=\"both\">valid trace + valid authorization</option><option value=\"noauth\">valid trace + no authorization</option><option value=\"badtrace\">malformed trace + valid authorization</option></select></label><div id=\"traceWorld\" class=\"world\"></div></div>",
+    "js": "function paintTraceContext(){const t=traceCase.value!=='badtrace',auth=traceCase.value!=='noauth';traceWorld.innerHTML='<p><strong>Question:</strong> are correlation and access the same decision?</p><div class=step-flow><div class=\"tile '+(t?'ok':'fail')+'\">traceparent<br>'+(t?'trace 57aa accepted':'invalid → new root')+'</div><div class=arrow>→</div><div class=\"tile '+(t?'ok':'wait')+'\">orders span<br>'+(t?'joins trace 57aa':'starts trace 99bb')+'</div><div class=arrow>→</div><div class=\"tile '+(auth?'ok':'fail')+'\">authorization<br>'+(auth?'tenant red allowed':'request denied')+'</div></div><p>A valid trace never turns a denied caller into an allowed one.</p>';};traceCase.onchange=paintTraceContext;paintTraceContext();",
+    "questions": [
+      [
+        "A request has a valid traceparent but no valid credential. What should orders do?",
+        [
+          "Keep or record trace context as policy allows, but deny the request",
+          "Authorize because the trace ID is valid",
+          "Replace authorization with tracestate"
+        ],
+        0,
+        "Correlation metadata is not caller identity."
+      ],
+      [
+        "What changes at each service hop?",
+        [
+          "The parent/span ID while the trace ID continues",
+          "The trace ID must always change",
+          "The bearer principal becomes the trace ID"
+        ],
+        0,
+        "Child spans share a trace but have their own span identities."
+      ],
+      [
+        "What should a service do with malformed incoming context?",
+        [
+          "Follow propagator policy, commonly reject that context and start a new valid root—not trust it",
+          "Grant access",
+          "Copy it unchanged into credentials"
+        ],
+        0,
+        "Untrusted telemetry input needs validation and bounded handling."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "incoming='00-'+'57'*16+'-'+'ab'*8+'-01'; bearer_tenant=None",
+          "note": "Receive valid-looking trace context without a security principal."
+        },
+        {
+          "code": "parts=incoming.split('-'); trace_valid=(len(parts)==4 and len(parts[1])==32 and len(parts[2])==16)",
+          "note": "Apply a deliberately simplified shape check."
+        },
+        {
+          "code": "trace_id=parts[1] if trace_valid else '99'*16; authorized=(bearer_tenant=='red')",
+          "note": "Continue correlation independently from authorization."
+        },
+        {
+          "code": "result={'trace_joined':trace_valid,'trace_id_prefix':trace_id[:4],'authorized':authorized,'decision':'deny' if not authorized else 'allow'}",
+          "note": "Deny access even though trace correlation succeeds."
+        }
+      ],
+      "expect": {
+        "result": {
+          "trace_joined": true,
+          "trace_id_prefix": "5757",
+          "authorized": false,
+          "decision": "deny"
+        }
+      },
+      "limit": "The model checks a simplified header shape and one authorization boolean. It does not implement the full W3C grammar, all-zero checks, tracestate limits, sampling propagation, baggage, OpenTelemetry SDK behavior, cryptographic identity, privacy policy, proxies, message queues, gRPC metadata, or trace-backend storage.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "incoming": "00-57575757575757575757575757575757-abababababababab-01",
+            "bearer_tenant": null
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "incoming": "00-57575757575757575757575757575757-abababababababab-01",
+            "bearer_tenant": null,
+            "parts": [
+              "00",
+              "57575757575757575757575757575757",
+              "abababababababab",
+              "01"
+            ],
+            "trace_valid": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "incoming": "00-57575757575757575757575757575757-abababababababab-01",
+            "bearer_tenant": null,
+            "parts": [
+              "00",
+              "57575757575757575757575757575757",
+              "abababababababab",
+              "01"
+            ],
+            "trace_valid": true,
+            "trace_id": "57575757575757575757575757575757",
+            "authorized": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "incoming": "00-57575757575757575757575757575757-abababababababab-01",
+            "bearer_tenant": null,
+            "parts": [
+              "00",
+              "57575757575757575757575757575757",
+              "abababababababab",
+              "01"
+            ],
+            "trace_valid": true,
+            "trace_id": "57575757575757575757575757575757",
+            "authorized": false,
+            "result": {
+              "trace_joined": true,
+              "trace_id_prefix": "5757",
+              "authorized": false,
+              "decision": "deny"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "W3C Trace Context",
+        "https://www.w3.org/TR/trace-context/",
+        "W3C Recommendation and current publication page; checked November 17, 2026"
+      ],
+      [
+        "OpenTelemetry: Context propagation",
+        "https://opentelemetry.io/docs/concepts/context-propagation/",
+        "Official OpenTelemetry documentation; checked November 17, 2026"
+      ],
+      [
+        "OpenTelemetry Propagators API",
+        "https://opentelemetry.io/docs/specs/otel/context/api-propagators/",
+        "Official OpenTelemetry specification; checked November 17, 2026"
+      ]
+    ],
+    "visual_explanation": "Two parallel decisions show a trace continuing across gateway and orders while authorization independently allows or denies the same request.",
+    "written_questions": [
+      "Where does your platform currently lose trace context between HTTP, Kafka, and Spark boundaries?",
+      "Which telemetry fields could leak tenant or user information if copied into tracestate or baggage?"
+    ],
+    "source_checked_on": "2026-11-17"
+  }
+]
