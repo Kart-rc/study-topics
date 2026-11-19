@@ -83,7 +83,7 @@ Day17 adds product recovery on **2026-10-08** while preserving its original deli
 
 ## Official sources
 
-Checked **2026-11-11**. Recheck the guides weekly and again before booking; exam scope can change.
+Checked **2026-11-18**. Recheck the guides weekly and again before booking; exam scope can change.
 
 - [Databricks certification overview](https://www.databricks.com/learn/certification/data-engineer-associate)
 - [Current linked Databricks exam guide — May 4, 2026 version](https://www.databricks.com/sites/default/files/2026-03/databricks-certified-data-engineer-associate-exam-guide-may-4-2026.pdf)

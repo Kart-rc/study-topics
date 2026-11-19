@@ -1377,6 +1377,46 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day58/data-engineering",
+      "product_material_added_on": "2026-11-18",
+      "session_type": "retrieval_gap",
+      "cycle_position": 7,
+      "cycle_origin": "Day52",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "data_intelligence_platform",
+        "ingestion",
+        "transformation_modeling",
+        "lakeflow_jobs",
+        "ci_cd",
+        "troubleshooting_optimization",
+        "governance_security"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official COF-C03 overview and study-guide entry rechecked 2026-11-18; full objective IDs and weights still not retrievable; planning groups only",
+      "snowflake_planning_groups": [
+        "architecture_connectivity",
+        "account_access_security",
+        "loading_transformation",
+        "data_formats",
+        "performance",
+        "data_protection_sharing"
+      ],
+      "source_checked_on": "2026-11-18",
+      "source_versions": {
+        "databricks": "Official certification page and May 4, 2026 exam guide rechecked 2026-11-18; seven published weights unchanged",
+        "snowflake": "Official COF-C03 overview and study-guide entry rechecked 2026-11-18; full guide IDs/weights not retrieved"
+      },
+      "depth": "Cycle retrieval across Days52\u201357: run identity, Type-2 invariants, layout evidence, declared promotion, and governed sharing. Delivered gaps recorded for real platform evidence plus compute/ingestion reinforcement; no personal gap or mastery claim.",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_cli_sql": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -1581,6 +1621,11 @@
       "day_number": 57,
       "date": "2026-11-17",
       "key": "Day31/data-engineering+products+1"
+    },
+    {
+      "day_number": 58,
+      "date": "2026-11-18",
+      "key": "Day19/data-engineering+products+14"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
@@ -1606,7 +1651,7 @@
       "6": "consolidation_case",
       "7": "retrieval_gap"
     },
-    "next_consolidation_day": 57,
-    "next_retrieval_day": 58
+    "next_consolidation_day": 64,
+    "next_retrieval_day": 65
   }
 }
