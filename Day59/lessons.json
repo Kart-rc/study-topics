@@ -1,0 +1,1210 @@
+[
+  {
+    "slug": "data-engineering",
+    "track": "Data engineering",
+    "title": "A checkpoint remembers progress; a rate limit controls the next bite",
+    "goal": "Separate ingestion correctness from ingestion capacity so backlog tuning never destroys recovery evidence.",
+    "tag": "Certification cycle 2 · focused lesson 1 · ingestion and compute evidence",
+    "concept": "<p>A deli ticket tells the cook which order comes next. A tray size tells the cook how many sandwiches to carry. One remembers position; the other limits work.</p><p>Streaming ingestion needs both ideas. A checkpoint or committed offset remembers durable progress after a crash. A batch-size or client-capacity control bounds how much work enters the next processing interval. Raising the limit can drain a backlog faster, but it does not make progress durable. Deleting progress state can make the system repeat or miss work.</p>",
+    "example": "<p>Source <code>receipts-59</code> has 2,500 files. A hard limit of 1,000 files produces batches of 1,000, 1,000, and 500. The checkpoint advances after each committed batch. If batch two fails before commit, recovery resumes from the batch-one checkpoint—not from the configured limit.</p>",
+    "use_case": {
+      "when": "Use separate progress and capacity controls when a stream has a backlog or bursty arrivals.",
+      "example": "A retail data platform must catch up after an object-store notification outage without replaying already committed receipts.",
+      "decision": "Preserve durable progress first. Tune batch or client capacity from memory, latency, cost, and downstream evidence. Never use state expiry as a casual throughput knob."
+    },
+    "practice": "Change the model between durable progress plus a 1,000-file limit and a limit with lost progress. Predict the retry cursor.",
+    "boundary": "The local model counts files of equal cost. It does not run cloud discovery, Spark, Snowpipe Streaming, schemas, rejected rows, autoscaling, network limits, warehouse cost, or product recovery.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>recovery design <select id=\"ingestDesign\"><option value=\"safe\">checkpoint + 1,000-file limit</option><option value=\"lost\">limit only; checkpoint lost</option></select></label><div id=\"ingestWorld\" class=\"world\"></div></div>",
+    "js": "function paintIngest(){const safe=ingestDesign.value==='safe';ingestWorld.innerHTML='<p><strong>Question:</strong> where does retry start after batch two fails?</p><div class=step-flow><div class=tile>2,500 files</div><div class=tile>batch 1<br>1,000 committed</div><div class=\"tile '+(safe?'ok':'fail')+'\">'+(safe?'checkpoint=1,000':'progress missing')+'</div><div class=\"tile '+(safe?'ok':'fail')+'\">'+(safe?'retry from 1,001':'cannot prove cursor')+'</div></div><p>The limit shapes work; durable state proves progress.</p>';};ingestDesign.onchange=paintIngest;paintIngest();",
+    "questions": [
+      [
+        "Batch one committed and batch two failed. What proves the retry cursor?",
+        [
+          "The durable checkpoint or committed offset",
+          "The 1,000-file limit",
+          "The worker count"
+        ],
+        0,
+        "Capacity does not record completion."
+      ],
+      [
+        "Why is maxBytesPerTrigger not an exact memory ceiling?",
+        [
+          "Databricks documents it as a soft limit",
+          "Bytes are always zero",
+          "It deletes the checkpoint"
+        ],
+        0,
+        "A soft input limit can be exceeded."
+      ],
+      [
+        "What is the Snowpipe Streaming boundary?",
+        [
+          "Offset tokens track per-channel progress; retained source data and throughput controls remain client responsibilities",
+          "One token sizes every batch",
+          "The token makes producer memory durable"
+        ],
+        0,
+        "Progress, retention, and capacity are separate responsibilities."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "total=2500; hard_limit=1000; checkpoint=0",
+          "note": "Start with the backlog, capacity limit, and no committed progress."
+        },
+        {
+          "code": "batch1=min(hard_limit,total-checkpoint); checkpoint+=batch1",
+          "note": "Commit the first 1,000 files and advance durable progress."
+        },
+        {
+          "code": "batch2=min(hard_limit,total-checkpoint); failed_before_commit=True",
+          "note": "Read another 1,000, then fail before committing progress."
+        },
+        {
+          "code": "result={'checkpoint':checkpoint,'retry_starts_at':checkpoint+1,'failed_batch_size':batch2,'remaining_after_retry':total-checkpoint}",
+          "note": "Recover from committed progress, independent of the rate limit."
+        }
+      ],
+      "expect": {
+        "result": {
+          "checkpoint": 1000,
+          "retry_starts_at": 1001,
+          "failed_batch_size": 1000,
+          "remaining_after_retry": 1500
+        }
+      },
+      "limit": "The local model counts files of equal cost. It does not run cloud discovery, Spark, Snowpipe Streaming, schemas, rejected rows, autoscaling, network limits, warehouse cost, or product recovery.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "total": 2500,
+            "hard_limit": 1000,
+            "checkpoint": 0
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "total": 2500,
+            "hard_limit": 1000,
+            "checkpoint": 1000,
+            "batch1": 1000
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "total": 2500,
+            "hard_limit": 1000,
+            "checkpoint": 1000,
+            "batch1": 1000,
+            "batch2": 1000,
+            "failed_before_commit": true
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "total": 2500,
+            "hard_limit": 1000,
+            "checkpoint": 1000,
+            "batch1": 1000,
+            "batch2": 1000,
+            "failed_before_commit": true,
+            "result": {
+              "checkpoint": 1000,
+              "retry_starts_at": 1001,
+              "failed_batch_size": 1000,
+              "remaining_after_retry": 1500
+            }
+          }
+        }
+      ],
+      "example_file": "examples/data-engineering.py"
+    },
+    "sources": [
+      [
+        "Databricks Auto Loader production guidance",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/production",
+        "Official documentation; checked November 19, 2026"
+      ],
+      [
+        "Snowpipe Streaming named channels and offset tokens",
+        "https://docs.snowflake.com/en/user-guide/snowpipe-streaming/snowpipe-streaming-channels",
+        "Official documentation; checked November 19, 2026"
+      ]
+    ],
+    "visual_explanation": "One timeline carries two independent labels: batch capacity and committed progress. Losing the second label makes the retry cursor unknowable.",
+    "written_questions": [
+      "Which backlog metric tells you capacity is insufficient?",
+      "Which durable artifact proves the next safe source position?"
+    ],
+    "source_checked_on": "2026-11-19",
+    "minutes": 30,
+    "product_sections": [
+      {
+        "id": "databricks",
+        "title": "Databricks: bound Auto Loader work without weakening its checkpoint",
+        "minutes": 9,
+        "html": "<p><strong>First-minute product recall:</strong> Complete the scheduled product refresher above.</p><pre><code><span>-- SQL sketch; not executed in Databricks</span><span>CREATE OR REFRESH STREAMING TABLE bronze_receipts</span><span>AS SELECT * FROM STREAM read_files('/receipts-59',</span><span>  format =&gt; 'json', maxFilesPerTrigger =&gt; 1000);</span></code></pre><p>Auto Loader records discovered-file progress in its checkpoint. The documented default is at most 1,000 files per micro-batch; <code>cloudFiles.maxFilesPerTrigger</code> is a hard file limit, while <code>cloudFiles.maxBytesPerTrigger</code> is soft. Keep checkpoints away from lifecycle deletion. Aggressive <code>maxFileAge</code> can cause ignored or reprocessed files.</p><label>Databricks state <select id=\"dbIngest\"><option value=\"safe\">checkpoint retained</option><option value=\"deleted\">checkpoint deleted by lifecycle</option></select></label><div id=\"dbIngestWorld\" class=\"world\"></div><p><strong>Execution label.</strong> SQL was not run in Databricks; this is a local JavaScript teaching model.</p>",
+        "markdown": "Use maxFilesPerTrigger or maxBytesPerTrigger to bound a micro-batch; keep the checkpoint durable. SQL was not executed in Databricks.",
+        "javascript": "const dbIngest=$('dbIngest'),dbIngestWorld=$('dbIngestWorld');function paintDbIngest(){const ok=dbIngest.value==='safe';dbIngestWorld.innerHTML='<div class=step-flow><div class=tile>1,000-file batch</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'RocksDB checkpoint=1,000':'checkpoint missing')+'</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'resume after 1,000':'restart from scratch')+'</div></div>';};dbIngest.onchange=paintDbIngest;paintDbIngest();"
+      },
+      {
+        "id": "snowflake",
+        "title": "Snowflake: offset tokens prove channel progress; they do not size the client",
+        "minutes": 9,
+        "html": "<p><strong>First-minute product recall:</strong> Complete the scheduled product refresher above.</p><pre><code><span>-- Validation SQL; not executed in Snowflake</span><span>SELECT COUNT(*) FROM bronze_receipts</span><span>WHERE source_partition = 'p59';</span><span># SDK sketch: appendRows(rows, offsetToken='1000')</span><span># reopen channel; resume after latest committed token</span></code></pre><p>Snowpipe Streaming persists an application-supplied offset token with committed rows on a named channel. On reopen, read the latest token and replay retained source data after it. This is not a direct equivalent of Auto Loader's per-micro-batch file limit: client batching, channels, buffering, and source retention control capacity. High-performance channels can be cleared after 30 days without ingestion, so keep a separate offset when that matters.</p><label>Snowflake recovery <select id=\"sfIngest\"><option value=\"retained\">token + retained source</option><option value=\"memory\">token + volatile producer memory</option></select></label><div id=\"sfIngestWorld\" class=\"world\"></div><p><strong>Execution label.</strong> No Snowflake SQL or SDK call ran; this is a local JavaScript teaching model.</p>",
+        "markdown": "Offset tokens track per-channel committed progress. Source retention and client capacity remain separate. Snowflake code was not executed.",
+        "javascript": "const sfIngest=$('sfIngest'),sfIngestWorld=$('sfIngestWorld');function paintSfIngest(){const ok=sfIngest.value==='retained';sfIngestWorld.innerHTML='<div class=step-flow><div class=tile>committed token=1,000</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'source keeps 1,001+':'producer memory lost')+'</div><div class=\"tile '+(ok?'ok':'fail')+'\">'+(ok?'resume at 1,001':'token cannot recreate rows')+'</div></div>';};sfIngest.onchange=paintSfIngest;paintSfIngest();"
+      }
+    ],
+    "product_comparison": {
+      "html": "<table><tr><th>Question</th><th>Databricks Auto Loader</th><th>Snowpipe Streaming</th></tr><tr><td>Durable progress</td><td>Checkpoint tracks discovered files and stream state</td><td>Per-channel committed offset token</td></tr><tr><td>Capacity control</td><td>File hard limit; byte soft limit per micro-batch</td><td>Client batching, channels, buffering, and service behavior</td></tr><tr><td>Recovery dependency</td><td>Durable checkpoint and source</td><td>Committed token plus retained source/application storage</td></tr></table>",
+      "markdown": "Both separate progress from capacity, but their state and throughput controls are not one-to-one equivalents."
+    },
+    "product_questions": [
+      [
+        "Which Databricks setting bounds file count per micro-batch?",
+        [
+          "cloudFiles.maxFilesPerTrigger",
+          "cloudFiles.maxFileAge",
+          "VACUUM"
+        ],
+        0,
+        "The file-count limit is hard."
+      ],
+      [
+        "A Snowpipe channel returns token 1000 after restart. What else must exist?",
+        [
+          "Retained source records after 1000",
+          "A larger warehouse only",
+          "A deleted producer buffer"
+        ],
+        0,
+        "The token cannot recreate source rows."
+      ]
+    ],
+    "product_sources": [
+      [
+        "Databricks Auto Loader production guidance",
+        "https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/production",
+        "Official documentation; checked November 19, 2026"
+      ],
+      [
+        "Snowpipe Streaming named channels and offset tokens",
+        "https://docs.snowflake.com/en/user-guide/snowpipe-streaming/snowpipe-streaming-channels",
+        "Official documentation; checked November 19, 2026"
+      ],
+      [
+        "Snowpipe Streaming best practices",
+        "https://docs.snowflake.com/en/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-best-practices",
+        "Official documentation; checked November 19, 2026"
+      ]
+    ],
+    "certification_alignment": {
+      "checked_on": "2026-11-19",
+      "session_type": "focused",
+      "cycle_position": 1,
+      "cycle_origin": "Day59",
+      "databricks": {
+        "scope": "Focused ingestion sizing, checkpoints, Auto Loader file and byte limits, and recovery evidence."
+      },
+      "snowflake": {
+        "scope": "Focused high-performance Snowpipe Streaming channels, offset tokens, source retention, and capacity boundaries. Planning groups only; full COF-C03 objective IDs and weights remain unverified."
+      },
+      "product_lab_execution": "not_run; browser models are local JavaScript and the recorded example is local Python"
+    }
+  },
+  {
+    "slug": "software-engineering",
+    "track": "Software engineering",
+    "title": "CompletionService returns the fastest finished task—not the first submitted",
+    "goal": "Consume concurrent Java results in completion order without blocking behind a slow task submitted first.",
+    "tag": "Software engineering · Java 21 · completion queues",
+    "concept": "<p>Three cooks receive tickets in order A, B, C. C finishes first. Reading the ticket stack in submission order makes everyone wait for A; reading the pickup shelf uses work as it finishes.</p><p><code>ExecutorCompletionService</code> runs tasks on an executor and places each completed <code>Future</code> on a completion queue. <code>take()</code> waits for the next completed task. It does not promise submission order. Keep the returned futures if you may need cancellation.</p>",
+    "example": "<p>Requests A, B, and C sleep for 90, 40, and 10 milliseconds. They are submitted A then B then C. The completion queue yields C, B, A.</p>",
+    "use_case": {
+      "when": "Use a completion service when many independent calls may finish out of order and results can be processed immediately.",
+      "example": "A Java metadata fan-out queries three regions and streams each completed inventory result to an aggregator.",
+      "decision": "Use invokeAll when submission-order results and all-task completion are clearer. Use structured concurrency when your supported JDK and lifecycle policy fit; JDK 25's API remains preview."
+    },
+    "practice": "Switch between completion order and submission-order Future.get calls. Predict which result blocks the consumer first.",
+    "boundary": "The Java run uses fixed sleeps and three successful tasks. It omits failures, timeouts, cancellation, executor saturation, backpressure, ordering requirements, and distributed side effects.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>consumer <select id=\"completionMode\"><option value=\"complete\">CompletionService.take()</option><option value=\"submit\">Future.get() in submission order</option></select></label><div id=\"completionWorld\" class=\"world\"></div></div>",
+    "js": "function paintCompletion(){const q=completionMode.value==='complete';completionWorld.innerHTML='<p><strong>Question:</strong> which result can the caller use first?</p><div class=step-flow><div class=tile>submit A(90), B(40), C(10)</div><div class=\"tile '+(q?'ok':'wait')+'\">'+(q?'take C at 10ms':'wait for A until 90ms')+'</div><div class=\"tile '+(q?'ok':'wait')+'\">'+(q?'then B, A':'then B, C already done')+'</div></div>';};completionMode.onchange=paintCompletion;paintCompletion();",
+    "questions": [
+      [
+        "A, B, C are submitted in that order but C finishes first. What does take return first?",
+        [
+          "C's completed Future",
+          "A's Future",
+          "The executor itself"
+        ],
+        0,
+        "The queue is ordered by completion."
+      ],
+      [
+        "What does CompletionService not do automatically?",
+        [
+          "Cancel remaining tasks after one useful result",
+          "Queue completed futures",
+          "Run tasks on its executor"
+        ],
+        0,
+        "Cancellation policy remains yours."
+      ],
+      [
+        "When is invokeAll simpler?",
+        [
+          "You need all results and submission-order association",
+          "You need the earliest completion",
+          "You have no tasks"
+        ],
+        0,
+        "Choose the abstraction that matches consumption semantics."
+      ]
+    ],
+    "walkthrough": {
+      "language": "java",
+      "steps": [
+        {
+          "code": "var pool=java.util.concurrent.Executors.newFixedThreadPool(3); var cs=new java.util.concurrent.ExecutorCompletionService<String>(pool);",
+          "note": "Create an executor and its completion queue."
+        },
+        {
+          "code": "cs.submit(() -> {Thread.sleep(90); return \"A\";}); cs.submit(() -> {Thread.sleep(40); return \"B\";}); cs.submit(() -> {Thread.sleep(10); return \"C\";});",
+          "note": "Submit slow A, medium B, and fast C in that order."
+        },
+        {
+          "code": "var order=new java.util.ArrayList<String>(); for(int i=0;i<3;i++) order.add(cs.take().get());",
+          "note": "Take completed futures as they arrive."
+        },
+        {
+          "code": "pool.shutdown(); String result=String.join(\",\",order);",
+          "note": "Observe completion order and close the executor."
+        }
+      ],
+      "expect": {
+        "result": "C,B,A"
+      },
+      "limit": "The Java run uses fixed sleeps and three successful tasks. It omits failures, timeouts, cancellation, executor saturation, backpressure, ordering requirements, and distributed side effects.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "pool": "java.util.concurrent.ThreadPoolExecutor@5c5eefef[Running, pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0]",
+            "cs": "java.util.concurrent.ExecutorCompletionService@72d1ad2e"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "pool": "java.util.concurrent.ThreadPoolExecutor@5c5eefef[Running, pool size = 3, active threads = 3, queued tasks = 0, completed tasks = 0]",
+            "cs": "java.util.concurrent.ExecutorCompletionService@72d1ad2e"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "pool": "java.util.concurrent.ThreadPoolExecutor@5c5eefef[Running, pool size = 3, active threads = 0, queued tasks = 0, completed tasks = 3]",
+            "cs": "java.util.concurrent.ExecutorCompletionService@72d1ad2e",
+            "order": "[C, B, A]"
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "pool": "java.util.concurrent.ThreadPoolExecutor@5c5eefef[Shutting down, pool size = 3, active threads = 0, queued tasks = 0, completed tasks = 3]",
+            "cs": "java.util.concurrent.ExecutorCompletionService@72d1ad2e",
+            "order": "[C, B, A]",
+            "result": "C,B,A"
+          }
+        }
+      ],
+      "example_file": "examples/software-engineering.java"
+    },
+    "sources": [
+      [
+        "Java SE 21 CompletionService",
+        "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/CompletionService.html",
+        "Official Oracle API; checked November 19, 2026"
+      ],
+      [
+        "Java SE 21 ExecutorCompletionService",
+        "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ExecutorCompletionService.html",
+        "Official Oracle API; checked November 19, 2026"
+      ]
+    ],
+    "visual_explanation": "Submission tickets remain A-B-C while a separate completion shelf visibly fills C-B-A.",
+    "written_questions": [
+      "Where does submission-order waiting currently add tail latency?",
+      "What cancellation or timeout policy must wrap the completion queue?"
+    ],
+    "source_checked_on": "2026-11-19"
+  },
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Route routine changes automatically; reserve approval meetings for real risk",
+    "goal": "Reduce decision delay by matching approval depth to evidence-based change risk.",
+    "tag": "Distinguished Engineer · governance · change approval",
+    "concept": "<p>An airport does not send every traveler to the same inspection room. Known low-risk cases follow a fast standard path; unusual risk gets deeper review.</p><p>A single architecture board for every change creates a queue even when automated tests and team ownership already control routine work. The senior-leadership move is not “remove governance.” It is to define risk classes, automate evidence for normal changes, name the exceptional decider, and measure approval wait separately from implementation time.</p>",
+    "example": "<p>Ten weekly changes reach a board. Eight are routine and wait three days; two change regulated data boundaries and deserve review. Risk routing removes 24 routine queue-days while retaining the two high-risk decisions.</p>",
+    "use_case": {
+      "when": "Use risk-tiered approval when teams repeatedly wait for an external board on changes with known controls.",
+      "example": "Data-product schema additions with passing compatibility tests take the fast path; cross-account PII sharing requires security and data-owner review.",
+      "decision": "Define observable risk signals, required evidence, escalation owners, and audit sampling. Do not let teams self-label high-risk work as routine without controls."
+    },
+    "practice": "Switch between one board for all ten changes and a risk-routed path. Predict routine queue-days.",
+    "boundary": "The calculator assumes fixed three-day waits and perfect classification. It omits false negatives, correlated risk, audit cost, regulatory mandates, meeting capacity, and the value of expert review.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>approval design <select id=\"approvalPath\"><option value=\"risk\">risk routed</option><option value=\"all\">board reviews all</option></select></label><div id=\"approvalWorld\" class=\"world\"></div></div>",
+    "js": "function paintApproval(){const risk=approvalPath.value==='risk',routine=8,days=risk?0:24;approvalWorld.innerHTML='<p><strong>Question:</strong> where does decision time accumulate?</p><div class=step-flow><div class=tile>10 changes<br>8 routine + 2 high risk</div><div class=\"tile '+(risk?'ok':'fail')+'\">routine queue-days='+days+'</div><div class=tile>high risk reviewed=2</div></div>';};approvalPath.onchange=paintApproval;paintApproval();",
+    "questions": [
+      [
+        "Eight routine changes each wait three days. What queue delay is exposed?",
+        [
+          "24 change-days",
+          "3 minutes",
+          "Zero"
+        ],
+        0,
+        "Eight times three is 24."
+      ],
+      [
+        "What makes a fast path governable?",
+        [
+          "Explicit risk signals, automated evidence, ownership, and audit",
+          "Calling every change low risk",
+          "Removing logs"
+        ],
+        0,
+        "Controls make delegation inspectable."
+      ],
+      [
+        "Which change still deserves deeper review?",
+        [
+          "A new cross-account PII sharing boundary",
+          "A tested typo fix",
+          "A documentation link"
+        ],
+        0,
+        "Material security and compliance boundaries need appropriate authority."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "changes=10; routine=8; high_risk=2; board_wait_days=3",
+          "note": "State the weekly demand and current wait."
+        },
+        {
+          "code": "all_board_queue_days=routine*board_wait_days",
+          "note": "Calculate delay imposed on routine work."
+        },
+        {
+          "code": "risk_routed_queue_days=0; retained_reviews=high_risk",
+          "note": "Route controlled routine work automatically and retain exceptional review."
+        },
+        {
+          "code": "result={'routine_queue_days_removed':all_board_queue_days-risk_routed_queue_days,'high_risk_reviews_retained':retained_reviews}",
+          "note": "Measure speed and retained governance together."
+        }
+      ],
+      "expect": {
+        "result": {
+          "routine_queue_days_removed": 24,
+          "high_risk_reviews_retained": 2
+        }
+      },
+      "limit": "The calculator assumes fixed three-day waits and perfect classification. It omits false negatives, correlated risk, audit cost, regulatory mandates, meeting capacity, and the value of expert review.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "changes": 10,
+            "routine": 8,
+            "high_risk": 2,
+            "board_wait_days": 3
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "changes": 10,
+            "routine": 8,
+            "high_risk": 2,
+            "board_wait_days": 3,
+            "all_board_queue_days": 24
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "changes": 10,
+            "routine": 8,
+            "high_risk": 2,
+            "board_wait_days": 3,
+            "all_board_queue_days": 24,
+            "risk_routed_queue_days": 0,
+            "retained_reviews": 2
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "changes": 10,
+            "routine": 8,
+            "high_risk": 2,
+            "board_wait_days": 3,
+            "all_board_queue_days": 24,
+            "risk_routed_queue_days": 0,
+            "retained_reviews": 2,
+            "result": {
+              "routine_queue_days_removed": 24,
+              "high_risk_reviews_retained": 2
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "DORA: Streamlining change approval",
+        "https://dora.dev/capabilities/streamlining-change-approval/",
+        "Official DORA research-derived guidance; checked November 19, 2026"
+      ],
+      [
+        "DORA: Loosely coupled teams",
+        "https://dora.dev/capabilities/loosely-coupled-teams/",
+        "Official DORA guidance; checked November 19, 2026"
+      ]
+    ],
+    "visual_explanation": "A ten-change queue splits into an automated eight-change lane and a two-change expert-review lane while both counts stay visible.",
+    "written_questions": [
+      "Which approval queue has the largest routine share?",
+      "What evidence would safely qualify its fast path?"
+    ],
+    "source_checked_on": "2026-11-19"
+  },
+  {
+    "slug": "genai-engineering",
+    "track": "GenAI engineering",
+    "title": "Use form elicitation for preferences; send secrets to a URL flow",
+    "goal": "Keep passwords, API keys, payments, and OAuth credentials out of MCP form responses and model context.",
+    "tag": "GenAI engineering · harness engineering · MCP elicitation",
+    "concept": "<p>A waiter can ask “window or aisle?” at the table. A credit-card PIN belongs in the bank's secure terminal, not spoken into the dining room.</p><p>MCP form elicitation returns structured, non-sensitive answers through the client and into the tool conversation. Sensitive information must use URL mode or another out-of-band flow. In the 2026-07-28 lifecycle, the request can arrive through multi-round-trip input-required flow, but the security boundary remains: form content is in-band.</p>",
+    "example": "<p>Tool <code>deploy59</code> asks for region and maintenance window in a form. When it needs cloud authorization, it returns a trusted HTTPS URL. The harness shows the destination, waits for completion, and never copies the credential into form JSON.</p>",
+    "use_case": {
+      "when": "Use elicitation when a long-running tool needs a small user decision it cannot infer safely.",
+      "example": "A deployment tool asks for region in form mode, then opens the organization's OAuth approval URL.",
+      "decision": "Classify every requested field. Use form only for non-sensitive structured data. Validate URL origin, explain the transition, require explicit user action, and bind completion to the original request."
+    },
+    "practice": "Classify a region choice and an API key. Watch the harness route one in-band and one out-of-band.",
+    "boundary": "The model classifies two fields. It does not implement MCP transport, MRTR, URL-origin policy, OAuth, phishing defense, callback binding, client capability negotiation, or secret storage.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>requested value <select id=\"elicitValue\"><option value=\"region\">region preference</option><option value=\"key\">API key</option></select></label><div id=\"elicitWorld\" class=\"world\"></div></div>",
+    "js": "function paintElicit(){const safe=elicitValue.value==='region';elicitWorld.innerHTML='<p><strong>Question:</strong> where should the value travel?</p><div class=step-flow><div class=tile>'+(safe?'region=us-east-1':'API key')+'</div><div class=\"tile '+(safe?'ok':'fail')+'\">'+(safe?'form mode':'not form mode')+'</div><div class=\"tile '+(safe?'ok':'wait')+'\">'+(safe?'structured answer':'trusted URL flow')+'</div></div>';};elicitValue.onchange=paintElicit;paintElicit();",
+    "questions": [
+      [
+        "Where should an API key be entered?",
+        [
+          "A trusted URL or out-of-band secure flow",
+          "Form elicitation",
+          "The model prompt"
+        ],
+        0,
+        "Secrets must not travel through form mode."
+      ],
+      [
+        "Why is region suitable for a form?",
+        [
+          "It is a non-sensitive structured preference",
+          "It is always a password",
+          "It bypasses validation"
+        ],
+        0,
+        "Form mode is designed for bounded non-sensitive input."
+      ],
+      [
+        "What must the harness still verify for URL mode?",
+        [
+          "Destination/origin, user intent, and binding to the pending request",
+          "Only the button color",
+          "Nothing"
+        ],
+        0,
+        "Out-of-band does not automatically mean trustworthy."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "requests=[('region','non_sensitive'),('api_key','sensitive')]",
+          "note": "Classify requested fields before choosing a channel."
+        },
+        {
+          "code": "routes={'non_sensitive':'form','sensitive':'url'}",
+          "note": "Define the in-band and out-of-band routes."
+        },
+        {
+          "code": "decisions={name:routes[kind] for name,kind in requests}",
+          "note": "Route each value by sensitivity."
+        },
+        {
+          "code": "result={'region':decisions['region'],'api_key':decisions['api_key'],'secret_in_form':False}",
+          "note": "Confirm the secret never enters form content."
+        }
+      ],
+      "expect": {
+        "result": {
+          "region": "form",
+          "api_key": "url",
+          "secret_in_form": false
+        }
+      },
+      "limit": "The model classifies two fields. It does not implement MCP transport, MRTR, URL-origin policy, OAuth, phishing defense, callback binding, client capability negotiation, or secret storage.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "requests": [
+              [
+                "region",
+                "non_sensitive"
+              ],
+              [
+                "api_key",
+                "sensitive"
+              ]
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "requests": [
+              [
+                "region",
+                "non_sensitive"
+              ],
+              [
+                "api_key",
+                "sensitive"
+              ]
+            ],
+            "routes": {
+              "non_sensitive": "form",
+              "sensitive": "url"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "requests": [
+              [
+                "region",
+                "non_sensitive"
+              ],
+              [
+                "api_key",
+                "sensitive"
+              ]
+            ],
+            "routes": {
+              "non_sensitive": "form",
+              "sensitive": "url"
+            },
+            "decisions": {
+              "region": "form",
+              "api_key": "url"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "requests": [
+              [
+                "region",
+                "non_sensitive"
+              ],
+              [
+                "api_key",
+                "sensitive"
+              ]
+            ],
+            "routes": {
+              "non_sensitive": "form",
+              "sensitive": "url"
+            },
+            "decisions": {
+              "region": "form",
+              "api_key": "url"
+            },
+            "result": {
+              "region": "form",
+              "api_key": "url",
+              "secret_in_form": false
+            }
+          }
+        }
+      ],
+      "example_file": "examples/genai-engineering.py"
+    },
+    "sources": [
+      [
+        "MCP TypeScript SDK: Elicitation",
+        "https://ts.sdk.modelcontextprotocol.io/v2/servers/elicitation",
+        "Official MCP SDK documentation; checked November 19, 2026"
+      ],
+      [
+        "MCP 2026-07-28 specification release",
+        "https://blog.modelcontextprotocol.io/posts/2026-07-28/",
+        "Official MCP project release; published July 28, 2026; checked November 19, 2026"
+      ]
+    ],
+    "visual_explanation": "Two input paths diverge before collection: a region enters the visible form, while the API key leaves through a labeled trusted-URL boundary.",
+    "written_questions": [
+      "Which inputs in your harness are currently sensitive but in-band?",
+      "How will a user verify the URL destination before continuing?"
+    ],
+    "source_checked_on": "2026-11-19"
+  },
+  {
+    "slug": "technology-breakthroughs",
+    "track": "Technology breakthroughs",
+    "title": "Pair a 2D n-transistor with a 1D p-transistor to build complementary logic",
+    "goal": "Understand what mixed-dimensional CMOS demonstrated and keep device results separate from manufacturing readiness.",
+    "tag": "Technology breakthroughs · low-dimensional electronics · research deep dive",
+    "concept": "<p>A two-person saw works because one person pulls each direction. Complementary logic similarly pairs an n-type path that pulls output low with a p-type path that pulls output high.</p><p>A Nature Electronics paper combines two-dimensional single-crystal MoS₂ n-type transistors with one-dimensional aligned carbon-nanotube p-type transistors. The reported inverters show rail-to-rail operation, peak static power below 1 pW, and 19 ps single-stage delay. The team also reports logic gates, a 4-bit adder, and SRAM-like cells. These are device and circuit demonstrations, not a production process.</p>",
+    "example": "<p>For an inverter, input 0 turns the p-side path on and output rises to 1. Input 1 turns the n-side path on and output falls to 0. The material pairing supplies opposite carrier types in one complementary circuit.</p>",
+    "use_case": {
+      "when": "Study this work when evaluating post-silicon complementary device integration and ultra-low-power logic research.",
+      "example": "A research roadmap compares low-dimensional transistor stacks for edge logic or dense experimental memory.",
+      "decision": "Use the paper as evidence for integrated circuit function. Before product comparison, require yield, variability, contacts, endurance, thermal behavior, interconnect, area, fabrication throughput, and standardized workload data."
+    },
+    "practice": "Toggle the inverter input and watch the active pull-up or pull-down path. Then identify what the binary toy omits.",
+    "boundary": "The model is an ideal Boolean inverter. It does not reproduce device physics, voltage transfer curves, the reported 19 ps measurement, static power, SRAM margins, variability, fabrication, or scaling.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>input <select id=\"cmosInput\"><option value=\"0\">0</option><option value=\"1\">1</option></select></label><div id=\"cmosWorld\" class=\"world\"></div></div>",
+    "js": "function paintCmos(){const i=+cmosInput.value,o=1-i;cmosWorld.innerHTML='<p><strong>Question:</strong> which material path drives the output?</p><div class=step-flow><div class=\"tile '+(!i?'ok':'wait')+'\">1D CNT p-path<br>'+(!i?'on':'off')+'</div><div class=tile>input='+i+'</div><div class=\"tile '+(i?'ok':'wait')+'\">2D MoS₂ n-path<br>'+(i?'on':'off')+'</div><div class=tile>output='+o+'</div></div>';};cmosInput.onchange=paintCmos;paintCmos();",
+    "questions": [
+      [
+        "Which pairing is reported?",
+        [
+          "2D MoS₂ n-type plus aligned 1D CNT p-type",
+          "Two identical resistors",
+          "Silicon only"
+        ],
+        0,
+        "Opposite carrier types form the complementary pair."
+      ],
+      [
+        "Input is 1 in the ideal inverter. Which path pulls output low?",
+        [
+          "The n-type MoS₂ path",
+          "The p-type CNT path",
+          "Neither"
+        ],
+        0,
+        "The n-side conducts for high input."
+      ],
+      [
+        "What blocks a manufacturing-readiness claim?",
+        [
+          "Yield, variability, contacts, interconnect, endurance, and process scale remain to be established",
+          "The paper includes a 4-bit adder",
+          "The output is rail-to-rail"
+        ],
+        0,
+        "A lab circuit is not a qualified fabrication platform."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "inputs=[0,1]",
+          "note": "Evaluate both ideal inverter inputs."
+        },
+        {
+          "code": "outputs=[1-i for i in inputs]",
+          "note": "Apply complementary inversion."
+        },
+        {
+          "code": "active_paths=['CNT-p pull-up','MoS2-n pull-down']",
+          "note": "Name the active material path for each input."
+        },
+        {
+          "code": "result={'truth_table':list(zip(inputs,outputs)),'paths':active_paths,'paper_reproduction':False}",
+          "note": "Keep the Boolean model separate from reported device measurements."
+        }
+      ],
+      "expect": {
+        "result": {
+          "truth_table": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              0
+            ]
+          ],
+          "paths": [
+            "CNT-p pull-up",
+            "MoS2-n pull-down"
+          ],
+          "paper_reproduction": false
+        }
+      },
+      "limit": "The model is an ideal Boolean inverter. It does not reproduce device physics, voltage transfer curves, the reported 19 ps measurement, static power, SRAM margins, variability, fabrication, or scaling.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "inputs": [
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "inputs": [
+              0,
+              1
+            ],
+            "outputs": [
+              1,
+              0
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "inputs": [
+              0,
+              1
+            ],
+            "outputs": [
+              1,
+              0
+            ],
+            "active_paths": [
+              "CNT-p pull-up",
+              "MoS2-n pull-down"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "inputs": [
+              0,
+              1
+            ],
+            "outputs": [
+              1,
+              0
+            ],
+            "active_paths": [
+              "CNT-p pull-up",
+              "MoS2-n pull-down"
+            ],
+            "result": {
+              "truth_table": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  1,
+                  0
+                ]
+              ],
+              "paths": [
+                "CNT-p pull-up",
+                "MoS2-n pull-down"
+              ],
+              "paper_reproduction": false
+            }
+          }
+        }
+      ],
+      "example_file": "examples/technology-breakthroughs.py"
+    },
+    "sources": [
+      [
+        "Mixed-dimensional CMOS technology for high-performance integrated circuits",
+        "https://www.nature.com/articles/s41928-026-01737-7",
+        "Primary Nature Electronics paper; published November 16, 2026; checked November 19, 2026"
+      ]
+    ],
+    "visual_explanation": "The inverter shows two opposing material paths around one output; only one path is active for each binary input.",
+    "written_questions": [
+      "Which reported metric matters most for a target edge workload?",
+      "Which manufacturing evidence would you request before a platform bet?"
+    ],
+    "source_checked_on": "2026-11-19"
+  },
+  {
+    "slug": "ci-cd-github-actions",
+    "track": "CI/CD & GitHub Actions",
+    "title": "fail-fast cancels sibling matrix jobs; continue-on-error forgives only one job",
+    "goal": "Model GitHub Actions matrix failures so experimental coverage does not hide stable-platform breakage.",
+    "tag": "CI/CD & GitHub Actions · testing · matrix failure policy",
+    "concept": "<p>A fire alarm can evacuate the whole building, while a test-kitchen mistake can be recorded without closing the restaurant. These are different policies.</p><p>In a job matrix, <code>strategy.fail-fast</code> applies to the matrix and defaults to true: a non-forgiven failure cancels queued and in-progress siblings. <code>continue-on-error</code> applies to one job. Mark only the experimental combination as allowed to fail; do not apply it to stable coverage.</p>",
+    "example": "<p>Java 21 and 25 are required; Java 26-ea is experimental. If 26-ea fails with <code>continue-on-error: true</code>, stable jobs continue. If Java 21 fails, fail-fast cancels siblings.</p>",
+    "use_case": {
+      "when": "Use a test matrix when one codebase supports multiple runtimes or operating systems.",
+      "example": "A data connector tests supported JDKs and one early-access JDK without letting the experiment mask stable regressions.",
+      "decision": "Keep required combinations un-forgiven. Label experiments explicitly, decide whether fast cancellation saves useful capacity, and retain enough logs to diagnose the first required failure."
+    },
+    "practice": "Switch the failing combination between experimental and stable. Predict which siblings are cancelled.",
+    "boundary": "The model has three jobs and instant state transitions. It omits runner timing, cancellation races, queued capacity, retries, artifacts, billing, branch protection, and required-check naming.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>failure <select id=\"matrixFailure\"><option value=\"experimental\">26-ea experimental</option><option value=\"stable\">21 stable</option></select></label><div id=\"matrixWorld\" class=\"world\"></div></div>",
+    "js": "function paintMatrix(){const exp=matrixFailure.value==='experimental';matrixWorld.innerHTML='<p><strong>Question:</strong> does the matrix stop?</p><div class=step-flow><div class=tile>21 required</div><div class=tile>25 required</div><div class=\"tile fail\">'+(exp?'26-ea experimental fails':'21 stable fails')+'</div><div class=\"tile '+(exp?'ok':'wait')+'\">'+(exp?'siblings continue':'siblings cancelled')+'</div></div>';};matrixFailure.onchange=paintMatrix;paintMatrix();",
+    "questions": [
+      [
+        "The experimental job fails with continue-on-error true. What happens?",
+        [
+          "Other matrix jobs continue",
+          "Every sibling is cancelled",
+          "The failure becomes a stable pass"
+        ],
+        0,
+        "The forgiveness applies to that job."
+      ],
+      [
+        "A required stable job fails while fail-fast is true. What happens?",
+        [
+          "Queued and in-progress matrix siblings are cancelled",
+          "Only the UI color changes",
+          "continue-on-error is added automatically"
+        ],
+        0,
+        "Fail-fast applies across the matrix."
+      ],
+      [
+        "What is the dangerous configuration?",
+        [
+          "continue-on-error true for required stable jobs",
+          "An explicit experimental flag",
+          "Testing two supported versions"
+        ],
+        0,
+        "Forgiving required coverage can produce a green workflow with a real regression."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "jobs={'21':'required','25':'required','26-ea':'experimental'}; failure='26-ea'",
+          "note": "Define stable and experimental combinations."
+        },
+        {
+          "code": "forgiven=(jobs[failure]=='experimental')",
+          "note": "Evaluate continue-on-error for the failing job."
+        },
+        {
+          "code": "siblings_cancelled=not forgiven",
+          "note": "Apply fail-fast only to a non-forgiven failure."
+        },
+        {
+          "code": "result={'failure':failure,'forgiven':forgiven,'siblings_cancelled':siblings_cancelled,'workflow':'success-with-experimental-failure'}",
+          "note": "Keep the experimental result visible without blocking stable coverage."
+        }
+      ],
+      "expect": {
+        "result": {
+          "failure": "26-ea",
+          "forgiven": true,
+          "siblings_cancelled": false,
+          "workflow": "success-with-experimental-failure"
+        }
+      },
+      "limit": "The model has three jobs and instant state transitions. It omits runner timing, cancellation races, queued capacity, retries, artifacts, billing, branch protection, and required-check naming.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "jobs": {
+              "21": "required",
+              "25": "required",
+              "26-ea": "experimental"
+            },
+            "failure": "26-ea"
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "jobs": {
+              "21": "required",
+              "25": "required",
+              "26-ea": "experimental"
+            },
+            "failure": "26-ea",
+            "forgiven": true
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "jobs": {
+              "21": "required",
+              "25": "required",
+              "26-ea": "experimental"
+            },
+            "failure": "26-ea",
+            "forgiven": true,
+            "siblings_cancelled": false
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "jobs": {
+              "21": "required",
+              "25": "required",
+              "26-ea": "experimental"
+            },
+            "failure": "26-ea",
+            "forgiven": true,
+            "siblings_cancelled": false,
+            "result": {
+              "failure": "26-ea",
+              "forgiven": true,
+              "siblings_cancelled": false,
+              "workflow": "success-with-experimental-failure"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/ci-cd-github-actions.py"
+    },
+    "sources": [
+      [
+        "GitHub Actions workflow syntax: matrix failure handling",
+        "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstrategyfail-fast",
+        "Official GitHub documentation; checked November 19, 2026"
+      ],
+      [
+        "GitHub Actions: running job variations",
+        "https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations",
+        "Official GitHub documentation; checked November 19, 2026"
+      ]
+    ],
+    "visual_explanation": "Three matrix cells share one fail-fast boundary, while only the experimental cell carries its own continue-on-error exception.",
+    "written_questions": [
+      "Which matrix combinations are truly required?",
+      "Would fail-fast save capacity or erase useful diagnosis in this workflow?"
+    ],
+    "source_checked_on": "2026-11-19"
+  },
+  {
+    "slug": "apis-microservices",
+    "track": "APIs & Microservices",
+    "title": "maximum: 100 without type: number still allows the string ‘huge’",
+    "goal": "Write OpenAPI 3.2 schemas whose constraints apply to the instance types you actually intend to accept.",
+    "tag": "APIs & Microservices · OpenAPI 3.2.1 · schema validation",
+    "concept": "<p>A sign saying “maximum 100 kilograms” constrains weight. It says nothing about a box labeled with the word “huge.”</p><p>OpenAPI 3.2 Schema Objects use JSON Schema semantics. If a schema omits <code>type</code>, it allows all JSON types. A numeric keyword such as <code>maximum</code> applies to numbers but does not itself require the instance to be numeric. Add <code>type: number</code> when that is the contract.</p>",
+    "example": "<p>The request field <code>batchSize</code> has only <code>maximum: 100</code>. Number 120 fails, number 80 passes, and string <code>\"huge\"</code> is not rejected by that numeric constraint. Adding <code>type: integer</code> rejects the string.</p>",
+    "use_case": {
+      "when": "Use explicit types whenever an API contract relies on type-specific JSON Schema keywords.",
+      "example": "An ingestion API limits batchSize to 100 but must reject strings before they reach scheduler code.",
+      "decision": "Declare type, bounds, required properties, and object closure deliberately. Test the validator used at the gateway and server; documentation alone is not runtime enforcement."
+    },
+    "practice": "Toggle the explicit type and validate 80, 120, and the string huge.",
+    "boundary": "The model implements only a tiny subset of JSON Schema. It omits dialect negotiation, integer versus number details, composition, null, coercion, formats, unevaluated properties, and validator differences.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>schema <select id=\"schemaType\"><option value=\"typed\">type: integer + maximum: 100</option><option value=\"loose\">maximum: 100 only</option></select></label><div id=\"schemaWorld\" class=\"world\"></div></div>",
+    "js": "function paintSchema(){const typed=schemaType.value==='typed';schemaWorld.innerHTML='<p><strong>Question:</strong> which inputs validate?</p><div class=step-flow><div class=\"tile ok\">80 passes</div><div class=\"tile fail\">120 fails maximum</div><div class=\"tile '+(typed?'fail':'wait')+'\">\"huge\" '+(typed?'fails type':'not rejected by maximum')+'</div></div>';};schemaType.onchange=paintSchema;paintSchema();",
+    "questions": [
+      [
+        "Schema has maximum:100 but no type. What happens to string 'huge'?",
+        [
+          "The numeric keyword does not reject it",
+          "It becomes number 100",
+          "OpenAPI deletes it"
+        ],
+        0,
+        "The keyword applies only to numeric instances."
+      ],
+      [
+        "What closes the gap?",
+        [
+          "Declare type: integer or number",
+          "Add a longer description",
+          "Rename the field"
+        ],
+        0,
+        "The type constraint makes the intended domain explicit."
+      ],
+      [
+        "What does the OpenAPI document not guarantee by itself?",
+        [
+          "That every runtime request is validated and not coerced",
+          "That humans can read the contract",
+          "That schemas can declare maximum"
+        ],
+        0,
+        "Runtime enforcement depends on actual validators and server code."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "values=[80,120,'huge']; maximum=100",
+          "note": "Choose two numbers and one string."
+        },
+        {
+          "code": "loose=[not isinstance(v,(int,float)) or v<=maximum for v in values]",
+          "note": "Apply maximum only where it is applicable."
+        },
+        {
+          "code": "typed=[isinstance(v,int) and v<=maximum for v in values]",
+          "note": "Add the intended integer type constraint."
+        },
+        {
+          "code": "result={'values':values,'maximum_only':loose,'typed_integer':typed}",
+          "note": "Compare the loose and explicit contracts."
+        }
+      ],
+      "expect": {
+        "result": {
+          "values": [
+            80,
+            120,
+            "huge"
+          ],
+          "maximum_only": [
+            true,
+            false,
+            true
+          ],
+          "typed_integer": [
+            true,
+            false,
+            false
+          ]
+        }
+      },
+      "limit": "The model implements only a tiny subset of JSON Schema. It omits dialect negotiation, integer versus number details, composition, null, coercion, formats, unevaluated properties, and validator differences.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "values": [
+              80,
+              120,
+              "huge"
+            ],
+            "maximum": 100
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "values": [
+              80,
+              120,
+              "huge"
+            ],
+            "maximum": 100,
+            "loose": [
+              true,
+              false,
+              true
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "values": [
+              80,
+              120,
+              "huge"
+            ],
+            "maximum": 100,
+            "loose": [
+              true,
+              false,
+              true
+            ],
+            "typed": [
+              true,
+              false,
+              false
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "values": [
+              80,
+              120,
+              "huge"
+            ],
+            "maximum": 100,
+            "loose": [
+              true,
+              false,
+              true
+            ],
+            "typed": [
+              true,
+              false,
+              false
+            ],
+            "result": {
+              "values": [
+                80,
+                120,
+                "huge"
+              ],
+              "maximum_only": [
+                true,
+                false,
+                true
+              ],
+              "typed_integer": [
+                true,
+                false,
+                false
+              ]
+            }
+          }
+        }
+      ],
+      "example_file": "examples/apis-microservices.py"
+    },
+    "sources": [
+      [
+        "OpenAPI Specification v3.2.1",
+        "https://spec.openapis.org/oas/v3.2.1.html",
+        "Official OpenAPI Initiative specification; published September 2026; checked November 19, 2026"
+      ]
+    ],
+    "visual_explanation": "The same three values pass through two schema gates; only the typed gate rejects the string before the maximum check.",
+    "written_questions": [
+      "Which current schemas use type-specific keywords without type?",
+      "Where is the contract actually enforced in your request path?"
+    ],
+    "source_checked_on": "2026-11-19"
+  }
+]

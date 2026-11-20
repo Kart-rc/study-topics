@@ -1417,6 +1417,39 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day59/data-engineering",
+      "product_material_added_on": "2026-11-19",
+      "session_type": "focused",
+      "cycle_position": 1,
+      "cycle_origin": "Day59",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "ingestion",
+        "data_intelligence_platform",
+        "troubleshooting_optimization"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official COF-C03 overview and study-guide entry last rechecked 2026-11-18; full objective IDs and weights still not retrievable; planning groups only",
+      "snowflake_planning_groups": [
+        "loading_transformation",
+        "architecture_connectivity",
+        "performance"
+      ],
+      "source_checked_on": "2026-11-19",
+      "source_versions": {
+        "databricks": "Auto Loader production documentation checked 2026-11-19; official exam guide last rechecked 2026-11-18",
+        "snowflake": "Snowpipe Streaming channel and best-practice documentation checked 2026-11-19; official COF-C03 overview last rechecked 2026-11-18"
+      },
+      "depth": "Focused progress-versus-capacity controls: Auto Loader checkpoints and batch sizing; Snowpipe Streaming channel offset tokens, retained source, and client-capacity boundary. No mastery or complete coverage claim.",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_cli_sql": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -1626,6 +1659,11 @@
       "day_number": 58,
       "date": "2026-11-18",
       "key": "Day19/data-engineering+products+14"
+    },
+    {
+      "day_number": 59,
+      "date": "2026-11-19",
+      "key": "Day26/data-engineering+products+7"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
