@@ -1,0 +1,167 @@
+[
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A technology radar needs movement evidence—not a prettier dot",
+    "goal": "Turn an internal technology radar into a small, reviewable portfolio of evidence-backed adoption policies.",
+    "tag": "Distinguished Engineer · technology strategy · evidence portfolios",
+    "concept": "<p>A grocery shelf label says what the store will stock, not which package got the loudest applause. A technology-radar ring should work the same way: it expresses the organization's current use policy.</p><p><strong>Assess</strong> means learn without creating production dependency. <strong>Trial</strong> means use in a bounded production context that can carry the risk. <strong>Adopt</strong> means a proven default for an appropriate context. <strong>Caution</strong> means do not start new use until named concerns are resolved. Movement needs evidence, an owner, a review date, and an explicit next test. Otherwise the radar becomes decoration.</p>",
+    "example": "<p>Three data teams ask to make the synthetic <code>CatalogBridge</code> metadata client the platform default. A demo puts it in Assess. One bounded production workload with rollback and telemetry can justify Trial under the company's local policy. It moves to Adopt only after evidence from three materially different workloads shows the same operating guardrails work. A failed rollback moves it to Caution until the return path is repaired.</p>",
+    "use_case": {
+      "when": "Use a technology radar when teams face repeated platform choices and need a visible default, bounded experiments, and explicit retirement guidance.",
+      "example": "A data-platform group must decide whether a new metadata client is only worth studying, safe for one production pilot, or ready to become the supported default.",
+      "decision": "Define local entry and exit evidence for every ring, cap concurrent trials, name a champion and review date, and publish context. Use a short decision record instead when only one team and one decision are involved."
+    },
+    "practice": "Move CatalogBridge through demo, bounded production, three-context evidence, and failed rollback. Predict the ring before revealing the local policy result.",
+    "boundary": "This local model is an original governance rule, not Thoughtworks' universal scoring formula. It reduces evidence to four packets and cannot measure security, regulatory fit, ecosystem health, switching cost, skill availability, performance, vendor risk, or the quality of production experience.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>evidence packet <select id=\"radarEvidence\"><option value=\"demo\">demo only</option><option value=\"pilot\">one bounded production pilot</option><option value=\"contexts\">three different production contexts</option><option value=\"failure\">rollback failed in production</option></select></label><div id=\"radarWorld\" class=\"world\"></div></div>",
+    "js": "function paintRadar(){const p=radarEvidence.value;const ring=p==='demo'?'Assess':p==='pilot'?'Trial':p==='contexts'?'Adopt':'Caution';const evidence=p==='demo'?'lab trace; no production dependency':p==='pilot'?'1 production use; rollback tested':p==='contexts'?'3 contexts; guardrails repeated':'rollback failed; return path broken';const next=p==='demo'?'name a bounded pilot':p==='pilot'?'test a different workload':p==='contexts'?'review default quarterly':'repair and retest rollback';radarWorld.innerHTML='<p><strong>Question:</strong> what use policy does this evidence support?</p><div class=step-flow><div class=tile>CatalogBridge</div><div class=tile>'+evidence+'</div><div class=\"tile '+(ring==='Adopt'?'ok':ring==='Caution'?'fail':'wait')+'\">ring: '+ring+'</div><div class=tile>next: '+next+'</div></div><p><strong>Owner:</strong> platform council · <strong>review:</strong> 2027-02-21</p>';};radarEvidence.onchange=paintRadar;paintRadar();",
+    "questions": [
+      [
+        "A polished demo has no production use. What is the strongest supported ring in the local policy?",
+        [
+          "Assess",
+          "Trial",
+          "Adopt"
+        ],
+        0,
+        "The demo supports learning, not a production recommendation."
+      ],
+      [
+        "Why does the Trial ring need a WIP limit?",
+        [
+          "To keep experiments few enough to support and finish",
+          "To maximize the number of logos",
+          "To make every trial permanent"
+        ],
+        0,
+        "A trial consumes operating attention and must produce a decision."
+      ],
+      [
+        "When should a radar entry be replaced by a simpler decision record?",
+        [
+          "One team faces one bounded choice with no recurring portfolio policy",
+          "Many teams repeatedly choose among platform defaults",
+          "The organization needs explicit retirement guidance"
+        ],
+        0,
+        "A radar earns its cost when it coordinates repeated choices across a portfolio."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "packet={'production_contexts':1,'rollback_tested':True,'critical_failure':False}",
+          "note": "Record evidence for one bounded production pilot."
+        },
+        {
+          "code": "ring='Caution' if packet['critical_failure'] else ('Adopt' if packet['production_contexts']>=3 and packet['rollback_tested'] else ('Trial' if packet['production_contexts']>=1 and packet['rollback_tested'] else 'Assess'))",
+          "note": "Apply the organization's explicit local movement rule."
+        },
+        {
+          "code": "record={'ring':ring,'owner':'platform_council','review_on':'2027-02-21'}",
+          "note": "Attach accountability and a time to revisit the policy."
+        },
+        {
+          "code": "result={**record,'next_evidence':'different_workload' if ring=='Trial' else 'bounded_pilot'}",
+          "note": "Publish the next evidence needed, not only the current dot."
+        }
+      ],
+      "expect": {
+        "result": {
+          "ring": "Trial",
+          "owner": "platform_council",
+          "review_on": "2027-02-21",
+          "next_evidence": "different_workload"
+        }
+      },
+      "limit": "This local model is an original governance rule, not Thoughtworks' universal scoring formula. It reduces evidence to four packets and cannot measure security, regulatory fit, ecosystem health, switching cost, skill availability, performance, vendor risk, or the quality of production experience.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "packet": {
+              "production_contexts": 1,
+              "rollback_tested": true,
+              "critical_failure": false
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "packet": {
+              "production_contexts": 1,
+              "rollback_tested": true,
+              "critical_failure": false
+            },
+            "ring": "Trial"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "packet": {
+              "production_contexts": 1,
+              "rollback_tested": true,
+              "critical_failure": false
+            },
+            "ring": "Trial",
+            "record": {
+              "ring": "Trial",
+              "owner": "platform_council",
+              "review_on": "2027-02-21"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "packet": {
+              "production_contexts": 1,
+              "rollback_tested": true,
+              "critical_failure": false
+            },
+            "ring": "Trial",
+            "record": {
+              "ring": "Trial",
+              "owner": "platform_council",
+              "review_on": "2027-02-21"
+            },
+            "result": {
+              "ring": "Trial",
+              "owner": "platform_council",
+              "review_on": "2027-02-21",
+              "next_evidence": "different_workload"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Thoughtworks Technology Radar, Volume 35",
+        "https://www.thoughtworks.com/content/dam/thoughtworks/documents/radar/2026/11/tr_technology_radar_vol_35_en.pdf",
+        "Primary Technology Advisory Board publication; November 2026"
+      ],
+      [
+        "Thoughtworks Technology Radar FAQ",
+        "https://www.thoughtworks.com/radar/faq",
+        "Official definitions and evidence rules; current page"
+      ],
+      [
+        "Thoughtworks Enterprise Architecture Playbook: Tech radar",
+        "https://www.thoughtworks.com/content/dam/thoughtworks/documents/report/thoughtworks-enterprise-architecture-playbook.pdf",
+        "Official playbook; 2025; recommends context, a Trial WIP limit, and quarterly review"
+      ]
+    ],
+    "visual_explanation": "One candidate moves through four evidence packets. The ring, owner, review date, and next test change together, showing that the dot is a use policy rather than a popularity score.",
+    "written_questions": [
+      "Which technology choice is repeated often enough to deserve a portfolio-level policy?",
+      "What exact production evidence would move it one ring, and what failure would move it outward?"
+    ],
+    "source_checked_on": "2026-11-21"
+  }
+]

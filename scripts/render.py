@@ -28,14 +28,14 @@ def render(folder):
  expected=expected_tracks(manifest,day['number'])
  if sorted(l['track'] for l in lessons)!=sorted(expected):raise ValueError('Lesson tracks do not match day policy: '+folder)
  lesson_count=len(lessons);total_minutes=day_minutes(manifest,day)
+ previously={k for d in manifest['days'] if d['number']<day['number'] for k in d.get('review_keys',[])}
  for prior in manifest['days']:
   if prior['number']>=day['number']:continue
   age=(date.fromisoformat(day['date'])-date.fromisoformat(prior['date'])).days
   # Include missed intervals once at the next generated date; prior deliveries record covered intervals.
   for offset in manifest['review_offsets_days']:
    key=f"{prior['folder']}+{offset}"
-   previously={k for d in manifest['days'] if d['number']<day['number'] for k in d.get('review_keys',[])}
-   if age>=offset and key not in previously:due.append((prior,key))
+   if age>=offset:due.append((prior,key))
  # Select up to two source topics for each track. A global folder cap would
  # starve tracks introduced later when older bundles did not contain them.
  due.sort(key=lambda pair: (date.fromisoformat(pair[0]['date'])+timedelta(days=int(pair[1].split('+')[1])),pair[0]['number']))
@@ -45,7 +45,11 @@ def render(folder):
   selected=[]
   for prior,key in due:
    if len(selected)>=2:break
-   if any(old['track']==track for old in prior_lessons[prior['folder']]):selected.append((prior,key))
+   old=next((item for item in prior_lessons[prior['folder']] if item['track']==track),None)
+   if old:
+    offset=key.rsplit('+',1)[1]
+    qualified=f"{prior['folder']}/{old['slug']}+{offset}"
+    if key not in previously and qualified not in previously:selected.append((prior,qualified))
   due_by_track[track]=selected
  day['review_keys']=sorted({key for selected in due_by_track.values() for _,key in selected})
  for L in lessons:
@@ -120,10 +124,18 @@ $('export').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(
    md=md.replace(L['goal']+'\n',L['goal']+'\n\nBudget: 6 minutes concept/recall, 9 Databricks, 9 Snowflake, 6 comparison/quiz.\n',1)
   (R/folder/f'{slug}.md').write_text(md)
  cards=''.join(f'<article class="card"><p class="eyebrow">{esc(l["track"])}</p><h2><a href="{l["slug"]}.html">{esc(l["title"])}</a></h2><p>{esc(l["goal"])}</p><span class="pill">{lesson_minutes(manifest,day,l["track"])} minutes</span></article>' for l in lessons)
- timing_description='Data engineering: 30 minutes; other six lessons: 15 minutes each.' if total_minutes==120 else '15 minutes each.'
+ timing_description='Data engineering: 30 minutes; other six lessons: 15 minutes each.' if total_minutes==120 else ('15 minutes.' if lesson_count==1 else '15 minutes each.')
  prepared=('<p>Prepared in advance at your request for '+esc(day['date'])+'.</p>') if day.get('prepared_in_advance_at_user_request') else ''
- (R/folder/'index.html').write_text(page(folder,f'<nav><a href="../index.html">← All days</a></nav><header><p class="eyebrow">Engineering field notes / {day["date"]}</p><h1>{folder}: see the idea, then follow the code.</h1><p class="lead">{lesson_count} lessons. {timing_description} Read a plain-language example, follow the code as values change, then explore and quiz yourself. Deeper sections are optional.</p><p>{total_minutes} minutes total. Each lesson includes its own recall and quiz time.</p>{prepared}</header><div class="grid">{cards}</div><section><h2>Make it stick</h2><p>Review intervals: 1, 3, 7, 14, and 30 days after delivery. Future lessons include due questions and refreshers. Export answers and upload them in ChatGPT to target weak areas. Generation does not imply completion.</p></section>'))
+ noun='lesson' if lesson_count==1 else 'lessons'
+ (R/folder/'index.html').write_text(page(folder,f'<nav><a href="../index.html">← All days</a></nav><header><p class="eyebrow">Engineering field notes / {day["date"]}</p><h1>{folder}: see the idea, then follow the code.</h1><p class="lead">{lesson_count} {noun}. {timing_description} Read a plain-language example, follow the code as values change, then explore and quiz yourself. Deeper sections are optional.</p><p>{total_minutes} minutes total. Each lesson includes its own recall and quiz time.</p>{prepared}</header><div class="grid">{cards}</div><section><h2>Make it stick</h2><p>Review intervals: 1, 3, 7, 14, and 30 days after delivery. Future lessons include due questions and refreshers. Export answers and upload them in ChatGPT to target weak areas. Generation does not imply completion.</p></section>'))
  (R/'study-state.json').write_text(json.dumps(manifest,indent=2)+'\n')
  cards=''.join(f'<article class="card"><h2><a href="{d["folder"]}/index.html">{d["folder"]}</a></h2><p>{d["date"]} · {day_count(manifest,d)} lessons · {day_minutes(manifest,d)} minutes</p></article>' for d in reversed(manifest['days']))
- (R/'index.html').write_text(page('Engineering field notes',f'<header><p class="eyebrow">Daily study / seven tracks from Day11</p><h1>Engineering field notes.</h1><p class="lead">A daily practice in systems, software, technical judgment, AI engineering, emerging research, CI/CD, and APIs.</p><p>New material is scheduled for 6:50 PM America/New_York. Open any day below. All lessons work offline once downloaded.</p></header><div class="grid">{cards}</div>'))
+ latest_tracks=expected_tracks(manifest,max(d['number'] for d in manifest['days']))
+ if latest_tracks==['Distinguished Engineer']:
+  eyebrow='Daily study / Distinguished Engineer from Day61'
+  lead='A daily practice in technical direction, evidence-backed strategy, and cross-organization influence. Days 1–60 preserve the earlier multi-track curriculum.'
+ else:
+  eyebrow='Daily study / seven tracks from Day11'
+  lead='A daily practice in systems, software, technical judgment, AI engineering, emerging research, CI/CD, and APIs.'
+ (R/'index.html').write_text(page('Engineering field notes',f'<header><p class="eyebrow">{eyebrow}</p><h1>Engineering field notes.</h1><p class="lead">{lead}</p><p>New material is scheduled for 6:50 PM America/New_York. Open any day below. All lessons work offline once downloaded.</p></header><div class="grid">{cards}</div>'))
 if __name__=='__main__':render(sys.argv[1] if len(sys.argv)>1 else 'Day1')
