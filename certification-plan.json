@@ -1450,6 +1450,40 @@
       },
       "product_lab_execution": "not_run",
       "mastery": "not_assessed"
+    },
+    {
+      "lesson": "Day60/data-engineering",
+      "product_material_added_on": "2026-11-20",
+      "session_type": "focused",
+      "cycle_position": 2,
+      "cycle_origin": "Day59",
+      "databricks_guide_version": "2026-05-04",
+      "databricks_domains": [
+        "lakeflow_jobs",
+        "deployment_and_orchestration",
+        "troubleshooting_optimization",
+        "data_intelligence_platform"
+      ],
+      "snowflake_exam_code": "COF-C03",
+      "snowflake_blueprint_status": "Official COF-C03 overview and study-guide entry last rechecked 2026-11-18; full objective IDs and weights still not retrievable; planning groups only",
+      "snowflake_planning_groups": [
+        "architecture_connectivity",
+        "performance",
+        "account_access_security"
+      ],
+      "source_checked_on": "2026-11-20",
+      "source_versions": {
+        "databricks": "Current jobs-compute and classic-jobs documentation checked 2026-11-20; official exam guide last rechecked 2026-11-18",
+        "snowflake": "Current warehouse considerations and ALTER WAREHOUSE documentation checked 2026-11-20; official COF-C03 overview last rechecked 2026-11-18"
+      },
+      "depth": "Focused compute lifecycle: supported Databricks job task compute, serverless prerequisites, classic/shared lifecycle, Snowflake inactivity-based auto-suspend/resume, startup and billing tradeoffs. No mastery or complete exam coverage claim.",
+      "execution_status": {
+        "browser_models": "local JavaScript",
+        "recorded_example": "Python executed locally",
+        "vendor_cli_sql": "not_run"
+      },
+      "product_lab_execution": "not_run",
+      "mastery": "not_assessed"
     }
   ],
   "review_offsets_days": [
@@ -1664,6 +1698,11 @@
       "day_number": 59,
       "date": "2026-11-19",
       "key": "Day26/data-engineering+products+7"
+    },
+    {
+      "day_number": 60,
+      "date": "2026-11-20",
+      "key": "Day30/data-engineering+products+3"
     }
   ],
   "assessment_policy": "Coverage is delivery only; personal answers, scores, mastery and exam booking details stay private. Silence is not completion.",
