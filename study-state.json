@@ -1378,6 +1378,15 @@
       ],
       "total_minutes": 105,
       "approved_on": "2026-10-01"
+    },
+    {
+      "effective_from_day": 61,
+      "tracks": [
+        "Distinguished Engineer"
+      ],
+      "total_minutes": 15,
+      "approved_on": "2026-11-20",
+      "note": "Trimmed to the Distinguished Engineer track only. Other six tracks, Databricks/Snowflake product sections and certification alignment are paused, not deleted; Days 1-60 stay as published."
     }
   ],
   "lesson_duration_changes": [
@@ -1394,6 +1403,12 @@
         "snowflake": 9,
         "comparison_and_quiz": 6
       }
+    },
+    {
+      "effective_from_day": 61,
+      "minutes_by_track": {},
+      "total_minutes": 15,
+      "approved_on": "2026-11-20"
     }
   ],
   "certification_plan": "certification-plan.json",

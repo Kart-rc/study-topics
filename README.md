@@ -1,6 +1,6 @@
 # Engineering field notes
 
-From Day11: seven lessons per day for an experienced data/platform engineering leader: data engineering, software engineering, Distinguished Engineer judgment, GenAI engineering, technology breakthroughs, CI/CD & GitHub Actions, and APIs & Microservices. Days 1–10 contain the original five tracks.
+From Day11: seven lessons per day for an experienced data/platform engineering leader: data engineering, software engineering, Distinguished Engineer judgment, GenAI engineering, technology breakthroughs, CI/CD & GitHub Actions, and APIs & Microservices. Days 1–10 contain the original five tracks. From Day61 (November 21, 2026): one Distinguished Engineer lesson per day, 15 minutes; the other six tracks and the certification work are paused.
 
 ## Read
 

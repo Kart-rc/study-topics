@@ -1,5 +1,16 @@
 # Daily study execution contract
 
+## Distinguished Engineer only from Day61 (approved by the user on November 20, 2026)
+
+This section overrides every earlier instruction in this file about track count, lesson count, minutes, Databricks/Snowflake product sections and certification alignment, from Day61 onward. Days 1-60 stay exactly as published.
+
+- Generate one lesson per day: the **Distinguished Engineer** track (`distinguished-engineer`), 15 minutes, with the same 2/4/5/4 structure, plain-language teaching style, visual, use case, code or decision trace, sources and three scored questions described below.
+- Pause the other six tracks (Data engineering, Software engineering, GenAI engineering, Technology breakthroughs, CI/CD & GitHub Actions, APIs & Microservices). Do not generate them, and do not add Databricks or Snowflake product sections. Pause the certification coverage work in `CERTIFICATION_ROADMAP.md` and `certification-plan.json`; leave those files unchanged.
+- `study-state.json.track_changes` (effective_from_day 61) is the authoritative policy. Each new `lessons.json` holds exactly one lesson, and the day record's `lesson_slugs` is `["distinguished-engineer"]`.
+- Spaced review continues for the Distinguished Engineer track only. Do not schedule recall from the paused tracks; do not mark their outstanding review keys as covered.
+- Topic focus: the learner is preparing for a Distinguished Engineer role in enterprise data platforms and already gets a separate nightly page on architecture boards, ADRs, AI evals and mocks. Use this lesson for what that page does not cover: how real DEs set direction (published case studies, engineering strategy writing, technology radars, architecture review practice, influence across organizations), recent primary-source developments relevant to a data-platform DE, and decision traces from those cases. Avoid repeating generic system-design drills.
+- Verification and the atomic commit rules in steps 8 and 9 apply to the single lesson, its Markdown companion, the daily hub and the manifest.
+
 Approved by the user: from Day11 create seven standalone HTML lessons in Kart-rc/study-topics, one each for Data engineering, Software engineering, Distinguished Engineer, GenAI engineering, Technology breakthroughs, CI/CD & GitHub Actions, and APIs & Microservices. Days 1–10 retain five lessons and 75 minutes; Days11–16 have seven lessons and 105 minutes total. From Day17, data engineering is 30 minutes and the other six tracks remain 15 minutes: 120 minutes total, including review. Do not ask for approach selection or confirmation again. Use current research and senior-level, intuitive explanations with concrete examples. Context: AWS, Spark, Kafka, EKS, Databricks, Snowflake, observability, lineage, platform architecture, and organizational technical influence. Vary coverage; do not turn every track into AI news.
 
 1. Read repository instructions, `study-state.json`, this file, root contents, and recent `DayN/lessons.json` on the default branch. Use current repository state as authoritative. Keep this program distinct from the completion-gated Director ALTER program. Do not modify unrelated tasks.
