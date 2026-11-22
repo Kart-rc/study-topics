@@ -1,0 +1,167 @@
+[
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A strategy principle should decide a repeated choice—not decorate a slide",
+    "goal": "Write a technology principle as a usable default, an evidence test, and an explicit exception path.",
+    "tag": "Distinguished Engineer · engineering strategy · sensible defaults",
+    "concept": "<p>A road sign that says “be thoughtful” sounds friendly but does not tell two drivers who goes first. “Yield to traffic already in the circle” resolves the repeated choice.</p><p>An engineering principle works only when the same facts produce the same starting decision. State the default, the context where it applies, the evidence that permits an exception, and who revisits the exception. That makes the principle a <strong>sensible default</strong>: a strong starting point, not a claim that one answer is best everywhere.</p>",
+    "example": "<p>Fourteen data services use the supported Java event client. A new team asks for a second client because it prefers Python. The principle says: “Use the supported event runtime when it meets the workload's latency, security, and integration needs. Trial an exception only when measured evidence shows a requirement the default cannot meet; name an owner and expiry.” Preference alone selects the default. A measured missing capability opens a bounded exception.</p>",
+    "use_case": {
+      "when": "Use a decision-producing principle when many teams repeatedly choose runtimes, data formats, observability libraries, deployment paths, or platform integrations.",
+      "example": "A data-platform organization wants deep expertise in one event-client stack without blocking a workload that proves the standard cannot meet a regulatory or latency requirement.",
+      "decision": "Publish a default plus applicability test, exception evidence, owner, and review date. Use team judgment without a principle when the choice is rare, local, cheap to reverse, and creates no shared operating burden."
+    },
+    "practice": "Switch among a vague slogan, an ordinary service, a measured capability gap, and an expired exception. Predict whether the strategy yields a decision or merely creates a meeting.",
+    "boundary": "This is an original local decision model, not Spotify's or Thoughtworks' governance process. It reduces technical fit to one Boolean and omits migration cost, security review, regulatory interpretation, skills, ecosystem maturity, commercial terms, support load, and how teams challenge a bad default.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><div id=\"world\"><label>decision packet <select id=\"principleCase\"><option value=\"vague\">“prefer consistency” only</option><option value=\"fits\">default meets all named needs</option><option value=\"gap\">measured requirement gap</option><option value=\"expired\">exception passed its review date</option></select></label><div id=\"principleWorld\" class=\"world\"></div></div>",
+    "js": "function paintPrinciple(){const c=principleCase.value;const decision=c==='vague'?'unresolved':c==='fits'?'use supported Java client':c==='gap'?'bounded Python trial':'re-evaluate or return to default';const evidence=c==='vague'?'no applicability test':c==='fits'?'latency, security, integration all fit':c==='gap'?'measured capability missing':'review date reached';const owner=c==='gap'?'team + platform owner':c==='expired'?'platform council':'platform default owner';const next=c==='vague'?'hold another meeting':c==='gap'?'measure the bounded trial':'record the outcome';principleWorld.innerHTML='<p><strong>Question:</strong> does the principle turn these facts into a decision?</p><p><strong>Notice:</strong> the default applies only after the evidence crosses the named test.</p><div class=tool-path><div class=tile><strong>1 · Evidence</strong><br>'+evidence+'</div><div class=arrow>→ test default →</div><div class=\"tile '+(c==='vague'?'fail':'wait')+'\"><strong>2 · Applicability gate</strong><br>'+(c==='vague'?'missing':'needs named checks')+'</div></div><div class=tool-path><div class=\"tile '+(c==='vague'?'fail':c==='gap'||c==='expired'?'wait':'ok')+'\"><strong>3 · Decision</strong><br>'+decision+'</div><div class=arrow>→ assign →</div><div class=tile><strong>4 · Follow-up</strong><br>owner: '+owner+'<br>next: '+next+'</div></div>';};principleCase.onchange=paintPrinciple;paintPrinciple();",
+    "questions": [
+      [
+        "The supported client meets the service's named needs, but the team prefers another language. What does the principle select?",
+        [
+          "The supported default",
+          "An automatic permanent exception",
+          "No decision until executives vote"
+        ],
+        0,
+        "Preference alone does not disprove the applicability test."
+      ],
+      [
+        "What makes an exception compatible with the strategy?",
+        [
+          "A measured gap, bounded trial, owner, and review date",
+          "A popular library",
+          "An exception with no return path"
+        ],
+        0,
+        "The exception tests an explicit limit without silently creating a second standard."
+      ],
+      [
+        "When is this kind of principle unnecessary?",
+        [
+          "A rare local choice is cheap to reverse and creates no shared burden",
+          "Many teams repeatedly choose incompatible observability libraries",
+          "Each choice expands the on-call and security surface"
+        ],
+        0,
+        "Strategy should remove repeated coordination cost, not govern every small decision."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "case={'default_meets_needs':True,'measured_gap':None,'exception_requested':True}",
+          "note": "Capture the facts, including that the request is preference rather than evidence of a gap."
+        },
+        {
+          "code": "decision='default' if case['default_meets_needs'] else 'bounded_exception'",
+          "note": "Apply the principle's explicit applicability test."
+        },
+        {
+          "code": "record={'decision':decision,'default':'java_event_client','exception_owner':None}",
+          "note": "Record the starting decision and avoid inventing an owner for an exception that was not granted."
+        },
+        {
+          "code": "result={**record,'principle_resolved_choice':decision=='default'}",
+          "note": "Show that the principle removed a repeated choice instead of creating another approval meeting."
+        }
+      ],
+      "expect": {
+        "result": {
+          "decision": "default",
+          "default": "java_event_client",
+          "exception_owner": null,
+          "principle_resolved_choice": true
+        }
+      },
+      "limit": "This is an original local decision model, not Spotify's or Thoughtworks' governance process. It reduces technical fit to one Boolean and omits migration cost, security review, regulatory interpretation, skills, ecosystem maturity, commercial terms, support load, and how teams challenge a bad default.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "case": {
+              "default_meets_needs": true,
+              "measured_gap": null,
+              "exception_requested": true
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "case": {
+              "default_meets_needs": true,
+              "measured_gap": null,
+              "exception_requested": true
+            },
+            "decision": "default"
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "case": {
+              "default_meets_needs": true,
+              "measured_gap": null,
+              "exception_requested": true
+            },
+            "decision": "default",
+            "record": {
+              "decision": "default",
+              "default": "java_event_client",
+              "exception_owner": null
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "case": {
+              "default_meets_needs": true,
+              "measured_gap": null,
+              "exception_requested": true
+            },
+            "decision": "default",
+            "record": {
+              "decision": "default",
+              "default": "java_event_client",
+              "exception_owner": null
+            },
+            "result": {
+              "decision": "default",
+              "default": "java_event_client",
+              "exception_owner": null,
+              "principle_resolved_choice": true
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Spotify Engineering: Coding Is No Longer the Constraint",
+        "https://www.engineering.atspotify.com/2026/6/code-with-claude-coding-is-no-longer-the-constraint",
+        "Official engineering case study; published June 2026"
+      ],
+      [
+        "Spotify Engineering: Introducing Spotify Technology",
+        "https://www.engineering.atspotify.com/2026/10/introducing-spotify-technology-proven-at-spotify-now-yours",
+        "Official platform-strategy case study; published October 2026"
+      ],
+      [
+        "Thoughtworks: Better technology decision-making is underpinned by sensible defaults",
+        "https://www.thoughtworks.com/en-us/insights/blog/technology-strategy/better-tech-decision-making-underpinned-by-sensible-defaults",
+        "Official technology-strategy article; published September 5, 2024"
+      ]
+    ],
+    "visual_explanation": "The same technology request flows through four evidence packets. A vague slogan stops without a decision; a named applicability test selects the default, opens a bounded trial, or forces an expired exception back to review.",
+    "written_questions": [
+      "Which repeated technology choice in your organization is currently governed by a slogan rather than a test?",
+      "Write its default, applicability evidence, exception trigger, owner, and review date in five lines."
+    ],
+    "source_checked_on": "2026-11-22"
+  }
+]
