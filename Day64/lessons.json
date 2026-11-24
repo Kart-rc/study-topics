@@ -1,0 +1,196 @@
+[
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "Influence before the decision window closes—not after the answer is polished",
+    "goal": "Sequence cross-organization involvement early while labeling evidence, unknowns, and commitments honestly.",
+    "tag": "Distinguished Engineer · cross-org influence · decision timing",
+    "concept": "<p>If friends must choose a restaurant by noon, sending a perfect review at 2 PM does not help. Sending “the kitchen is definitely safe” at 9 AM before checking is also harmful.</p><p>Cross-organization technical influence has the same timing problem. A Distinguished Engineer should expose the decision question early, bring in the people who own constraints, and label what is known, provisional, and still being tested. This is an <strong>influence sequence</strong>: the right evidence reaches the right decision owner before the choice becomes expensive to change.</p>",
+    "example": "<p>A platform team investigates a managed change-data-capture service for eight weeks. Consumer roadmaps lock in week 6. Waiting until week 8 produces a polished recommendation that no team has capacity to adopt. Instead, in week 2 the DE shares the problem, current evidence, open security and replay questions, and the week-5 test. Security and two consumer owners shape the test. The week-6 decision uses the new evidence without pretending the service was proven in week 2.</p>",
+    "use_case": {
+      "when": "Use an influence sequence when evidence takes time to develop but another team's budget, roadmap, security review, or vendor decision will close first.",
+      "example": "A data-platform group is evaluating managed CDC while security, finance, and two consumer teams are making commitments that determine whether adoption is possible.",
+      "decision": "Engage named decision owners early with a bounded question, current evidence, unknowns, and the next test. Wait for a finished answer only when the decision is local, reversible, and no external planning window will close."
+    },
+    "practice": "Switch among a late broadcast, an early overclaim, an honest early note, and a staged sequence. Predict whether the week-6 roadmap decision receives usable evidence without creating a false commitment.",
+    "boundary": "This is an original local timing model, not Spotify's or Thoughtworks' influence process. It assumes one roadmap lock and four synthetic weeks. It omits trust history, power dynamics, procurement, regulatory review, calendar availability, decision rights, reversibility, and evidence quality.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><style>.decision-line{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:18px 0}.week{min-height:92px;border:2px solid #5f817d;border-radius:12px;padding:10px;background:#143136}.week strong{display:block;color:#d6f4b5}.week.lock{border-color:#e0a64b}.week.good{border-color:#7fd18a;background:#143b31}.week.bad{border-color:#ef7f72;background:#472b2b}@media(max-width:620px){.decision-line{grid-template-columns:1fr 1fr}.week{min-height:105px}}</style><div id=\"world\"><label>influence sequence <select id=\"influenceCase\"><option value=\"late\">first contact after roadmap lock</option><option value=\"overclaim\">early contact, unknowns hidden</option><option value=\"honest\">early bounded note</option><option value=\"staged\">targeted staged sequence</option></select></label><div id=\"influenceWorld\" class=\"world\"></div></div>",
+    "js": "function paintInfluence(){const c=influenceCase.value;const w2=c==='late'?'silent research':c==='overclaim'?'“CDC is proven”':c==='honest'?'problem + unknowns + week-5 test':'platform + security frame test';const w4=c==='late'?'silent research':c==='overclaim'?'teams assume commitment':c==='honest'?'security + consumers refine test':'consumer owners add replay cases';const w5=c==='late'?'test completes privately':c==='overclaim'?'test reveals open replay risk':c==='honest'?'test reports evidence + limits':'shared test reports evidence + limits';const w6=c==='late'?'roadmaps already locked':c==='overclaim'?'re-plan after broken promise':c==='honest'?'conditional adoption decision':'decision owner chooses next step';const verdict=c==='late'?'missed: polished answer arrived too late':c==='overclaim'?'unsafe: early contact became false certainty':c==='honest'?'usable: honest evidence reached the window':'strong: relevant owners shaped evidence before the window';const cls=c==='late'||c==='overclaim'?'bad':'good';influenceWorld.innerHTML='<p><strong>Question:</strong> does honest, relevant evidence reach the decision owner before week 6?</p><p><strong>Notice:</strong> early influence is not an early commitment. Unknowns stay visible until the test changes them.</p><div class=decision-line><div class=\"week '+(c==='late'?'bad':'good')+'\"><strong>Week 2 · frame</strong>'+w2+'</div><div class=\"week '+(c==='late'||c==='overclaim'?'bad':'good')+'\"><strong>Week 4 · involve</strong>'+w4+'</div><div class=\"week '+cls+'\"><strong>Week 5 · evidence</strong>'+w5+'</div><div class=\"week lock '+cls+'\"><strong>Week 6 · roadmap lock</strong>'+w6+'</div></div><p class='+cls+'><strong>Verdict:</strong> '+verdict+'</p>';};influenceCase.onchange=paintInfluence;paintInfluence();",
+    "questions": [
+      [
+        "The CDC evidence is complete in week 8, but consumer roadmaps lock in week 6. What should the DE do in week 2?",
+        [
+          "Share the decision question, current evidence, unknowns, and next test with relevant owners",
+          "Declare the service proven so teams reserve capacity",
+          "Stay silent until every question is closed"
+        ],
+        0,
+        "Early involvement protects the decision window only when provisional evidence remains clearly provisional."
+      ],
+      [
+        "Why invite security and consumer owners before the week-5 test?",
+        [
+          "Their constraints can shape evidence while the test is still changeable",
+          "Every stakeholder receives a veto",
+          "Early attendance proves adoption"
+        ],
+        0,
+        "Relevant owners contribute constraints and cases; involvement is input, not automatic consensus or commitment."
+      ],
+      [
+        "When is a polished late recommendation acceptable?",
+        [
+          "The decision is local, reversible, and no external planning window closes",
+          "Several teams lock annual budgets before the evidence arrives",
+          "Security approval is required before any pilot"
+        ],
+        0,
+        "The sequence is needed when another party's decision becomes hard to change before research finishes."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "window={'roadmap_lock_week':6,'full_research_week':8,'first_outreach_week':2}",
+          "note": "Make the timing conflict visible before polishing the recommendation."
+        },
+        {
+          "code": "packet={'known':'CDC reduces custom polling','unknowns':['replay recovery','security boundary'],'next_test_week':5}",
+          "note": "Separate current evidence from unknowns and name the next evidence-producing test."
+        },
+        {
+          "code": "participants=['platform owner','security owner','two consumer owners']",
+          "note": "Invite owners who can add relevant constraints rather than broadcasting to everyone."
+        },
+        {
+          "code": "result={'window_preserved':window['first_outreach_week']<window['roadmap_lock_week'],'commitment':'conditional','decision_week':window['roadmap_lock_week'],'participants':participants}",
+          "note": "Record a conditional decision path: early influence without a premature technology commitment."
+        }
+      ],
+      "expect": {
+        "result": {
+          "window_preserved": true,
+          "commitment": "conditional",
+          "decision_week": 6,
+          "participants": [
+            "platform owner",
+            "security owner",
+            "two consumer owners"
+          ]
+        }
+      },
+      "limit": "This is an original local timing model, not Spotify's or Thoughtworks' influence process. It assumes one roadmap lock and four synthetic weeks. It omits trust history, power dynamics, procurement, regulatory review, calendar availability, decision rights, reversibility, and evidence quality.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "window": {
+              "roadmap_lock_week": 6,
+              "full_research_week": 8,
+              "first_outreach_week": 2
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "window": {
+              "roadmap_lock_week": 6,
+              "full_research_week": 8,
+              "first_outreach_week": 2
+            },
+            "packet": {
+              "known": "CDC reduces custom polling",
+              "unknowns": [
+                "replay recovery",
+                "security boundary"
+              ],
+              "next_test_week": 5
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "window": {
+              "roadmap_lock_week": 6,
+              "full_research_week": 8,
+              "first_outreach_week": 2
+            },
+            "packet": {
+              "known": "CDC reduces custom polling",
+              "unknowns": [
+                "replay recovery",
+                "security boundary"
+              ],
+              "next_test_week": 5
+            },
+            "participants": [
+              "platform owner",
+              "security owner",
+              "two consumer owners"
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "window": {
+              "roadmap_lock_week": 6,
+              "full_research_week": 8,
+              "first_outreach_week": 2
+            },
+            "packet": {
+              "known": "CDC reduces custom polling",
+              "unknowns": [
+                "replay recovery",
+                "security boundary"
+              ],
+              "next_test_week": 5
+            },
+            "participants": [
+              "platform owner",
+              "security owner",
+              "two consumer owners"
+            ],
+            "result": {
+              "window_preserved": true,
+              "commitment": "conditional",
+              "decision_week": 6,
+              "participants": [
+                "platform owner",
+                "security owner",
+                "two consumer owners"
+              ]
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Spotify Engineering: AI Product Management at Spotify—A View From Three Angles",
+        "https://engineering.atspotify.com/2026/11/ai-product-management-at-spotify-a-view-from-three-angles",
+        "Recent primary case; published November 9, 2026. Describes involving relevant teams early, stating what evidence does and does not show, and the risk that a decision window closes before research finishes."
+      ],
+      [
+        "Spotify Engineering: Technical Decision-Making in a Fragmented Space",
+        "https://engineering.atspotify.com/2024/07/technical-decision-making-in-a-fragmented-space-spotify-in-car-case-study",
+        "Primary case study; published July 10, 2024. Uses a big-picture RFC followed by smaller focused RFCs for the teams relevant to each question."
+      ],
+      [
+        "Thoughtworks: How to better connect strategy to implementation",
+        "https://www.thoughtworks.com/en-ca/insights/blog/technology-strategy/how-to-better-connect-strategy-to-implementation",
+        "Practice guidance; published January 23, 2026. Recommends involving people from the start with clear rationale and connecting strategic artifacts to implementation."
+      ]
+    ],
+    "visual_explanation": "A four-week timeline shows the same CDC investigation under four influence sequences. Late contact misses the roadmap lock; early overclaim creates a broken promise; honest or staged involvement brings bounded evidence and relevant constraints to the decision in time.",
+    "written_questions": [
+      "Which real platform decision has an evidence-ready date later than another team's decision date?",
+      "Write the early influence packet: decision question, known evidence, unknowns, next test, decision owner, and deadline."
+    ],
+    "source_checked_on": "2026-11-24"
+  }
+]
