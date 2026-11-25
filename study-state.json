@@ -21,7 +21,7 @@
     30
   ],
   "automation_id": "6ab1c43862cc8191b0de8c1b7155a753",
-  "last_generated_day": 64,
+  "last_generated_day": 65,
   "days": [
     {
       "number": 1,
@@ -1413,6 +1413,22 @@
         "distinguished-engineer"
       ],
       "validation": "404 recorded lesson walkthroughs, the Day64 four-state influence timeline, scoring, save/export invocation, links, track-qualified review state, paused certification state, and 15 bundle-policy tests passed locally. Native Playwright layout/download checks were unavailable because Chromium is not installed. Mastery was not assessed."
+    },
+    {
+      "number": 65,
+      "folder": "Day65",
+      "date": "2026-11-25",
+      "generation_key": "2026-11-25",
+      "status": "generated",
+      "completion": "not_assessed",
+      "review_keys": [
+        "Day13/distinguished-engineer+30",
+        "Day41/distinguished-engineer+1"
+      ],
+      "lesson_slugs": [
+        "distinguished-engineer"
+      ],
+      "validation": "405 recorded lesson walkthroughs, the Day65 four-state maturity profile, scoring, save/export invocation, links, track-qualified review state, paused certification state, and 15 bundle-policy tests passed locally. Native Playwright layout/download checks were unavailable because Chromium is not installed. Mastery was not assessed."
     }
   ],
   "submitted_assessments": [],
