@@ -1,0 +1,186 @@
+[
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A standard earns its place by beating the current baseline—not its last version",
+    "goal": "Use paired ablation evidence to keep, slim, canary, or retire a reusable platform standard as the surrounding system changes.",
+    "tag": "Distinguished Engineer · platform standards · ablation evidence",
+    "concept": "<p>Your company gives every traveler an airport map. Thousands use it. Then the terminal changes. The map's popularity does not prove it still helps; compare today's trip <strong>with</strong> the map to the same trip <strong>without</strong> it.</p><p>A reusable standard—an agent skill, golden path, runbook, or pipeline template—can survive because it already exists. Comparing version 3 only with version 2 preserves that assumption. An <strong>ablation</strong> asks the harder question: on the same representative work, does the current system perform better with the standard than without it? Measure outcome quality, errors, time, and cost. Then keep, slim, canary, or retire it. Repeat when a model, tool, platform, or risk profile changes.</p>",
+    "example": "<p>A synthetic warehouse-query skill is replayed on 100 current troubleshooting prompts. With the skill, its answer wins 62 blind comparisons; without it, the baseline wins 23; 15 tie. Tool errors fall from 34 to 9 and median task time falls from 130 to 110 seconds, but the skill adds 12,000 context tokens. The decision is <strong>keep and slim</strong>, not “keep forever.” After a model upgrade, the paired replay flips: the skill wins 33, the no-skill baseline wins 49, and errors are slightly worse with the skill. High historical usage cannot rescue it; canary its removal and retire it if protected cases remain safe.</p>",
+    "use_case": {
+      "when": "Use paired ablation when a default platform capability is costly, widely installed, or sensitive to changes in models, tools, APIs, runtimes, or organizational constraints.",
+      "example": "Your data platform mandates one Spark troubleshooting helper in every repository, but the runtime and observability APIs have changed twice since its last evidence review.",
+      "decision": "Replay the same representative tasks with and without the standard, segment protected high-risk cases, and compare quality, errors, time, and cost. Keep a hard control when its risk boundary requires it; do not retire it from an average score alone."
+    },
+    "practice": "Switch from usage-only evidence to paired current-model, upgraded-model, and rare regulated-task evidence. Predict which lifecycle decision the same popular standard now earns.",
+    "boundary": "This is an original local teaching model, not an Uber, Spotify, or production evaluation. The prompts, wins, errors, times, and token costs are synthetic. Blind judges can be wrong; paired samples can be unrepresentative; non-deterministic runs need uncertainty estimates; and rare safety, security, privacy, or regulatory failures require protected slices and human review rather than an average score.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><style>.compare{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0}.arm{border:2px solid #6f9691;border-radius:12px;padding:14px;background:#102d31}.arm.better{border-color:#7fd18a}.metric{margin:12px 0}.rail{height:18px;background:#24484c;border-radius:9px;overflow:hidden}.fill{height:100%;background:#efb65f}.better .fill{background:#7fd18a}.decision{border-left:5px solid #d6f4b5;padding:12px;background:#24484c}.usage{font-size:2rem;font-weight:800;color:#d6f4b5}@media(max-width:620px){.compare{grid-template-columns:1fr}}</style><div id=\"world\"><label>evidence view <select id=\"ablationCase\"><option value=\"usage\">usage dashboard only</option><option value=\"current\">paired replay on current system</option><option value=\"upgrade\">paired replay after model upgrade</option><option value=\"rare\">protected regulated-task slice</option></select></label><div id=\"ablationWorld\" class=\"world\"></div></div>",
+    "js": "const cases={usage:{usage:'12,000 calls this month',note:'Reach is visible; incremental value is unknown.',decision:'DO NOT DECIDE · create a paired baseline'},current:{withArm:{wins:62,errors:9,seconds:110,tokens:12000},withoutArm:{wins:23,errors:34,seconds:130,tokens:0},note:'The standard improves quality and reliability, but its context cost remains.',decision:'KEEP + SLIM · schedule the next change-triggered ablation'},upgrade:{withArm:{wins:33,errors:14,seconds:122,tokens:12000},withoutArm:{wins:49,errors:12,seconds:111,tokens:0},note:'The surrounding model improved; previously helpful instructions now drag.',decision:'CANARY REMOVAL · retire if protected slices stay safe'},rare:{withArm:{wins:62,errors:9,seconds:110,tokens:12000},withoutArm:{wins:23,errors:34,seconds:130,tokens:0},note:'Average tasks favor the helper, but two regulated prompts fail only when its validation control is absent.',decision:'SPLIT THE CONTROL · keep mandatory validation, slim advisory prose'}};function arm(label,x,better){return '<div class=\"arm '+(better?'better':'')+'\"><h3>'+label+'</h3><div class=metric>blind wins <strong>'+x.wins+'/100</strong><div class=rail><div class=fill style=\"width:'+x.wins+'%\"></div></div></div><div class=metric>tool errors <strong>'+x.errors+'</strong></div><div class=metric>median time <strong>'+x.seconds+'s</strong></div><div class=metric>extra context <strong>'+x.tokens.toLocaleString()+' tokens</strong></div></div>';}function paintAblation(){const c=cases[ablationCase.value];if(c.usage){ablationWorld.innerHTML='<p class=usage>'+c.usage+'</p><p>'+c.note+'</p><p class=decision><strong>'+c.decision+'</strong></p>';return;}const withBetter=c.withArm.wins>c.withoutArm.wins;ablationWorld.innerHTML='<p><strong>Same task set, current environment, two arms.</strong> Commit to the lifecycle decision before reading the verdict.</p><div class=compare>'+arm('WITH STANDARD',c.withArm,withBetter)+arm('WITHOUT STANDARD',c.withoutArm,!withBetter)+'</div><p>'+c.note+'</p><p class=decision><strong>'+c.decision+'</strong></p>';};ablationCase.onchange=paintAblation;paintAblation();",
+    "questions": [
+      [
+        "A default helper has 12,000 monthly calls, but no with-versus-without comparison. What can you conclude?",
+        [
+          "It has reach, but its incremental value is still unknown",
+          "It must remain mandatory",
+          "It should be retired immediately"
+        ],
+        0,
+        "Usage shows exposure and adoption; only a representative comparison can estimate what the helper adds."
+      ],
+      [
+        "After a model upgrade, no-helper wins 49 comparisons and the helper wins 33, with fewer errors without it. What is the best next move?",
+        [
+          "Canary removal on representative and protected cases, then retire if safe",
+          "Compare the helper only with its previous version",
+          "Keep it because historical usage is high"
+        ],
+        0,
+        "The current baseline now wins; a bounded removal canary tests the lifecycle decision without assuming the result."
+      ],
+      [
+        "Average results favor removing a long helper, but two regulated tasks fail only without one validation step. What should you do?",
+        [
+          "Keep the mandatory validation control and test slimming the advisory instructions",
+          "Remove everything because the average improved",
+          "Ignore all ablation evidence forever"
+        ],
+        0,
+        "Protected high-risk slices can justify a narrow hard control even when optional guidance no longer adds value."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "enabled={'wins':62,'errors':9,'seconds':110,'extra_tokens':12000}",
+          "note": "Record the outcomes and cost when the reusable standard is enabled."
+        },
+        {
+          "code": "baseline={'wins':23,'errors':34,'seconds':130,'extra_tokens':0}",
+          "note": "Run the same representative work against today's system without the standard."
+        },
+        {
+          "code": "delta={'quality_wins':enabled['wins']-baseline['wins'],'errors_avoided':baseline['errors']-enabled['errors'],'seconds_saved':baseline['seconds']-enabled['seconds'],'extra_tokens':enabled['extra_tokens']}",
+          "note": "Make the added value and added cost visible instead of using adoption as a proxy."
+        },
+        {
+          "code": "decision={'action':'keep and slim','reason':'quality and reliability beat the current baseline','next_test':'canary after model or harness change'}",
+          "note": "Choose a time-bounded lifecycle action and name the event that must reopen the decision."
+        }
+      ],
+      "expect": {
+        "decision": {
+          "action": "keep and slim",
+          "reason": "quality and reliability beat the current baseline",
+          "next_test": "canary after model or harness change"
+        }
+      },
+      "limit": "This is an original local teaching model, not an Uber, Spotify, or production evaluation. The prompts, wins, errors, times, and token costs are synthetic. Blind judges can be wrong; paired samples can be unrepresentative; non-deterministic runs need uncertainty estimates; and rare safety, security, privacy, or regulatory failures require protected slices and human review rather than an average score.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "enabled": {
+              "wins": 62,
+              "errors": 9,
+              "seconds": 110,
+              "extra_tokens": 12000
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "enabled": {
+              "wins": 62,
+              "errors": 9,
+              "seconds": 110,
+              "extra_tokens": 12000
+            },
+            "baseline": {
+              "wins": 23,
+              "errors": 34,
+              "seconds": 130,
+              "extra_tokens": 0
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "enabled": {
+              "wins": 62,
+              "errors": 9,
+              "seconds": 110,
+              "extra_tokens": 12000
+            },
+            "baseline": {
+              "wins": 23,
+              "errors": 34,
+              "seconds": 130,
+              "extra_tokens": 0
+            },
+            "delta": {
+              "quality_wins": 39,
+              "errors_avoided": 25,
+              "seconds_saved": 20,
+              "extra_tokens": 12000
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "enabled": {
+              "wins": 62,
+              "errors": 9,
+              "seconds": 110,
+              "extra_tokens": 12000
+            },
+            "baseline": {
+              "wins": 23,
+              "errors": 34,
+              "seconds": 130,
+              "extra_tokens": 0
+            },
+            "delta": {
+              "quality_wins": 39,
+              "errors_avoided": 25,
+              "seconds_saved": 20,
+              "extra_tokens": 12000
+            },
+            "decision": {
+              "action": "keep and slim",
+              "reason": "quality and reliability beat the current baseline",
+              "next_test": "canary after model or harness change"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Uber Engineering: How Uber Evals 1 Million Agent Skill Invocations a Month",
+        "https://www.uber.com/gb/en/blog/optimizing-ubers-agent-skills/",
+        "Recent primary engineering case; published November 23, 2026. Describes skill lifecycle, paired with/without ablation on real prompts, blind comparison, cost measurement, change-triggered evaluation, and retirement as models improve."
+      ],
+      [
+        "Spotify Engineering: Coding Is No Longer the Constraint",
+        "https://engineering.atspotify.com/2026/06/code-with-claude-coding-is-no-longer-the-constraint",
+        "Primary engineering case; published June 3, 2026. Shows standardization as an active feedback system for people and agents while faster code generation shifts the bottleneck toward human decisions."
+      ],
+      [
+        "Amazon Builders' Library FAQs",
+        "https://aws.amazon.com/builders-library/faqs/",
+        "Maintained practitioner foundation. States that Amazon's practices are contextual, that there is no single right way, and that a best practice can cease to be best as technology and constraints change."
+      ]
+    ],
+    "visual_explanation": "The paired visual holds the task set constant and puts WITH STANDARD beside WITHOUT STANDARD. Usage-only mode deliberately withholds a quality verdict; later modes change the surrounding model or reveal a protected risk slice so the lifecycle decision can change without contradiction.",
+    "written_questions": [
+      "Choose one internal standard you own. Define the same-task with/without comparison, its quality signal, operational cost, and protected risk slices.",
+      "Write its retirement trigger and canary boundary. Which result keeps it, slims it, splits out a hard control, or removes it?"
+    ],
+    "source_checked_on": "2026-11-26"
+  }
+]
