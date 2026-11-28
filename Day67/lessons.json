@@ -1,0 +1,191 @@
+[
+  {
+    "slug": "distinguished-engineer",
+    "track": "Distinguished Engineer",
+    "title": "A strategic rewrite needs a replaceable seam—not a blank sheet",
+    "goal": "Scope a high-leverage rewrite around one replaceable bottleneck, then gate rollout on semantic parity, operability, compatibility, and an explicit fallback boundary.",
+    "tag": "Distinguished Engineer · rewrite strategy · architectural seams",
+    "concept": "<p>Imagine renovating a restaurant kitchen while the dining room stays open. Keep the menu, ordering counter, and supplier doors stable; replace the cooking line that causes the queue. A blank-sheet rebuild closes the restaurant and makes every boundary part of the project.</p><p>A strategic rewrite begins with a measured bottleneck and a <strong>replaceable seam</strong>: stable inputs, observable outputs, and an old path that can still accept traffic. The new component earns expansion only when it preserves semantics and gains operational maturity—not when its benchmark looks good. This turns “rewrite the platform” into a sequence of falsifiable decisions: profile, isolate, prove parity, canary, expand, and stop where compatibility or risk says stop.</p>",
+    "example": "<p>A synthetic query fleet spends 92% of CPU in execution while its SQL front end, planner, and storage contracts are stable. A native execution engine is therefore a plausible seam. On 100 representative queries it uses 41% less CPU, but only 96 results match the legacy engine. The decision is <strong>hold the canary</strong>: four semantic gaps outweigh the performance win. After fixes reach 100/100 parity, the team routes 5% of eligible traffic, watches correctness, crashes, memory, latency, and fallback rate, then expands only the eligible set. Unsupported connectors remain on the old engine; “90% of eligible traffic” is not misreported as 90% of all traffic.</p>",
+    "use_case": {
+      "when": "Use a seam-first rewrite when profiling finds one concentrated bottleneck, the surrounding contracts can stay stable, and the legacy path can remain as a bounded fallback during migration.",
+      "example": "Your Spark or Presto estate has accumulated years of planner, connector, security, and user-facing semantics, but most compute cost is concentrated in the local execution layer.",
+      "decision": "Replace the execution layer behind its plan and data interfaces. Gate every traffic increase on semantic parity and production controls; keep unsupported workloads explicitly out of scope instead of pulling them into a platform-wide rewrite."
+    },
+    "practice": "Move through the four evidence states. Predict the decision before reading it, then name the stable seam, the rollout gate, and the stop boundary for one rewrite in your estate.",
+    "boundary": "This is an original local decision model, not a live Presto or Velox benchmark. Its 100-query corpus, 92% CPU share, 41% saving, parity counts, and traffic percentages are synthetic. A stable interface can still hide semantic coupling; matching outputs does not prove identical performance, security, or failure behavior; and a fallback can become permanent dual-operation debt. Real adoption needs workload-specific tests, shadowing, observability, capacity planning, rollback drills, and human review.",
+    "sim": "<style>\n.world{background:#f1f7f4;color:#173934;border-radius:14px;padding:16px;margin:14px 0;overflow:hidden}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:center}.node{border:2px solid #73988b;border-radius:12px;padding:12px;background:#fbfdfb;overflow-wrap:anywhere}.ok{background:#dff3ce;border-color:#277761}.fail{background:#ffe1db;border-color:#a43d32}.wait{background:#fff0b7;border-color:#bb7917}.arrow{text-align:center;font-weight:850;font-size:1.1rem}.schema{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}.column{border:2px solid #73988b;border-radius:10px;padding:10px;background:#fbfdfb}.column.new{background:#fff0b7}.column.rescued{background:#ffe1db}.failure-stack{display:grid;grid-template-columns:1fr;gap:10px}.failure{border:2px solid #73988b;border-radius:12px;padding:12px}.failure.primary{background:#ffe1db}.failure.suppressed{background:#fff0b7;margin-left:30px}.adr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tool-path{display:grid;grid-template-columns:1fr 70px 1fr;gap:10px;align-items:center}.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cat{border:3px solid #73988b;border-radius:50%;min-height:150px;padding:25px;text-align:center}.cat.squeezed{transform:scaleX(.7);background:#dff3ce}.step-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px}.http-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}label{display:block;margin:9px 0}select,input{font:inherit;padding:7px;max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #b6c7bf;padding:8px;text-align:left;overflow-wrap:anywhere}pre{max-width:100%;overflow-x:auto}pre code span{display:block;padding:4px}@media(max-width:680px){.tool-path,.cat-grid{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}table{display:block;overflow-x:auto}}\n</style><style>.stack{display:grid;gap:8px;margin:18px 0}.layer{border:2px solid #6f9691;border-radius:10px;padding:12px;background:#102d31}.layer.seam{border-color:#efb65f;background:#3b3325}.layer.keep{opacity:.7}.gate{border-left:5px solid #d6f4b5;padding:12px;background:#24484c;margin-top:14px}.bad{border-left-color:#f38b8b}.meter{height:16px;background:#24484c;border-radius:8px;overflow:hidden;margin:7px 0}.meter span{display:block;height:100%;background:#7fd18a}.scope{display:flex;gap:8px;flex-wrap:wrap}.scope span{padding:5px 9px;border-radius:999px;background:#24484c}.scope .out{opacity:.55;text-decoration:line-through}@media(max-width:620px){.scope{display:grid}}</style><div id=\"world\"><label>rewrite evidence <select id=\"rewriteCase\"><option value=\"profile\">1 · profile the bottleneck</option><option value=\"parity\">2 · prove semantic parity</option><option value=\"canary\">3 · canary eligible traffic</option><option value=\"boundary\">4 · enforce the stop boundary</option></select></label><div id=\"rewriteWorld\" class=\"world\"></div></div>",
+    "js": "const rewriteCases={profile:{cpu:92,parity:null,traffic:0,title:'PROFILE · one layer dominates',note:'Execution consumes 92% of CPU; the planner, SQL surface, and storage contracts are not the measured bottleneck.',decision:'SEAM FOUND · replace execution, preserve surrounding contracts'},parity:{cpu:59,parity:96,traffic:0,title:'PARITY GATE · four answers differ',note:'The candidate saves 41% CPU, but 4 of 100 representative results do not match.',decision:'HOLD · performance cannot purchase silent wrong answers'},canary:{cpu:59,parity:100,traffic:5,title:'CANARY · parity passed',note:'Route 5% of eligible traffic while watching results, crashes, memory, latency, and fallback rate.',decision:'EXPAND ONLY IF OPERABILITY HOLDS'},boundary:{cpu:59,parity:100,traffic:90,title:'BOUNDARY · 90% of eligible traffic',note:'Legacy UDFs and unsupported connectors remain on the old engine. Eligible is not the same as total.',decision:'STOP THE SCOPE · close gaps deliberately; do not restart a whole-platform rewrite'}};function paintRewrite(){const c=rewriteCases[rewriteCase.value];const parity=c.parity===null?'not tested':c.parity+'/100';rewriteWorld.innerHTML='<h3>'+c.title+'</h3><div class=stack><div class=\"layer keep\">SQL + planner · preserve</div><div class=\"layer seam\"><strong>execution engine · replaceable seam</strong><div class=meter><span style=\"width:'+c.cpu+'%\"></span></div>CPU index '+c.cpu+'</div><div class=\"layer keep\">connectors + storage · preserve contracts</div></div><div class=scope><span>semantic parity '+parity+'</span><span>new-engine traffic '+c.traffic+'%</span><span class=out>whole platform rewrite</span></div><p>'+c.note+'</p><p class=\"gate '+(rewriteCase.value==='parity'?'bad':'')+'\"><strong>'+c.decision+'</strong></p>';};rewriteCase.onchange=paintRewrite;paintRewrite();",
+    "questions": [
+      [
+        "A new engine cuts CPU 41%, but 4 of 100 representative query results differ. What is the correct rollout decision?",
+        [
+          "Hold traffic and close the semantic gaps",
+          "Expand because CPU is the strategic metric",
+          "Rewrite the planner too"
+        ],
+        0,
+        "Silent wrong answers are a stop condition. Performance matters only after semantic parity is credible."
+      ],
+      [
+        "Why preserve the SQL surface, planner, and connectors when execution is the measured bottleneck?",
+        [
+          "Stable boundaries concentrate the change and preserve fallback",
+          "Those components never need improvement",
+          "A rewrite should avoid all integration tests"
+        ],
+        0,
+        "A seam narrows blast radius and supports comparison, routing, and rollback; it does not declare adjacent layers perfect."
+      ],
+      [
+        "The new engine carries 90% of eligible traffic. What must an executive update say?",
+        [
+          "Name the eligibility boundary and the unsupported workloads",
+          "Say the migration is 90% complete without qualification",
+          "Count fallback traffic as migrated"
+        ],
+        0,
+        "The denominator is part of the evidence. Eligibility exclusions reveal the remaining compatibility and operating cost."
+      ]
+    ],
+    "walkthrough": {
+      "language": "python",
+      "steps": [
+        {
+          "code": "profile={'execution_cpu_share':92,'candidate_cpu_saving':41,'queries':100,'semantic_matches':96}",
+          "note": "Start with a concentrated bottleneck and keep the performance claim separate from correctness."
+        },
+        {
+          "code": "seam={'replace':'execution engine','preserve':['SQL','planner','connectors'],'fallback':'legacy engine'}",
+          "note": "Name the component boundary and the old path that makes comparison and rollback possible."
+        },
+        {
+          "code": "gate={'semantic_gaps':profile['queries']-profile['semantic_matches'],'canary_percent':0}",
+          "note": "Turn parity into a traffic gate; four mismatches mean the canary remains closed."
+        },
+        {
+          "code": "decision={'action':'hold canary','scope':'execution engine only','reason':'4 semantic gaps remain'}",
+          "note": "Choose the bounded next action rather than widening the rewrite to solve unrelated layers."
+        }
+      ],
+      "expect": {
+        "decision": {
+          "action": "hold canary",
+          "scope": "execution engine only",
+          "reason": "4 semantic gaps remain"
+        }
+      },
+      "limit": "This is an original local decision model, not a live Presto or Velox benchmark. Its corpus and metrics are synthetic. Real rollout requires workload-specific semantic, performance, security, resilience, and rollback evidence.",
+      "frames": [
+        {
+          "step": 0,
+          "state": {
+            "profile": {
+              "execution_cpu_share": 92,
+              "candidate_cpu_saving": 41,
+              "queries": 100,
+              "semantic_matches": 96
+            }
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "profile": {
+              "execution_cpu_share": 92,
+              "candidate_cpu_saving": 41,
+              "queries": 100,
+              "semantic_matches": 96
+            },
+            "seam": {
+              "replace": "execution engine",
+              "preserve": [
+                "SQL",
+                "planner",
+                "connectors"
+              ],
+              "fallback": "legacy engine"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "profile": {
+              "execution_cpu_share": 92,
+              "candidate_cpu_saving": 41,
+              "queries": 100,
+              "semantic_matches": 96
+            },
+            "seam": {
+              "replace": "execution engine",
+              "preserve": [
+                "SQL",
+                "planner",
+                "connectors"
+              ],
+              "fallback": "legacy engine"
+            },
+            "gate": {
+              "semantic_gaps": 4,
+              "canary_percent": 0
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "profile": {
+              "execution_cpu_share": 92,
+              "candidate_cpu_saving": 41,
+              "queries": 100,
+              "semantic_matches": 96
+            },
+            "seam": {
+              "replace": "execution engine",
+              "preserve": [
+                "SQL",
+                "planner",
+                "connectors"
+              ],
+              "fallback": "legacy engine"
+            },
+            "gate": {
+              "semantic_gaps": 4,
+              "canary_percent": 0
+            },
+            "decision": {
+              "action": "hold canary",
+              "scope": "execution engine only",
+              "reason": "4 semantic gaps remain"
+            }
+          }
+        }
+      ],
+      "example_file": "examples/distinguished-engineer.py"
+    },
+    "sources": [
+      [
+        "Uber Engineering: Velox at Uber—Rebuilding Presto's Execution Engine for Speed and Scale",
+        "https://www.uber.com/us/en/blog/velox-at-uber/",
+        "Recent primary case; published November 10, 2026. Reports a profiled execution bottleneck, operational foundation work, result verification, phased routing, compatibility limits, upstream discipline, and measured production outcomes."
+      ],
+      [
+        "Velox: Design Philosophy",
+        "https://velox-lib.io/docs/community/design-philosophy/",
+        "Maintained primary project documentation. Defines reliability, semantic extensibility, real-workload evidence, testing, verification, and long-term maintainability as design principles."
+      ],
+      [
+        "Meta Engineering: Introducing Velox",
+        "https://engineering.fb.com/2023/03/09/open-source/velox-open-source-execution-engine/",
+        "Primary foundation; published March 9, 2023. Describes the execution engine as a reusable data-plane component that accepts optimized plans and leaves front ends and optimizers outside its boundary."
+      ]
+    ],
+    "visual_explanation": "The stack keeps SQL/planning and connector/storage boundaries visible while the execution layer alone is highlighted as the replaceable seam. Each state changes one decision variable—bottleneck evidence, parity, canary traffic, then eligibility—so a performance result cannot silently override correctness or scope.",
+    "written_questions": [
+      "Choose one proposed rewrite. What profile evidence identifies the bottleneck, and which input/output contracts form the smallest credible seam?",
+      "Write the rollout gate, fallback, eligibility denominator, and explicit stop boundary. Which result would make you pause rather than widen the rewrite?"
+    ],
+    "source_checked_on": "2026-11-27"
+  }
+]
